@@ -1,0 +1,32 @@
+{
+	"name": "audinate-dantecontroller",
+	"version": "1.0.0",
+	"api_version": "1.0",
+	"keywords": [
+		"audio",
+		"routing"
+	],
+	"manufacturer": "Audinate",
+	"product": [
+		"Dante"
+	],
+	"shortname": "audinate-dantecontroller",
+	"description": "Companion module for controlling Audinate Dante devices",
+	"main": "src/index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "Joseph Adams <josephdadams@gmail.com>",
+	"license": "MIT",
+	"homepage": "https://github.com/bitfocus/companion-module-audinate-dantecontroller#readme",
+	"bugs": {
+		"url": "https://github.com/bitfocus/companion-module-audinate-dantecontroller/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bitfocus/companion-module-audinate-dantecontroller.git"
+	},
+	"dependencies": {
+		"dante-control": "^0.2.2"
+	}
+}
