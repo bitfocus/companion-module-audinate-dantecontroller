@@ -1,27 +1,24 @@
 module.exports = {
-	// ##########################
-	// #### Define Variables ####
-	// ##########################
-	setVariables: function () {
+	initVariables: function () {
 		let self = this;
 
 		let variables = [];
 
-		variables.push({ name: 'channel_count', label: 'Channel Count' })
+		variables.push({ variableId: 'channel_count', name: 'Channel Count' })
 
-		return variables
+		self.setVariableDefinitions(variables);
 	},
 
-	// #########################
-	// #### Check Variables ####
-	// #########################
 	checkVariables: function () {
 		let self = this;
 
 		try {
-			self.setVariable('channel_count', self.DEVICEINFO.channelCount);
+			self.setVariableValues({
+				'channel_count': self.DEVICEINFO.channelCount
+			});
 		}
 		catch(error) {
+			self.log('error', 'Error setting variables: ' + error);
 		}
 	}
 }

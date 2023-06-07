@@ -1,18 +1,16 @@
+const { combineRgb } = require('@companion-module/base');
+
 module.exports = {
-	setPresets: function () {
+	initPresets: function () {
 		let self = this;
 
 		let presets = [];
 
-		const foregroundColor = self.rgb(255, 255, 255) // White
-		const foregroundColorBlack = self.rgb(0, 0, 0) // Black
-		const backgroundColorRed = self.rgb(255, 0, 0) // Red
-		const backgroundColorGreen = self.rgb(0, 255, 0) // Red
-
-		// ########################
-		// #### Presets ###########
-		// ########################
+		const foregroundColor = combineRgb(255, 255, 255) // White
+		const foregroundColorBlack = combineRgb(0, 0, 0) // Black
+		const backgroundColorRed = combineRgb(255, 0, 0) // Red
+		const backgroundColorGreen = combineRgb(0, 255, 0) // Red
 		
-		return presets;
+		self.setPresetDefinitions(presets);
 	}
 }

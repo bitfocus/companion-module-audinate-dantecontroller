@@ -1,17 +1,10 @@
 module.exports = {
-	// ##########################
-	// #### Instance Actions ####
-	// ##########################
-	setActions: function () {
+	initActions: function () {
 		let self = this;
 		let actions = {};
 
-		// ########################
-		// ####    Actions     ####
-		// ########################
-
 		actions.makeCrosspoint = {
-			label: 'Make Crosspoint',
+			name: 'Make Crosspoint',
 			options: [
 				{
 					type: 'textinput',
@@ -32,14 +25,14 @@ module.exports = {
 					default: '3'
 				}
 			],
-			callback: function (action, bank) {
+			callback: async function (action) {
 				let opt = action.options;
 				self.makeCrosspoint(opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
 			}
 		}
 
 		actions.clearCrosspoint = {
-			label: 'Clear Crosspoint',
+			name: 'Clear Crosspoint',
 			options: [
 				{
 					type: 'textinput',
@@ -48,12 +41,12 @@ module.exports = {
 					default: '3'
 				}
 			],
-			callback: function (action, bank) {
+			callback: async function (action) {
 				let opt = action.options;
 				self.clearCrosspoint(opt.destinationChannelNumber)
 			}
 		}
 
-		return actions
+		self.setActionDefinitions(actions);
 	}
 }
