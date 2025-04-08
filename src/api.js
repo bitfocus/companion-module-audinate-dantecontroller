@@ -1,4 +1,5 @@
 const Dante = require('dante-control');
+const mdns = require('multicast-dns');
 
 module.exports = {
 	initConnection: function () {
@@ -8,10 +9,18 @@ module.exports = {
 		console.log('creating new dante object');
 		self.DANTE = new Dante();
 		console.log('getting information function');
+		self.devices = [];
 		self.getInformation();
 
 		self.setupInterval();
 	},
+
+	updateDevices: function(response){
+		if ((response?.answer?.name) && (self.devices.includes(response.answer.name))) {
+			self.devices.push(response.answer.name);
+		}
+	},
+	
 	
 	setupInterval: function() {
 		let self = this;
@@ -50,6 +59,7 @@ module.exports = {
 			console.log('****info***')
 			console.log(self.DEVICEINFO.toString());
 		}
+		
 	},
 	
 	updateData: function (bytes) {
