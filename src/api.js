@@ -329,9 +329,12 @@ module.exports = {
 				}
 			}
 			else {
+			  let devicesName = {}
 				this.devicesList.forEach((device_name) => {
 					if ((answer.name == (device_name + '.local')) && (answer.type == 'A')) {
 						this.devicesIp[device_name] = answer.data;
+						devicesName[answer.data] = {name : device_name};
+						merge (this.devicesData, devicesName);
 					}
 				});
 			}
