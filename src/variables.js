@@ -4,8 +4,9 @@ module.exports = {
 
 		let variables = [];
 
-		variables.push({ variableId: 'channel_count', name: 'Channel Count' })
-
+		variables.push({ variableId: 'channel_count', name: 'Channel Count' });
+		variables.push({variableId: 'devices', name: 'Dante Devices'});
+			
 		self.setVariableDefinitions(variables);
 	},
 
@@ -14,7 +15,8 @@ module.exports = {
 
 		try {
 			self.setVariableValues({
-				'channel_count': self.DEVICEINFO.channelCount
+				'channel_count': self.DEVICEINFO.channelCount,
+				'devices': self.Dante.devices
 			});
 		}
 		catch(error) {
