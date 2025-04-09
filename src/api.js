@@ -1,6 +1,7 @@
 const mdns = require('multicast-dns')();
 const dgram = require("dgram");
 const merge = require("./dante-control/utils/merge");
+const { InstanceStatus, Regex } = require('@companion-module/base')
 
 const danteServiceTypes = ["_netaudio-cmc._udp", "_netaudio-dbc._udp", "_netaudio-arc._udp", "_netaudio-chan._udp"];
 const danteControlPort = 4440;
