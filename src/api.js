@@ -61,8 +61,10 @@ module.exports = {
 		this.socket = dgram.createSocket({type: "udp4", reusePort: true});
 
         this.socket.on("message", this.parseReply.bind(this));
-        this.socket.on("error", this.updateStatus.bind(this)(InstanceStatus.Disconnected));
-        this.socket.on("listening", this.updateStatus.bind(this)(InstanceStatus.Ok));
+        this.socket.on("error", ()=>{self.updateStatus(InstanceStatus.Disconnected);});
+        //this.updateStatus.bind(this)(InstanceStatus.Disconnected));
+        this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Ok);}); 
+        // this.updateStatus.bind(this)(InstanceStatus.Ok));
         
         this.socket.bind(danteControlPort);
 
