@@ -10,24 +10,34 @@ module.exports = {
 					type: 'textinput',
 					label: 'Source Channel Name',
 					id: 'sourceChannelName',
-					default: 'Input 1'
+					default: 'Input 1',
+					useVariables: true
 				},
 				{
 					type: 'textinput',
 					label: 'Source Device Name',
 					id: 'sourceDeviceName',
-					default: 'MyDanteDeviceName'
+					default: 'MyDanteDeviceName',
+					useVariables: true
 				},
 				{
 					type: 'textinput',
 					label: 'Destination Channel Number',
 					id: 'destinationChannelNumber',
-					default: '3'
-				}
+					default: '3',
+					useVariables: true
+				},
+				{
+					type: 'textinput',
+					label: 'Destination Device Address',
+					id: 'destinationDeviceAdddress',
+					default: 'MyDanteDeviceName',
+					useVariables: true
+				},
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				self.makeCrosspoint(opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
+				self.makeCrosspoint(opt.destinationDeviceAdddress, opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
 			}
 		}
 
@@ -39,11 +49,18 @@ module.exports = {
 					label: 'Destination Channel Number',
 					id: 'destinationChannelNumber',
 					default: '3'
-				}
+				},
+				{
+					type: 'textinput',
+					label: 'Destination Device Address',
+					id: 'destinationDeviceAdddress',
+					default: 'MyDanteDeviceName',
+					useVariables: true
+				},
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				self.clearCrosspoint(opt.destinationChannelNumber)
+				self.clearCrosspoint(opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			}
 		}
 
