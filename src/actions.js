@@ -48,7 +48,8 @@ module.exports = {
 					type: 'textinput',
 					label: 'Destination Channel Number',
 					id: 'destinationChannelNumber',
-					default: '3'
+					default: '3',
+					useVariables: true
 				},
 				{
 					type: 'textinput',
