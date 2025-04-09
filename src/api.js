@@ -40,7 +40,7 @@ const parseTxChannelNames = (reply) => {
 
     for (let i = namesString.length - 1; i > 50; i--) {
         if (reply[i] === 0) {
-            console.log(reverse(name));
+            this.log('debug', reverse(name));
             names.channelNames.tx.push(reverse(name));
             name = "";
         } else {
@@ -70,7 +70,7 @@ module.exports = {
 
 
 		self.debug = true;
-		console.log('getting information function');
+		self.log('debug', 'getting information function');
 		self.devicesList = [];
 		self.devicesIp = {};
 		self.devices = new Map();
@@ -103,7 +103,7 @@ module.exports = {
 
         if (this.debug) {
             // Log replies when in debug mode
-            console.log(`Rx (${reply.length}): ${reply.toString("hex")}`);
+            this.log('debug', `Rx (${reply.length}): ${reply.toString("hex")}`);
         }
 
         if (reply[0] === danteConstant[0] && reply[1] === sequenceId1[0]) {
@@ -123,7 +123,7 @@ module.exports = {
                  this.devices = merge(this.devices, deviceData);
                 if (this.debug) {
                     // Log parsed device information when in debug mode
-                    console.log(this.devices);
+                    this.log('debug', this.devices);
                 }
             }
         }
@@ -132,7 +132,7 @@ module.exports = {
     sendCommand(command, host, port = danteControlPort) {
         if (this.debug) {
             // Log sent bytes when in debug mode
-            console.log(`Tx (${command.length}): ${command.toString("hex")}`);
+            this.log('debug', `Tx (${command.length}): ${command.toString("hex")}`);
         }
 
         this.socket.send(command, 0, command.length, port, host);
@@ -315,7 +315,7 @@ module.exports = {
 				if (name && (!this.devicesList.includes(name))) {
 					this.devicesList.push(name);
 					
-					console.log('Adding device : ', name);
+					this.log('info', 'Adding device : ', name);
 					this.getChannelCount(name);
 				}
 			}
@@ -358,7 +358,7 @@ module.exports = {
 		//Get all information from Device
 		let self = this;
 
-		console.log('getting info');
+		self.log('debug', 'getting info');
 		
 		mdns.query({
 			questions:[{
@@ -367,7 +367,7 @@ module.exports = {
 			}]
 		});
 
-	
+	/*
 		if (self.DANTE) {
 			self.config.host = '10.20.12.81';
 			console.log('getting channel count');
@@ -378,6 +378,7 @@ module.exports = {
 			console.log('****info***')
 			console.log(self.DEVICEINFO.toString());
 		}
+		*/
 		self.checkVariables();
 	},
 	
