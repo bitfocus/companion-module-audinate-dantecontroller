@@ -1,6 +1,3 @@
-//const Dante = require('./dante-control/Dante');
-
-const dgram = require("dgram");
 const mdns = require('multicast-dns')();
 const merge = require("./dante-control/utils/merge");
 
@@ -52,22 +49,37 @@ const parseTxChannelNames = (reply) => {
     return names;
 };
 
+
 module.exports = {
 	
-//class Dante {
-	/*
-    constructor() {
-        this.debug = false;
-//        this.devices;
-//        this.devicesList = [];
-        this.socket = dgram.createSocket("udp4");
+		
+	initConnection: function () {
+		let self = this;
+		
+		this.socket = dgram.createSocket({type: "udp4", reusePort: true});
 
         this.socket.on("message", this.parseReply.bind(this));
+        this.socket.on("error", this.updateStatus.bind(this)(InstanceStatus.Disconnected));
+        this.socket.on("listening", this.updateStatus.bind(this)(InstanceStatus.Ok));
+        
         this.socket.bind(danteControlPort);
 
-//        mdns.on("response", this.parseDevices.bind(this));
-    },
-*/
+
+		self.debug = true;
+		console.log('getting information function');
+		self.devicesList = [];
+		self.devicesIp = {};
+		self.devices = new Map();
+		self.devicesData = {};
+
+		self.getInformation();
+
+		self.setupInterval();
+		mdns.on('response', self.updateDevices.bind(this));
+	},
+	
+
+	
     parseDevices: function(response) {
         this.devicesList = response?.answers?.filter((answer) => {
             for (let danteServiceType of danteServiceTypes) {
@@ -289,31 +301,6 @@ module.exports = {
 	
 	
 	
-	
-	
-	initConnection: function () {
-		let self = this;
-		
-		this.socket = dgram.createSocket("udp4");
-
-        this.socket.on("message", this.parseReply.bind(this));
-        this.socket.bind(danteControlPort);
-		
-		//create dante object
-//		console.log('creating new dante object');
-//		self.DANTE = new Dante();
-		self.debug = true;
-		console.log('getting information function');
-		self.devicesList = [];
-		self.devicesIp = {};
-		self.devices = new Map();
-		self.devicesData = {};
-
-		self.getInformation();
-
-		self.setupInterval();
-		mdns.on('response', self.updateDevices.bind(this));
-	},
 	
 
 	updateDevices: function(response){
