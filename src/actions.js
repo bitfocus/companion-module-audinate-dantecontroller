@@ -2,6 +2,22 @@ module.exports = {
 	initActions: function () {
 		let self = this;
 		let actions = {};
+		
+		self.count = 0;
+		self.myTextOptions = [{
+		  id: 'test',
+		  label: 'TEST',
+		  type: "static-text",
+		  value: self.count
+		}];
+		
+		self.updateCount = function() {
+		  self.count++;
+		  self.myTextOptions.test.value=self.count;
+		}
+		
+		self.testInterval = setInterval(self.updateCount, 3000);
+		
 
 		actions.makeCrosspoint = {
 			name: 'Make Crosspoint',
@@ -63,6 +79,14 @@ module.exports = {
 				let opt = action.options;
 				self.clearCrosspoint(opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			}
+		};
+		
+		actions.test ={
+		  name : 'test',
+		  options: self.myTextOptions,
+		  callback: async function (action) {
+		    self.log('debug', action.options.test);
+		  }
 		}
 
 		self.setActionDefinitions(actions);
