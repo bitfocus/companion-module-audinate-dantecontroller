@@ -8,12 +8,12 @@ module.exports = {
 		  id: 'test',
 		  label: 'TEST',
 		  type: "static-text",
-		  value: self.count
+		  value: self.count.toString()
 		}];
 		
 		self.updateCount = function() {
 		  self.count++;
-		  self.myTextOptions[0].value=self.count;
+		  self.myTextOptions[0].value=self.count.toString();
 		}
 		
 		self.testInterval = setInterval(self.updateCount, 3000);
