@@ -35,19 +35,36 @@ const parseTxChannelNames = (reply) => {
     const names = { channelNames: { tx: [] } };
     const namesString = reply.toString();
     const channelsCount = reply[10];
-
+/*
+	for (let i = 1; i <= channelsCount; i++) {
+		names.channelNames.tx[i] = i.toString().padStart(2,'0');
+	}
+*/
+	let outInfo = '';
+	let start = 15;
+	console.log(reply.length);
+	while (reply[start] !== 0 && start < reply.length) {
+		outInfo = reply.slice(start, start+6);
+		console.log(outInfo.readUInt8(0).toString());
+		start += 6;
+	}
+	
     let name = "";
-
-    for (let i = namesString.length - 1; i > 50; i--) {
+	let j = 0;
+    for (let i = namesString.length - 2; i > 50 && j < channelsCount; i--) {
         if (reply[i] === 0) {
-            this.log('debug', reverse(name));
-            names.channelNames.tx.push(reverse(name));
+     //       console.log(reverse(name));
+            names.channelNames.tx.unshift(reverse(name));
             name = "";
+			j++;
         } else {
             name += namesString[i];
         }
     }
 
+//	namesString.slice(76); 76 -> 118 // - 42 mac mini
+//	names.channelNames.tx = namesString.slice(76).split(Buffer.from([0x00]));
+	console.log(names);
     return names;
 };
 
@@ -58,18 +75,20 @@ module.exports = {
 	initConnection: function () {
 		let self = this;
 		
-		this.socket = dgram.createSocket({type: "udp4", reusePort: true});
+		this.socket = dgram.createSocket({type: "udp4" /*, reusePort: true*/});
 
         this.socket.on("message", this.parseReply.bind(this));
-        this.socket.on("error", ()=>{self.updateStatus(InstanceStatus.Disconnected);});
+        this.socket.on("error", (error)=>{
+			self.updateStatus(InstanceStatus.Disconnected);
+			self.log('error', error.message);
+		});
         //this.updateStatus.bind(this)(InstanceStatus.Disconnected));
         this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Ok);}); 
         // this.updateStatus.bind(this)(InstanceStatus.Ok));
         
         this.socket.bind(danteControlPort);
 
-
-		self.debug = true;
+		this.debug = this.config.verbose;
 		self.log('debug', 'getting information function');
 		self.devicesList = [];
 		self.devicesIp = {};
@@ -83,18 +102,6 @@ module.exports = {
 	},
 	
 
-	
-    parseDevices: function(response) {
-        this.devicesList = response?.answers?.filter((answer) => {
-            for (let danteServiceType of danteServiceTypes) {
-                if (answer.name.includes(danteServiceType)) {
-                    return true;
-                }
-                return false;
-            }
-        });
-		
-    },
 
     parseReply: function(reply, rinfo) {
         const deviceIP = rinfo.address;
@@ -119,11 +126,11 @@ module.exports = {
                         break;
                 }
 				
-
-                 this.devices = merge(this.devices, deviceData);
-                if (this.debug) {
+                this.devicesData = merge(this.devicesData, deviceData);
+				if (this.debug) {
                     // Log parsed device information when in debug mode
-                    this.log('debug', this.devices);
+				    console.log(this.devicesData);
+					console.log(this.devicesData[deviceIP]?.name + " NAMES : " + this.devicesData[deviceIP]?.channelNames?.tx);
                 }
             }
         }
@@ -310,24 +317,27 @@ module.exports = {
 	updateDevices: function(response){
 		response?.answers?.forEach((answer) => {
 			if (answer.name?.match(/_netaudio-arc._udp/)) {
-				let name = answer.data?.slice(0, -25);
+				let name = answer.data?.toString().slice(0, -25);
+	
 
 				if (name && (!this.devicesList.includes(name))) {
 					this.devicesList.push(name);
+					this.log('info', 'Adding device : ' + name);
 					
-					this.log('info', 'Adding device : ', name);
-					this.getChannelCount(name);
+					response.additionals.forEach((additional) => {
+						if (additional.type == 'A') {
+							this.devicesIp[name] = additional.data;
+							let deviceData = {}
+							deviceData[additional.data] = {name: name};
+							merge (this.devicesData, deviceData); 
+						}
+					});
+	
+					// get channels info from devices
+					let ip = this.devicesIp[name] ?? name+'.local'
+					this.getChannelCount(ip);
+					this.getChannelNames(ip);
 				}
-			}
-			else {
-			  let devicesName = {}
-				this.devicesList.forEach((device_name) => {
-					if ((answer.name == (device_name + '.local')) && (answer.type == 'A')) {
-						this.devicesIp[device_name] = answer.data;
-						devicesName[answer.data] = {name : device_name};
-						merge (this.devicesData, devicesName);
-					}
-				});
 			}
 		});
 	},
@@ -367,18 +377,7 @@ module.exports = {
 			}]
 		});
 
-	/*
-		if (self.DANTE) {
-			self.config.host = '10.20.12.81';
-			console.log('getting channel count');
-			self.DEVICEINFO.channelCount = await self.DANTE.getChannelCount(self.config.host);
-			console.log('getting channel names');
-			self.DEVICEINFO.channelNames = await self.DANTE.getChannelNames(self.config.host);
-	
-			console.log('****info***')
-			console.log(self.DEVICEINFO.toString());
-		}
-		*/
+
 		self.checkVariables();
 	},
 	

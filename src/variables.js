@@ -17,7 +17,7 @@ module.exports = {
 		try {
 			self.setVariableValues({
 				'channel_count': self.DEVICEINFO.channelCount,
-				'devices': self.devices,
+				'devices': self.devicesList,
 				'devices_channels': self.devices_channels
 			});
 		}
