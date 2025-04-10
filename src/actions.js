@@ -13,7 +13,7 @@ module.exports = {
 		
 		self.updateCount = function() {
 		  self.count++;
-		  self.myTextOptions.[0].value=self.count;
+		  self.myTextOptions[0].value=self.count;
 		}
 		
 		self.testInterval = setInterval(self.updateCount, 3000);
