@@ -3,6 +3,13 @@ module.exports = {
 		let self = this;
 		let actions = {};
 		
+			
+		self.updateCount = function() {
+		  self.count++;
+		  self.myTextOptions[0].value=self.count;
+		  //self.initActions();
+		}
+		
 		if (self.count ==undefined) {
 		  self.count =0;
 		  self.num = self.count.toString();
@@ -14,13 +21,7 @@ module.exports = {
 		  type: "static-text",
 		  value: self.num
 		}];
-		
-		self.updateCount = function() {
-		  self.count++;
-		  self.myTextOptions[0].value=self.count;
-		  //self.initActions();
-		}
-		
+	
 		
 		
 
