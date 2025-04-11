@@ -26,6 +26,16 @@ const bufferToInt = (buffer) => {
     return buffer.readUInt16BE();
 };
 
+const bufferToString = (buffer, index) => {
+	let i = index;
+	let text = '';
+	while (buffer[i] !==0) {
+		text += buffer.toString()[i];
+		i++;
+	}
+	return text;
+}
+
 const parseChannelCount = (reply) => {
     const channelInfo = { channelCount: { tx: reply[13], rx: reply[15] } };
     return channelInfo;
@@ -35,36 +45,18 @@ const parseTxChannelNames = (reply) => {
     const names = { channelNames: { tx: [] } };
     const namesString = reply.toString();
     const channelsCount = reply[10];
-/*
-	for (let i = 1; i <= channelsCount; i++) {
-		names.channelNames.tx[i] = i.toString().padStart(2,'0');
-	}
-*/
-	let outInfo = '';
-	let start = 15;
-	console.log(reply.length);
-	while (reply[start] !== 0 && start < reply.length) {
-		outInfo = reply.slice(start, start+6);
-		console.log(outInfo.readUInt8(0).toString());
-		start += 6;
-	}
-	
-    let name = "";
-	let j = 0;
-    for (let i = namesString.length - 2; i > 50 && j < channelsCount; i--) {
-        if (reply[i] === 0) {
-     //       console.log(reverse(name));
-            names.channelNames.tx.unshift(reverse(name));
-            name = "";
-			j++;
-        } else {
-            name += namesString[i];
-        }
-    }
+	const namesCount = reply[11];
 
-//	namesString.slice(76); 76 -> 118 // - 42 mac mini
-//	names.channelNames.tx = namesString.slice(76).split(Buffer.from([0x00]));
-	console.log(names);
+	for (let i = 0; i < namesCount ; i++) {
+		const startIndex = 12 + (i * 6);
+		const infoBuffer = reply.slice (startIndex, startIndex + 6);
+		const nameIndex = infoBuffer.readUInt16BE(0);
+		const nameNumber = infoBuffer.readUInt16BE(2);
+		const nameAddress = infoBuffer.readUInt16BE(4);
+		const name = bufferToString(reply, nameAddress);
+		
+		names.channelNames.tx[nameNumber] = name;
+	}
     return names;
 };
 
@@ -75,25 +67,28 @@ module.exports = {
 	initConnection: function () {
 		let self = this;
 		
-		this.socket = dgram.createSocket({type: "udp4" /*, reusePort: true*/});
+		this.socket = dgram.createSocket({type: "udp4" , reusePort: true});
 
         this.socket.on("message", this.parseReply.bind(this));
         this.socket.on("error", (error)=>{
 			self.updateStatus(InstanceStatus.Disconnected);
 			self.log('error', error.message);
 		});
-        //this.updateStatus.bind(this)(InstanceStatus.Disconnected));
+
         this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Ok);}); 
-        // this.updateStatus.bind(this)(InstanceStatus.Ok));
         
         this.socket.bind(danteControlPort);
 
 		this.debug = this.config.verbose;
+		
 		self.log('debug', 'getting information function');
 		self.devicesList = [];
 		self.devicesIp = {};
-		self.devices = new Map();
 		self.devicesData = {};
+		
+		self.devicesChoices = [];
+		self.destChannelsChoice = {};
+		self.sourceChannelsChoice = {};
 
 		self.getInformation();
 
@@ -119,10 +114,41 @@ module.exports = {
                 deviceData[deviceIP] = {};
                 switch (bufferToInt(commandId)) {
                     case 4096:
+						let txCount = deviceData[deviceIP]?.channelCount?.tx;
+						let rxCount = deviceData[deviceIP]?.channelCount?.rx;
                         deviceData[deviceIP] = parseChannelCount(reply);
+						
+						// update choices;
+						if (txCount != deviceData[deviceIP]?.channelCount?.tx) {
+							txCount = deviceData[deviceIP]?.channelCount?.tx;
+							let sourceChannelChoice = [{id:0, label: 'None'}];
+							for (i = 1; i <= txCount; i++) {
+								let channel = {id : i.toString().padStart(2,'0'), label : i.toString().padStart(2,'0')};
+								sourceChannelChoice.push(channel);
+							}
+							this.sourceChannelsChoice[this.devicesData[deviceIP].name] = sourceChannelChoice;
+						}
+						
+						// update choices;
+						if (rxCount != deviceData[deviceIP]?.channelCount?.rx) {
+							rxCount = deviceData[deviceIP]?.channelCount?.rx;
+							let destChannelChoice = [];
+							for (i = 1; i <= rxCount; i++) {
+								let channel = {id : i, label : i.toString().padStart(2,'0')};
+								destChannelChoice.push(channel);
+							}
+							this.destChannelsChoice[this.devicesData[deviceIP].name] = destChannelChoice;
+						}
                         break;
                     case 8208:
                         deviceData[deviceIP] = parseTxChannelNames(reply);
+						
+						let namesArray = deviceData[deviceIP]?.channelNames?.tx;
+						for (let i = 1; i < namesArray.length; i++) {
+							if (namesArray[i]) {
+								this.sourceChannelsChoice[this.devicesData[deviceIP].name][i] = {id: namesArray[i], label: namesArray[i]};
+							}
+						}
                         break;
                 }
 				
@@ -130,7 +156,11 @@ module.exports = {
 				if (this.debug) {
                     // Log parsed device information when in debug mode
 				    console.log(this.devicesData);
-					console.log(this.devicesData[deviceIP]?.name + " NAMES : " + this.devicesData[deviceIP]?.channelNames?.tx);
+                }
+				this.initActions();
+				if (this.debug) {
+                    // Log parsed device information when in debug mode
+				    console.log(this.sourceChannelsChoice);
                 }
             }
         }
@@ -287,31 +317,20 @@ module.exports = {
         const commandBuffer = this.makeCommand("channelCount");
         this.sendCommand(commandBuffer, ipaddress);
 
-        return this.devices[ipaddress]?.channelCount;
+        return this.devicesData[ipaddress]?.channelCount;
     },
 
     getChannelNames(ipaddress) {
         const commandBuffer = this.makeCommand("txChannelNames", Buffer.from("0001000100", "hex"));
         this.sendCommand(commandBuffer, ipaddress);
 
-        return this.devices[ipaddress]?.channelNames;
+        return this.devicesData[ipaddress]?.channelNames;
     },
 
     get devices() {
         return this.devicesList;
     },
 
-
-//module.exports = Dante;
-
-
-
-
-
-	
-	
-	
-	
 	
 
 	updateDevices: function(response){
@@ -332,14 +351,30 @@ module.exports = {
 							merge (this.devicesData, deviceData); 
 						}
 					});
-	
+					
+					
 					// get channels info from devices
 					let ip = this.devicesIp[name] ?? name+'.local'
 					this.getChannelCount(ip);
+					/*
+					let sourceChannels={
+					let sourceChannels = [];
+					for (let i = 0; i < 
+					sourceChannelsChoice
+	*/
+					
+					
+					
 					this.getChannelNames(ip);
+					
+					// updates actions choices
+					let deviceChoice = { 'id' : name, 'label' : name};
+					this.devicesChoices.push(deviceChoice);
+					
 				}
 			}
 		});
+		this.initActions();
 	},
 	
 	
@@ -389,17 +424,4 @@ module.exports = {
 		self.checkFeedbacks();
 		self.checkVariables();
 	},
-/*	
-	makeCrosspoint: function(sourceChannelName, sourceDeviceName, destinationChannelNumber) {
-		let self = this;
-	
-		self.makeCrosspoint(sourceChannelName, sourceDeviceName, destinationChannelNumber);
-	},
-	
-	clearCrosspoint: function(destinationChannelNumber) {
-		let self = this;
-	
-		self.clearCrosspoint(destinationChannelNumber);
-	}
-*/
 }

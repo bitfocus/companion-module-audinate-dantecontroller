@@ -2,30 +2,7 @@ module.exports = {
 	initActions: function () {
 		let self = this;
 		let actions = {};
-		self.log('debug', 'actions');
 			
-		self.updateCount = function() {
-		  this.count++;
-		  this.myTextOptions[0].value=this.num;
-		  this.log('debug','label' + this.myTextOptions[0].LABEL);
-		  this.log('debug', this.myTextOptions[0].value);
-		  this.initActions();
-		}
-		
-		if (self.count ==undefined) {
-		  self.count =0;
-		  self.num = self.count.toString();
-		  self.testInterval = setInterval(self.updateCount.bind(this), 3000);
-		}
-		
-		self.myTextOptions = [{
-		  id: 'test',
-		  label: 'TEST',
-		  type: "static-text",
-		  value: self.num
-		}];
-	
-		
 		
 
 		actions.makeCrosspoint = {
@@ -65,6 +42,60 @@ module.exports = {
 				self.makeCrosspoint(opt.destinationDeviceAdddress, opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
 			}
 		}
+		
+		
+		
+		actions.makeCrosspointDropDown = {
+			name: 'Make Crosspoint (drop down menu)',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action) {
+				let opt = action.options;
+				
+				//self.makeCrosspoint(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
+				console.log(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
+			}
+		}
+
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'Destination channel',
+				id: 'destinationChannel_'+ device.name,
+				choices: this.destChannelsChoice[device.name],
+				isVisibleData : device.name,
+				isVisible: (options, name) => { return (options.destinationDevice == name);}
+			}
+			actions.makeCrosspointDropDown.options.push(nameOption);
+		}
+
+		
+		actions.makeCrosspointDropDown.options.push({
+					type: 'dropdown',
+					label: 'Source Device',
+					id: 'sourceDevice',
+					choices: this.devicesChoices
+				})
+	
+		
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'Source channel',
+				id: 'sourceChannel_'+ device.name,
+				choices: this.sourceChannelsChoice[device.name],
+				isVisibleData : device.name,
+				isVisible: (options, name) => { return (options.sourceDevice == name);}
+			}
+			actions.makeCrosspointDropDown.options.push(nameOption);
+		}
+		
 
 		actions.clearCrosspoint = {
 			name: 'Clear Crosspoint',
@@ -90,14 +121,38 @@ module.exports = {
 			}
 		};
 		
-		actions.test ={
-		  name : 'test',
-		  options: self.myTextOptions,
-		  callback: async function (action) {
-		    self.log('debug', action.options.test);
-		  }
+		
+		actions.clearCrosspointDropDown = {
+			name: 'Clear Crosspoint (drop down menu)',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action) {
+				let opt = action.options;
+				
+				//self.clearCosspoint(self.devicesIp[opt.destinationDevice], opt['destinationChannel_'+opt.destinationDevice]);
+				console.log(self.devicesIp[opt.destinationDevice], opt['destinationChannel_'+opt.destinationDevice]);
+			}
 		}
 
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'Destination channel',
+				id: 'destinationChannel_'+ device.name,
+				choices: this.destChannelsChoice[device.name],
+				isVisibleData : device.name,
+				isVisible: (options, name) => { return (options.destinationDevice == name);}
+			}
+			actions.clearCrosspointDropDown.options.push(nameOption);
+		}
+		
+		
 		self.setActionDefinitions(actions);
 	}
 }
