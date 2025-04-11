@@ -2,7 +2,7 @@ module.exports = {
 	initActions: function () {
 		let self = this;
 		let actions = {};
-		
+		self.log('debug', 'actions');
 			
 		self.updateCount = function() {
 		  self.count++;
