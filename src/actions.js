@@ -5,17 +5,17 @@ module.exports = {
 		self.log('debug', 'actions');
 			
 		self.updateCount = function() {
-		  self.count++;
-		  self.myTextOptions[0].value=self.num;
-		  self.log('debug', self.myTextOptions[0].LABEL);
-		  self.log('debug', self.myTextOptions[0].value);
-		  self.initActions();
+		  this.count++;
+		  this.myTextOptions[0].value=this.num;
+		  this.log('debug', this.myTextOptions[0].LABEL);
+		  this.log('debug', this.myTextOptions[0].value);
+		  this.initActions();
 		}
 		
 		if (self.count ==undefined) {
 		  self.count =0;
 		  self.num = self.count.toString();
-		  self.testInterval = setInterval(self.updateCount, 3000);
+		  self.testInterval = setInterval(self.updateCount.bind(this), 3000);
 		}
 		
 		self.myTextOptions = [{
