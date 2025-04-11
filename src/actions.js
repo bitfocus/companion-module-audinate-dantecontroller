@@ -7,6 +7,7 @@ module.exports = {
 		self.updateCount = function() {
 		  self.count++;
 		  self.myTextOptions[0].value=self.count;
+		  self.log('debug', self.myTextOptions[0].value)
 		  self.initActions();
 		}
 		
