@@ -146,7 +146,7 @@ module.exports = {
 						let namesArray = deviceData[deviceIP]?.channelNames?.tx;
 						for (let i = 1; i < namesArray.length; i++) {
 							if (namesArray[i]) {
-								this.sourceChannelsChoice[this.devicesData[deviceIP].name][i] = {id: namesArray[i], label: namesArray[i]};
+								this.sourceChannelsChoice[this.devicesData[deviceIP].name][i] = {id: namesArray[i], label: i.toString().padStart(2,'0') + ' : ' + namesArray[i]};
 							}
 						}
                         break;
