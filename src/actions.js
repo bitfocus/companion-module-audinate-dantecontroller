@@ -3,20 +3,25 @@ module.exports = {
 		let self = this;
 		let actions = {};
 		
-		self.count = 0;
+		if (self.count ==undefined) {
+		  self.count =0;
+		  self.num = self.count.toString();
+		  self.testInterval = setInterval(self.updateCount, 3000);
+		}
 		self.myTextOptions = [{
 		  id: 'test',
 		  label: 'TEST',
 		  type: "static-text",
-		  value: self.count.toString()
+		  value: self.num
 		}];
 		
 		self.updateCount = function() {
 		  self.count++;
-		  self.myTextOptions[0].value=self.count.toString();
+		  self.myTextOptions[0].value=self.count;
+		  //self.initActions();
 		}
 		
-		self.testInterval = setInterval(self.updateCount, 3000);
+		
 		
 
 		actions.makeCrosspoint = {
