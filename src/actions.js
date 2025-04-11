@@ -6,8 +6,9 @@ module.exports = {
 			
 		self.updateCount = function() {
 		  self.count++;
-		  self.myTextOptions[0].value=self.count;
-		  self.log('debug', self.myTextOptions[0].value)
+		  self.myTextOptions[0].value=self.num;
+		  self.log('debug', self.myTextOptions[0].LABEL);
+		  self.log('debug', self.myTextOptions[0].value);
 		  self.initActions();
 		}
 		
@@ -16,6 +17,7 @@ module.exports = {
 		  self.num = self.count.toString();
 		  self.testInterval = setInterval(self.updateCount, 3000);
 		}
+		
 		self.myTextOptions = [{
 		  id: 'test',
 		  label: 'TEST',
