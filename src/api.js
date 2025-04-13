@@ -22,11 +22,11 @@ const DANTE_COMMANDS = {
 
 
 
-
+/*
 function reverse(s) {
     return s.split("").reverse().join("");
 };
-
+*/
 const getRandomInt = (max) => {
     return Math.floor(Math.random() * max);
 };
@@ -114,7 +114,7 @@ module.exports = {
 		this.debug = this.config.verbose;
 		
 		self.log('debug', 'getting information function');
-		self.devicesList = [];
+	//	self.devicesList = [];
 		self.devicesIp = {};
 		self.devicesData = {};
 		
@@ -130,9 +130,15 @@ module.exports = {
 		//self.updateDevices.bind(this));
 	},
 	
+	updateDevicesChoices: function () {
+	  this.devicesChoices =[];
+	  for (const device of this. devicesData) {
+	    this.devicesChoices.push({id: device.name, label: device.name});
+	  }
+	},
 	
 	updateChannelChoices: function(deviceIP) {
-		for (ioString of ['rx', 'tx']) {
+		for (let ioString of ['rx', 'tx']) {
 			if (!(this.devicesData[deviceIP] && this.devicesData[deviceIP][ioString])) {
 				this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIP);
 				return;
@@ -354,12 +360,17 @@ module.exports = {
 	},
 
     get devices() {
-        return this.devicesList;
+      return this.devicesData;
     },
 
 	
 
-//	updateDevices: function(response){
+	updateDevices: function(deviceName, deviceIp) {
+	  let devicesObject ={}
+	  devicesObject[deviceIp] = { name: deviceName};
+	  
+	},
+	
 	
 	dante_discovery: function(response) {
 		response?.answers?.forEach((answer) => {
@@ -381,12 +392,12 @@ module.exports = {
 						}
 					});
 					
-					
+					/*
 					// get channels info from devices
 					let ip = this.devicesIp[name] ?? name+'.local'
 					this.getChannelCount(ip);					
 					this.getChannelNames(ip);
-					
+					*/
 					// updates actions choices
 					let deviceChoice = { 'id' : name, 'label' : name};
 					this.devicesChoices.push(deviceChoice);
