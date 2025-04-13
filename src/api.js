@@ -36,26 +36,47 @@ const bufferToString = (buffer, index) => {
 	return text;
 }
 
+const parseString = (string, startIndex) => {
+  let text ='';
+  for (let i=startIndex; i< string.length; i++) {
+    if (string[i] === '\x00') {
+      break;
+    } else {
+      text += string[i];
+    }
+  }
+  return text;
+};
+
+
 const parseChannelCount = (reply) => {
     const channelInfo = { channelCount: { tx: reply[13], rx: reply[15] } };
     return channelInfo;
 };
 
 const parseTxChannelNames = (reply) => {
-    const names = { channelNames: { tx: [] } };
+    const names = { channelNames: { tx: [] }, tx:{}, rx:{} };
     const namesString = reply.toString();
     const channelsCount = reply[10];
-	const namesCount = reply[11];
+	  const namesCount = reply[11];
 
 	for (let i = 0; i < namesCount ; i++) {
 		const startIndex = 12 + (i * 6);
 		const infoBuffer = reply.slice (startIndex, startIndex + 6);
-		const nameIndex = infoBuffer.readUInt16BE(0);
-		const nameNumber = infoBuffer.readUInt16BE(2);
-		const nameAddress = infoBuffer.readUInt16BE(4);
+		const nameIndex = parseString(namesString, startIndex);
+		//bufferToInt(infoBuffer.slice(0,2));
+		//infoBuffer.readUInt16BE(0);
+		const nameNumber = bufferToInt(infoBuffer.slice(2,4));
+		//infoBuffer.readUInt16BE(2);
+		const nameAddress = bufferToInt(infoBuffer.slice(4,6));
+		//infoBuffer.readUInt16BE(4);
 		const name = bufferToString(reply, nameAddress);
 		
 		names.channelNames.tx[nameNumber] = name;
+		if (names.tx[nameNumber] == undefined) {
+		  names.tx[nameNumber]={};
+		}
+		names.tx[nameNumber].name = name;
 	}
     return names;
 };
@@ -96,6 +117,32 @@ module.exports = {
 		mdns.on('response', self.updateDevices.bind(this));
 	},
 	
+	
+	updateChannelChoices: function(deviceIP, ioString) {
+	  if (!(this.deviceData[deviceIP] && this.deviceData[deviceIP][ioString])) {
+	    this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIP);
+	    return;
+	  }
+	  
+	  let deviceName = this.deviceData[deviceIP].name;
+	  let ioObject = this.deviceData[deviceIP][ioString];
+	  
+	  let channelChoice = [{id: 0, label:'None'}];
+	  if (ioString == 'tx') {
+	    for (let i = 1; i< ioObject.count; i++) {
+	      let indexString = i.toString().padStart(2,'0');
+	      let channelName = ioObject[i]?.name ?? '';
+	    channelChoice.push({id: channelName ?? indexString, label: indexString + ' : ' + channelName});
+	    }
+	  } else if (ioString == 'rx') {
+	    for (let i = 1; i< ioObject.count; i++) {
+	      let indexString = i.toString().padStart(2,'0');
+	      let channelName = ioObject[i]?.name ?? '';
+	      channelChoice.push({id: i, label: indexString + ' : ' + channelName});
+	    }
+	  }
+	  this[ioObject+'ChannelsChoices'][deviceName] = channelChoice;
+	}
 
 
     parseReply: function(reply, rinfo) {
@@ -116,7 +163,7 @@ module.exports = {
                     case 4096:
 						let txCount = deviceData[deviceIP]?.channelCount?.tx;
 						let rxCount = deviceData[deviceIP]?.channelCount?.rx;
-                        deviceData[deviceIP] = parseChannelCount(reply);
+                        deviceData[deviceIP] parseChannelCount(reply);
 						
 						// update choices;
 						if (txCount != deviceData[deviceIP]?.channelCount?.tx) {
