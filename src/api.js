@@ -50,7 +50,7 @@ const parseString = (string, startIndex) => {
 
 
 const parseChannelCount = (reply) => {
-    const channelInfo = { channelCount: { tx: reply[13], rx: reply[15] } };
+    const channelInfo = { channelCount: { tx: reply[13], rx: reply[15] }, tx: {count: reply[13]}, rx :{count:reply[15]} };
     return channelInfo;
 };
 
@@ -142,7 +142,7 @@ module.exports = {
 	    }
 	  }
 	  this[ioObject+'ChannelsChoices'][deviceName] = channelChoice;
-	}
+	},
 
 
     parseReply: function(reply, rinfo) {
@@ -163,7 +163,7 @@ module.exports = {
                     case 4096:
 						let txCount = deviceData[deviceIP]?.channelCount?.tx;
 						let rxCount = deviceData[deviceIP]?.channelCount?.rx;
-                        deviceData[deviceIP] parseChannelCount(reply);
+                        deviceData[deviceIP] = parseChannelCount(reply);
 						
 						// update choices;
 						if (txCount != deviceData[deviceIP]?.channelCount?.tx) {
