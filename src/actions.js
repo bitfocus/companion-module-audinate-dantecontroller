@@ -58,8 +58,9 @@ module.exports = {
 			callback: async function (action) {
 				let opt = action.options;
 				
-				//self.makeCrosspoint(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
+				self.makeCrosspoint(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
 				console.log(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
+				//self.makeCrosspoint('169.254.143.181', 'AD4D 2_2', 'Y006-Shure-AD4D-A-4fdaa1', 3);
 			}
 		}
 
@@ -68,7 +69,7 @@ module.exports = {
 				type: 'dropdown',
 				label: 'Destination channel',
 				id: 'destinationChannel_'+ device.name,
-				choices: this.destChannelsChoice[device.name],
+				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : device.name,
 				isVisible: (options, name) => { return (options.destinationDevice == name);}
 			}
@@ -89,7 +90,7 @@ module.exports = {
 				type: 'dropdown',
 				label: 'Source channel',
 				id: 'sourceChannel_'+ device.name,
-				choices: this.sourceChannelsChoice[device.name],
+				choices: this.txChannelsChoices[device.name],
 				isVisibleData : device.name,
 				isVisible: (options, name) => { return (options.sourceDevice == name);}
 			}
@@ -134,9 +135,7 @@ module.exports = {
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				
-				//self.clearCosspoint(self.devicesIp[opt.destinationDevice], opt['destinationChannel_'+opt.destinationDevice]);
-				console.log(self.devicesIp[opt.destinationDevice], opt['destinationChannel_'+opt.destinationDevice]);
+ 				self.clearCrosspoint(self.devicesIp[opt.destinationDevice],	opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
@@ -145,7 +144,7 @@ module.exports = {
 				type: 'dropdown',
 				label: 'Destination channel',
 				id: 'destinationChannel_'+ device.name,
-				choices: this.destChannelsChoice[device.name],
+				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : device.name,
 				isVisible: (options, name) => { return (options.destinationDevice == name);}
 			}

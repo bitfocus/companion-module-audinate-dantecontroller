@@ -1,4 +1,4 @@
-const mdns = require('multicast-dns')();
+const multidns = require('multicast-dns');
 const dgram = require("dgram");
 const merge = require("./dante-control/utils/merge");
 const { InstanceStatus, Regex } = require('@companion-module/base')
@@ -8,9 +8,24 @@ const danteControlPort = 4440;
 const sequenceId1 = Buffer.from([0x29]);
 const danteConstant = Buffer.from([0x27]);
 
+const DANTE_COMMANDS = {
+	channelCount : Buffer.from("1000", "hex"),
+	deviceInfo : Buffer.from("1003", "hex"),
+	deviceName : Buffer.from("1002", "hex"),
+	subscription : Buffer.from("3010", "hex"),
+	rxChannelNames : Buffer.from("3000", "hex"),
+	txChannelNames : Buffer.from("2010", "hex"),
+	setRxChannelName : Buffer.from([0x30, 0x01]),
+	setTxChannelName : Buffer.from([0x20, 0x13]),
+	setDeviceName : Buffer.from([0x10, 0x01])
+};
+
+
+
+
 function reverse(s) {
     return s.split("").reverse().join("");
-}
+};
 
 const getRandomInt = (max) => {
     return Math.floor(Math.random() * max);
@@ -26,15 +41,6 @@ const bufferToInt = (buffer) => {
     return buffer.readUInt16BE();
 };
 
-const bufferToString = (buffer, index) => {
-	let i = index;
-	let text = '';
-	while (buffer[i] !==0) {
-		text += buffer.toString()[i];
-		i++;
-	}
-	return text;
-}
 
 const parseString = (string, startIndex) => {
   let text ='';
@@ -50,12 +56,15 @@ const parseString = (string, startIndex) => {
 
 
 const parseChannelCount = (reply) => {
-    const channelInfo = { channelCount: { tx: reply[13], rx: reply[15] }, tx: {count: reply[13]}, rx :{count:reply[15]} };
+    const channelInfo = { tx: {count: reply[13]}, rx :{count:reply[15]} };
     return channelInfo;
 };
 
-const parseTxChannelNames = (reply) => {
-    const names = { channelNames: { tx: [] }, tx:{}, rx:{} };
+
+
+const parseChannelNames = (reply, ioString) => {
+    const names = {};
+	names[ioString] = {};
     const namesString = reply.toString();
     const channelsCount = reply[10];
 	  const namesCount = reply[11];
@@ -64,22 +73,24 @@ const parseTxChannelNames = (reply) => {
 		const startIndex = 12 + (i * 6);
 		const infoBuffer = reply.slice (startIndex, startIndex + 6);
 		const nameIndex = parseString(namesString, startIndex);
-		//bufferToInt(infoBuffer.slice(0,2));
-		//infoBuffer.readUInt16BE(0);
 		const nameNumber = bufferToInt(infoBuffer.slice(2,4));
-		//infoBuffer.readUInt16BE(2);
 		const nameAddress = bufferToInt(infoBuffer.slice(4,6));
-		//infoBuffer.readUInt16BE(4);
-		const name = bufferToString(reply, nameAddress);
-		
-		names.channelNames.tx[nameNumber] = name;
-		if (names.tx[nameNumber] == undefined) {
-		  names.tx[nameNumber]={};
+		const name = parseString(namesString, nameAddress);
+
+		if (names[ioString][nameNumber] == undefined) {
+		  names[ioString][nameNumber]={};
 		}
-		names.tx[nameNumber].name = name;
+	names[ioString][nameNumber].name = name;
 	}
     return names;
 };
+
+
+const parseDeviceName = (reply) => {
+	return parseString(reply.toString(), 10);
+}
+	
+
 
 
 module.exports = {
@@ -98,7 +109,7 @@ module.exports = {
 
         this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Ok);}); 
         
-        this.socket.bind(danteControlPort);
+        this.socket.bind(danteControlPort, self.config.ip);
 
 		this.debug = this.config.verbose;
 		
@@ -108,40 +119,44 @@ module.exports = {
 		self.devicesData = {};
 		
 		self.devicesChoices = [];
-		self.destChannelsChoice = {};
-		self.sourceChannelsChoice = {};
+		self.txChannelsChoices = {};
+		self.rxChannelsChoices = {};
 
 		self.getInformation();
 
 		self.setupInterval();
-		mdns.on('response', self.updateDevices.bind(this));
+		self.mdns = multidns({interface: self.config.ip});
+		self.mdns.on('response', self.dante_discovery.bind(this));
+		//self.updateDevices.bind(this));
 	},
 	
 	
-	updateChannelChoices: function(deviceIP, ioString) {
-	  if (!(this.deviceData[deviceIP] && this.deviceData[deviceIP][ioString])) {
-	    this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIP);
-	    return;
-	  }
+	updateChannelChoices: function(deviceIP) {
+		for (ioString of ['rx', 'tx']) {
+			if (!(this.devicesData[deviceIP] && this.devicesData[deviceIP][ioString])) {
+				this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIP);
+				return;
+			}
 	  
-	  let deviceName = this.deviceData[deviceIP].name;
-	  let ioObject = this.deviceData[deviceIP][ioString];
+			let deviceName = this.devicesData[deviceIP].name;
+			let ioObject = this.devicesData[deviceIP][ioString];
 	  
-	  let channelChoice = [{id: 0, label:'None'}];
-	  if (ioString == 'tx') {
-	    for (let i = 1; i< ioObject.count; i++) {
-	      let indexString = i.toString().padStart(2,'0');
-	      let channelName = ioObject[i]?.name ?? '';
-	    channelChoice.push({id: channelName ?? indexString, label: indexString + ' : ' + channelName});
-	    }
-	  } else if (ioString == 'rx') {
-	    for (let i = 1; i< ioObject.count; i++) {
-	      let indexString = i.toString().padStart(2,'0');
-	      let channelName = ioObject[i]?.name ?? '';
-	      channelChoice.push({id: i, label: indexString + ' : ' + channelName});
-	    }
-	  }
-	  this[ioObject+'ChannelsChoices'][deviceName] = channelChoice;
+			let channelChoice = [{id: 0, label:'None'}];
+			if (ioString == 'tx') {
+				for (let i = 1; i<= ioObject.count; i++) {
+				let indexString = i.toString().padStart(2,'0');
+				let channelName = ioObject[i]?.name;
+				channelChoice.push({id: channelName ?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')});
+				}
+			} else if (ioString == 'rx') {
+				for (let i = 1; i<= ioObject.count; i++) {
+				let indexString = i.toString().padStart(2,'0');
+				let channelName = ioObject[i]?.name ?? '';
+				channelChoice.push({id: i, label: indexString + ' : ' + channelName});
+				}
+			}
+			this[ioString+'ChannelsChoices'][deviceName] = channelChoice;
+		}
 	},
 
 
@@ -160,55 +175,41 @@ module.exports = {
                 const commandId = reply.slice(6, 8);
                 deviceData[deviceIP] = {};
                 switch (bufferToInt(commandId)) {
-                    case 4096:
-						let txCount = deviceData[deviceIP]?.channelCount?.tx;
-						let rxCount = deviceData[deviceIP]?.channelCount?.rx;
-                        deviceData[deviceIP] = parseChannelCount(reply);
-						
-						// update choices;
-						if (txCount != deviceData[deviceIP]?.channelCount?.tx) {
-							txCount = deviceData[deviceIP]?.channelCount?.tx;
-							let sourceChannelChoice = [{id:0, label: 'None'}];
-							for (i = 1; i <= txCount; i++) {
-								let channel = {id : i.toString().padStart(2,'0'), label : i.toString().padStart(2,'0')};
-								sourceChannelChoice.push(channel);
-							}
-							this.sourceChannelsChoice[this.devicesData[deviceIP].name] = sourceChannelChoice;
-						}
-						
-						// update choices;
-						if (rxCount != deviceData[deviceIP]?.channelCount?.rx) {
-							rxCount = deviceData[deviceIP]?.channelCount?.rx;
-							let destChannelChoice = [];
-							for (i = 1; i <= rxCount; i++) {
-								let channel = {id : i, label : i.toString().padStart(2,'0')};
-								destChannelChoice.push(channel);
-							}
-							this.destChannelsChoice[this.devicesData[deviceIP].name] = destChannelChoice;
-						}
+				    case 4096:
+					//case DANTE_COMMANDS.channelCount :
+					
+                        merge(deviceData[deviceIP] = parseChannelCount(reply));
                         break;
                     case 8208:
-                        deviceData[deviceIP] = parseTxChannelNames(reply);
-						
-						let namesArray = deviceData[deviceIP]?.channelNames?.tx;
-						for (let i = 1; i < namesArray.length; i++) {
-							if (namesArray[i]) {
-								this.sourceChannelsChoice[this.devicesData[deviceIP].name][i] = {id: namesArray[i], label: i.toString().padStart(2,'0') + ' : ' + namesArray[i]};
-							}
-						}
+					//case DANTE_COMMANDS.txChannelNames :
+                        deviceData[deviceIP] = parseChannelNames(reply,'tx');
                         break;
+						
+					case 12288 : 
+						deviceData[deviceIP] = parseChannelNames(reply, 'rx');
+						break;
+					case 4098 : 
+						console.log(parseDeviceName(reply));
+//						deviceData[deviceIP] = 
+						break;
                 }
 				
                 this.devicesData = merge(this.devicesData, deviceData);
+				
 				if (this.debug) {
                     // Log parsed device information when in debug mode
-				    console.log(this.devicesData);
+				    console.log('DEVICE DATA : ', this.devicesData);
                 }
+				
+				this.updateChannelChoices(deviceIP, 'tx');
+				this.updateChannelChoices(deviceIP, 'rx');
+				
+				if (this.debug) {
+					// Log parsed device information when in debug mode
+					console.log('TX CHOICES : ', this.txChannelsChoices);
+				}
+				
 				this.initActions();
-				if (this.debug) {
-                    // Log parsed device information when in debug mode
-				    console.log(this.sourceChannelsChoice);
-                }
             }
         }
     },
@@ -230,36 +231,8 @@ module.exports = {
         let commandLength = Buffer.alloc(2);
         let commandId = Buffer.alloc(2);
 
-        switch (command) {
-            case "channelCount":
-                commandId = Buffer.from("1000", "hex");
-                break;
-            case "deviceInfo":
-                commandId = Buffer.from("1003", "hex");
-                break;
-            case "deviceName":
-                commandId = Buffer.from("1002", "hex");
-                break;
-            case "subscription":
-                commandId = Buffer.from("3010", "hex");
-                break;
-            case "rxChannelNames":
-                commandId = Buffer.from("3000", "hex");
-                break;
-            case "txChannelNames":
-                commandId = Buffer.from("2010", "hex");
-                break;
-            case "setRxChannelName":
-                commandId = Buffer.from([0x30, 0x01]);
-                break;
-            case "setTxChannelName":
-                commandId = Buffer.from([0x20, 0x13]);
-                break;
-            case "setDeviceName":
-                commandId = Buffer.from([0x10, 0x01]);
-                break;
-        }
-
+		commandId = Buffer.from(DANTE_COMMANDS[command]);
+		
         commandLength.writeUInt16BE(
             Buffer.concat([
                 danteConstant,
@@ -373,6 +346,12 @@ module.exports = {
 
         return this.devicesData[ipaddress]?.channelNames;
     },
+	
+	getDeviceName(ipaddress) {
+		const commandBuffer = this.makeCommand("deviceName");//, Buffer.from("0001000100", "hex"));
+		console.log ('get device name : ', ipaddress);
+		this.sendCommand(commandBuffer, ipaddress);
+	},
 
     get devices() {
         return this.devicesList;
@@ -380,45 +359,40 @@ module.exports = {
 
 	
 
-	updateDevices: function(response){
+//	updateDevices: function(response){
+	
+	dante_discovery: function(response) {
 		response?.answers?.forEach((answer) => {
 			if (answer.name?.match(/_netaudio-arc._udp/)) {
 				let name = answer.data?.toString().slice(0, -25);
 	
-
+/*
 				if (name && (!this.devicesList.includes(name))) {
 					this.devicesList.push(name);
 					this.log('info', 'Adding device : ' + name);
-					
+*/					
 					response.additionals.forEach((additional) => {
 						if (additional.type == 'A') {
-							this.devicesIp[name] = additional.data;
-							let deviceData = {}
-							deviceData[additional.data] = {name: name};
-							merge (this.devicesData, deviceData); 
+//							this.devicesIp[name] = additional.data;
+//							let deviceData = {}
+//							deviceData[additional.data] = {name: name};
+//							merge (this.devicesData, deviceData); 
+							this.getDeviceName(additional.data);
 						}
 					});
 					
 					
 					// get channels info from devices
 					let ip = this.devicesIp[name] ?? name+'.local'
-					this.getChannelCount(ip);
-					/*
-					let sourceChannels={
-					let sourceChannels = [];
-					for (let i = 0; i < 
-					sourceChannelsChoice
-	*/
-					
-					
-					
+					this.getChannelCount(ip);					
 					this.getChannelNames(ip);
 					
 					// updates actions choices
 					let deviceChoice = { 'id' : name, 'label' : name};
 					this.devicesChoices.push(deviceChoice);
-					
-				}
+					this.devicesChoices.sort((deviceA, deviceB) => {
+						return deviceA.label.localeCompare(deviceB.label);
+					});
 			}
 		});
 		this.initActions();
@@ -452,7 +426,7 @@ module.exports = {
 
 		self.log('debug', 'getting info');
 		
-		mdns.query({
+		self.mdns?.query({
 			questions:[{
 				name:'_netaudio-arc._udp.local',
 				type:'PTR'
