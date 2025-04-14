@@ -32,14 +32,14 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Device Address',
-					id: 'destinationDeviceAdddress',
+					id: 'destinationDeviceAddress',
 					default: 'MyDanteDeviceName',
 					useVariables: true
 				},
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				self.makeCrosspoint(opt.destinationDeviceAdddress, opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
+				self.makeCrosspoint(opt.destinationDeviceAddress, opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
 			}
 		}
 		
@@ -57,10 +57,9 @@ module.exports = {
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				
-				self.makeCrosspoint(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
-				console.log(self.devicesIp[opt.destinationDevice], opt['sourceChannel_'+opt.sourceDevice], opt.sourceDevice, opt['destinationChannel_'+opt.destinationDevice]);
-				//self.makeCrosspoint('169.254.143.181', 'AD4D 2_2', 'Y006-Shure-AD4D-A-4fdaa1', 3);
+				console.log('ACTION');
+				self.makeCrosspoint(opt.destinationDevice, opt['sourceChannel_'+opt.sourceDevice], self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
+				console.log(opt.destinationDevice, opt['sourceChannel_'+opt.sourceDevice], self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
@@ -68,10 +67,10 @@ module.exports = {
 			let nameOption = {
 				type: 'dropdown',
 				label: 'Destination channel',
-				id: 'destinationChannel_'+ device.name,
+				id: 'destinationChannel_'+ ip,
 				choices: this.rxChannelsChoices[device.name],
-				isVisibleData : device.name,
-				isVisible: (options, name) => { return (options.destinationDevice == name);}
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return (options.destinationDevice == deviceIp);}
 			}
 			actions.makeCrosspointDropDown.options.push(nameOption);
 		}
@@ -89,10 +88,10 @@ module.exports = {
 			let nameOption = {
 				type: 'dropdown',
 				label: 'Source channel',
-				id: 'sourceChannel_'+ device.name,
+				id: 'sourceChannel_'+ ip,
 				choices: this.txChannelsChoices[device.name],
-				isVisibleData : device.name,
-				isVisible: (options, name) => { return (options.sourceDevice == name);}
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return (options.sourceDevice == deviceIp);}
 			}
 			actions.makeCrosspointDropDown.options.push(nameOption);
 		}
@@ -135,7 +134,7 @@ module.exports = {
 			],
 			callback: async function (action) {
 				let opt = action.options;
- 				self.clearCrosspoint(self.devicesIp[opt.destinationDevice],	opt['destinationChannel_'+opt.destinationDevice]);
+ 				self.clearCrosspoint(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
@@ -145,8 +144,8 @@ module.exports = {
 				label: 'Destination channel',
 				id: 'destinationChannel_'+ device.name,
 				choices: this.rxChannelsChoices[device.name],
-				isVisibleData : device.name,
-				isVisible: (options, name) => { return (options.destinationDevice == name);}
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return (options.destinationDevice == deviceIp);}
 			}
 			actions.clearCrosspointDropDown.options.push(nameOption);
 		}

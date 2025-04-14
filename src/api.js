@@ -87,7 +87,7 @@ const parseChannelNames = (reply, ioString) => {
 
 
 const parseDeviceName = (reply) => {
-	return parseString(reply.toString(), 10);
+	return {name: parseString(reply.toString(), 10)};
 }
 	
 
@@ -127,60 +127,56 @@ module.exports = {
 		self.setupInterval();
 		self.mdns = multidns({interface: self.config.ip});
 		self.mdns.on('response', self.dante_discovery.bind(this));
-		//self.updateDevices.bind(this));
 	},
 	
-	updateDevicesChoices: function () {
-	  this.devicesChoices =[];
-	  for (const device of this. devicesData) {
-	    this.devicesChoices.push({id: device.name, label: device.name});
-	  }
-	  this.devicesChoices.sort((deviceA, deviceB) => {
-						return deviceA.label.localeCompare(deviceB.label);
-	  });
-	},
 	
-	insertDeviceChoice: function (deviceName, deviceIp) {
-	  let i=0;
-	  while (this.devicesChoices[i] && (this.devicesChoices[i].name?.localeCompare(deviceName))) {
-	    i++;
-	  }
-	  this.devicesChoices.splice(i, 0, {id: deviceIp, label: deviceName});
+	insertDeviceChoice: function (deviceIp) {
+		const deviceName = this.devicesData[deviceIp]?.name;
+		
+		if (this.debug) {
+			this.log('debug', 'INSERT DEVICE : ' + deviceName);
+		}
+		
+		let i=0;
+		while (this.devicesChoices[i] && (deviceName.localeCompare(this.devicesChoices[i].name))) {
+			i++;
+		}
+		this.devicesChoices.splice(i, 0, {id: deviceIp, label: deviceName});
 	},
+
 	
-	updateChannelChoices: function(deviceIP) {
-		for (let ioString of ['rx', 'tx']) {
-			if (!(this.devicesData[deviceIP] && this.devicesData[deviceIP][ioString])) {
-				this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIP);
-				return;
-			}
-	  
-			let deviceName = this.devicesData[deviceIP].name;
-			let ioObject = this.devicesData[deviceIP][ioString];
-	  
-			let channelChoice = [{id: 0, label:'None'}];
-			if (ioString == 'tx') {
-				for (let i = 1; i<= ioObject.count; i++) {
+	updateChannelChoices: function(deviceIp, ioString) {
+		if (!(this.devicesData[deviceIp] && this.devicesData[deviceIp][ioString])) {
+			this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIp);
+			return;
+		}
+  
+		let deviceName = this.devicesData[deviceIp].name;
+		let ioObject = this.devicesData[deviceIp][ioString];
+  
+		let channelChoice = [{id: 0, label:'None'}];
+		if (ioString == 'tx') {
+			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name;
 				channelChoice.push({id: channelName ?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')});
-				}
-			} else if (ioString == 'rx') {
-				for (let i = 1; i<= ioObject.count; i++) {
+			}
+		} else if (ioString == 'rx') {
+			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name ?? '';
 				channelChoice.push({id: i, label: indexString + ' : ' + channelName});
-				}
 			}
-			this[ioString+'ChannelsChoices'][deviceName] = channelChoice;
 		}
+		this[ioString+'ChannelsChoices'][deviceName] = channelChoice;
 	},
 
 
     parseReply: function(reply, rinfo) {
-        const deviceIP = rinfo.address;
+        const deviceIp= rinfo.address;
         const replySize = rinfo.size;
         const deviceData = {};
+		let updateFlags = [];
 
         if (this.debug) {
             // Log replies when in debug mode
@@ -190,40 +186,62 @@ module.exports = {
         if (reply[0] === danteConstant[0] && reply[1] === sequenceId1[0]) {
             if (replySize === bufferToInt(reply.slice(2, 4))) {
                 const commandId = reply.slice(6, 8);
-                deviceData[deviceIP] = {};
+                deviceData[deviceIp] = {};
                 switch (bufferToInt(commandId)) {
+					
 				    case 4096:
 					//case DANTE_COMMANDS.channelCount :
-					
-                        merge(deviceData[deviceIP] = parseChannelCount(reply));
+                        deviceData[deviceIp] = parseChannelCount(reply);
+						if (deviceData[deviceIp].rx.count != this.devicesData[deviceIp]?.rx?.count) {
+							this.getChannelNames(deviceIp, 'rx');
+						}
+						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
+							this.getChannelNames(deviceIp, 'tx');
+						}
+
                         break;
+						
                     case 8208:
 					//case DANTE_COMMANDS.txChannelNames :
-                        deviceData[deviceIP] = parseChannelNames(reply,'tx');
+                        deviceData[deviceIp] = parseChannelNames(reply,'tx');
+						updateFlags.push('tx');
                         break;
 						
 					case 12288 : 
-						deviceData[deviceIP] = parseChannelNames(reply, 'rx');
+						deviceData[deviceIp] = parseChannelNames(reply, 'rx');
+						updateFlags.push('rx');
 						break;
+						
 					case 4098 : 
-						console.log(parseDeviceName(reply));
-//						deviceData[deviceIP] = 
+						deviceData[deviceIp] = parseDeviceName(reply);
+						if (this.devicesData[deviceIp]?.name != deviceData[deviceIp].name) {
+							updateFlags.push('name');
+						}
+						// retrieve channel count
+						this.getChannelCount(deviceIp);
 						break;
                 }
 				
-                this.devicesData = merge(this.devicesData, deviceData);
 				
 				if (this.debug) {
                     // Log parsed device information when in debug mode
 				    console.log('DEVICE DATA : ', this.devicesData);
                 }
+				this.devicesData = merge(this.devicesData, deviceData);
 				
-				this.updateChannelChoices(deviceIP, 'tx');
-				this.updateChannelChoices(deviceIP, 'rx');
-				
-				if (this.debug) {
-					// Log parsed device information when in debug mode
-					console.log('TX CHOICES : ', this.txChannelsChoices);
+				for (const flag of updateFlags) {
+					
+					switch (flag) {
+						case 'rx':		
+						case 'tx': 
+							this.updateChannelChoices(deviceIp, flag);
+							
+							break;
+							
+						case 'name':
+							this.insertDeviceChoice(deviceIp);
+							break;
+					}
 				}
 				
 				this.initActions();
@@ -357,16 +375,22 @@ module.exports = {
         return this.devicesData[ipaddress]?.channelCount;
     },
 
-    getChannelNames(ipaddress) {
-        const commandBuffer = this.makeCommand("txChannelNames", Buffer.from("0001000100", "hex"));
-        this.sendCommand(commandBuffer, ipaddress);
+    getChannelNames(ipaddress, io = '') {
+		let commandBuffer;
+		if (io != 'rx') {
+			commandBuffer = this.makeCommand("txChannelNames", Buffer.from("0001000100", "hex"));
+			this.sendCommand(commandBuffer, ipaddress);
+		}
+		if (io != 'tx') {
+			commandBuffer = this.makeCommand("rxChannelNames", Buffer.from("0001000100", "hex"));
+			this.sendCommand(commandBuffer, ipaddress);
+		}
 
         return this.devicesData[ipaddress]?.channelNames;
     },
 	
 	getDeviceName(ipaddress) {
-		const commandBuffer = this.makeCommand("deviceName");//, Buffer.from("0001000100", "hex"));
-		console.log ('get device name : ', ipaddress);
+		const commandBuffer = this.makeCommand("deviceName");
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 
@@ -374,16 +398,7 @@ module.exports = {
       return this.devicesData;
     },
 
-	
 
-	updateDevices: function(deviceName, deviceIp) {
-	  if (!this.devicesData[deviceIp]) {
-	    let devicesObject ={}
-	    devicesObject[deviceIp] = { name: deviceName};
-	    this.devicesData = merge(this.devicesData, devicesObject);
-	    this.insertDeviceChoice(deviceName, deviceIp);
-	  }
-	},
 	
 	
 	dante_discovery: function(response) {
@@ -417,8 +432,8 @@ module.exports = {
 					this.devicesChoices.push(deviceChoice);
 					this.devicesChoices.sort((deviceA, deviceB) => {
 						return deviceA.label.localeCompare(deviceB.label);
-						*/
-					});
+						
+					});*/
 			}
 		});
 		this.initActions();
