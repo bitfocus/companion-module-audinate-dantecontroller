@@ -135,6 +135,17 @@ module.exports = {
 	  for (const device of this. devicesData) {
 	    this.devicesChoices.push({id: device.name, label: device.name});
 	  }
+	  this.devicesChoices.sort((deviceA, deviceB) => {
+						return deviceA.label.localeCompare(deviceB.label);
+	  });
+	},
+	
+	insertDeviceChoice: function (deviceName, deviceIp) {
+	  let i=0;
+	  while (this.devicesChoices[i] && (this.devicesChoices[i].name?.localeCompare(deviceName))) {
+	    i++;
+	  }
+	  this.devicesChoices.splice(i, 0, {id: deviceIp, label: deviceName});
 	},
 	
 	updateChannelChoices: function(deviceIP) {
@@ -366,9 +377,12 @@ module.exports = {
 	
 
 	updateDevices: function(deviceName, deviceIp) {
-	  let devicesObject ={}
-	  devicesObject[deviceIp] = { name: deviceName};
-	  
+	  if (!this.devicesData[deviceIp]) {
+	    let devicesObject ={}
+	    devicesObject[deviceIp] = { name: deviceName};
+	    this.devicesData = merge(this.devicesData, devicesObject);
+	    this.insertDeviceChoice(deviceName, deviceIp);
+	  }
 	},
 	
 	
@@ -399,10 +413,11 @@ module.exports = {
 					this.getChannelNames(ip);
 					*/
 					// updates actions choices
-					let deviceChoice = { 'id' : name, 'label' : name};
+/*					let deviceChoice = { 'id' : name, 'label' : name};
 					this.devicesChoices.push(deviceChoice);
 					this.devicesChoices.sort((deviceA, deviceB) => {
 						return deviceA.label.localeCompare(deviceB.label);
+						*/
 					});
 			}
 		});
