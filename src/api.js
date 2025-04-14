@@ -130,9 +130,7 @@ module.exports = {
 	},
 	
 	
-	insertDeviceChoice: function (deviceIp) {
-		const deviceName = this.devicesData[deviceIp]?.name;
-		
+	insertDeviceChoice: function (deviceIp, deviceName) {
 		if (this.debug) {
 			this.log('debug', 'INSERT DEVICE : ' + deviceName);
 		}
@@ -142,8 +140,18 @@ module.exports = {
 			i++;
 		}
 		this.devicesChoices.splice(i, 0, {id: deviceIp, label: deviceName});
+		this.initActions();
 	},
-
+	
+	updateDeviceChoice: function (deviceIp, deviceName) {
+	  for (let device of this.devicesChoices) {
+	    if (device.id == deviceIp) {
+	      device.label=deviceName;
+	      break;
+	    }
+	  }
+	  this.initActions();
+	},
 	
 	updateChannelChoices: function(deviceIp, ioString) {
 		if (!(this.devicesData[deviceIp] && this.devicesData[deviceIp][ioString])) {
@@ -169,6 +177,7 @@ module.exports = {
 			}
 		}
 		this[ioString+'ChannelsChoices'][deviceName] = channelChoice;
+		this.initActions();
 	},
 
 
@@ -176,7 +185,7 @@ module.exports = {
         const deviceIp= rinfo.address;
         const replySize = rinfo.size;
         const deviceData = {};
-		let updateFlags = [];
+	    	let updateFlags = [];
 
         if (this.debug) {
             // Log replies when in debug mode
@@ -214,8 +223,13 @@ module.exports = {
 						
 					case 4098 : 
 						deviceData[deviceIp] = parseDeviceName(reply);
-						if (this.devicesData[deviceIp]?.name != deviceData[deviceIp].name) {
+/*						if (this.devicesData[deviceIp]?.name != deviceData[deviceIp].name) {
 							updateFlags.push('name');
+						}
+		*/				if (!this.devicesData[deviceIp]?.name) {
+						  this.insertDeviceChoice(deviceIp, deviceData[deviceIp].name);
+						} else if (this.devicesData[deviceIp].name) != deviceData[deviceIp].name) {
+						  this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
 						}
 						// retrieve channel count
 						this.getChannelCount(deviceIp);
@@ -244,7 +258,7 @@ module.exports = {
 					}
 				}
 				
-				this.initActions();
+				//this.initActions();
             }
         }
     },
