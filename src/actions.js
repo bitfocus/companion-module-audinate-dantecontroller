@@ -135,6 +135,7 @@ module.exports = {
 			callback: async function (action) {
 				let opt = action.options;
  				self.clearCrosspoint(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
+				console.log(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
@@ -142,7 +143,7 @@ module.exports = {
 			let nameOption = {
 				type: 'dropdown',
 				label: 'Destination channel',
-				id: 'destinationChannel_'+ device.name,
+				id: 'destinationChannel_'+ ip,
 				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : ip,
 				isVisible: (options, deviceIp) => { return (options.destinationDevice == deviceIp);}
