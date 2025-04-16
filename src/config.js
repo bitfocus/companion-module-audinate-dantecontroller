@@ -68,6 +68,21 @@ module.exports = {
 				width: 3,
 				default: 1000
 			},
+			
+			{
+				type: 'static-text',
+				id: 'intervalInfo',
+				width: 12,
+				label: 'Timeout Interval',
+				value: 'Please enter the time in milliseconds before a device is considered offline. Set to 0 to disable.',
+			},
+			{
+				type: 'textinput',
+				id: 'timeoutInterval',
+				label: 'Timeout Interval',
+				width: 3,
+				default: 2000
+			},
 			{
 				type: 'static-text',
 				id: 'info2',
