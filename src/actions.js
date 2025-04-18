@@ -57,9 +57,7 @@ module.exports = {
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				console.log('ACTION');
 				self.makeCrosspoint(opt.destinationDevice, opt['sourceChannel_'+opt.sourceDevice], self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
-				console.log(opt.destinationDevice, opt['sourceChannel_'+opt.sourceDevice], self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
@@ -135,7 +133,6 @@ module.exports = {
 			callback: async function (action) {
 				let opt = action.options;
  				self.clearCrosspoint(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
-				console.log(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
