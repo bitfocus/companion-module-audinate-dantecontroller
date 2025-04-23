@@ -665,24 +665,24 @@ module.exports = {
       if (channelTypes==undefined){
         channelTypes=['rx','txInfo'];
       }
-		  let page, commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
+		  let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
 		  for (let channelType of channelTypes) {
 		if (channelType == 'tx') {
-      for (page = 0, page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
+      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
 		    commandArguments.writeUInt8(page*2, 6);
 			  commandBuffer = this.makeCommand("txChannelNames", commandArguments);
 			  this.sendCommand(commandBuffer, ipaddress);
       }
 		}
 		if (channelType == 'rx') {
-		  for (page = 0, page < this.devicesData[ipaddress]?.tx?.count/16; page++ ) {
+		  for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/16; page++ ) {
 		    commandArguments.writeUInt8(page*2, 6);
 			  commandBuffer = this.makeCommand("rxChannelNames", commandArguments);
 			  this.sendCommand(commandBuffer, ipaddress);
 		  }
 		}
 		if (channelType == 'txInfo') {
-      for (page = 0, page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
+      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
 		    commandArguments.writeUInt8(page*2, 6);
 			  commandBuffer = this.makeCommand("txChannelInfo", commandArguments);
 			  this.sendCommand(commandBuffer, ipaddress);
