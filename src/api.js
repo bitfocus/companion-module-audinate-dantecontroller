@@ -16,9 +16,97 @@ const DANTE_COMMANDS = {
 	subscription : Buffer.from("3010", "hex"),
 	rxChannelNames : Buffer.from("3000", "hex"),
 	txChannelNames : Buffer.from("2010", "hex"),
+	txChannelInfo : Buffer.from("2000", "hex"),
 	setRxChannelName : Buffer.from([0x30, 0x01]),
 	setTxChannelName : Buffer.from([0x20, 0x13]),
-	setDeviceName : Buffer.from([0x10, 0x01])
+	setDeviceName : Buffer.from([0x10, 0x01]),
+	
+REQUEST_DANTE_MODEL : Buffer.from([97]),
+REQUEST_MAKE_MODEL : Buffer.from([193]),
+RESPONSE_DANTE_MODEL : Buffer.from([96]),
+RESPONSE_MAKE_MODEL : Buffer.from([192]),
+
+
+MESSAGE_TYPE_CHANNEL_COUNTS_QUERY : 4096,
+MESSAGE_TYPE_DEVICE_CONTROL : 4099,
+MESSAGE_TYPE_IDENTIFY_DEVICE_QUERY : 4302,
+MESSAGE_TYPE_NAME_CONTROL : 4097,
+MESSAGE_TYPE_NAME_QUERY : 4098,
+MESSAGE_TYPE_RX_CHANNEL_QUERY : 12288,
+MESSAGE_TYPE_TX_CHANNEL_QUERY : 8192,
+MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY : 8208,
+
+MESSAGE_TYPE_ACCESS_CONTROL : 177,
+MESSAGE_TYPE_ACCESS_STATUS : 176,
+MESSAGE_TYPE_AES67_CONTROL : 4102,
+MESSAGE_TYPE_AES67_STATUS : 4103,
+MESSAGE_TYPE_AUDIO_INTERFACE_QUERY : 135,
+MESSAGE_TYPE_AUDIO_INTERFACE_STATUS : 134,
+MESSAGE_TYPE_CLEAR_CONFIG_CONTROL : 119,
+MESSAGE_TYPE_CLEAR_CONFIG_STATUS : 120,
+MESSAGE_TYPE_CLOCKING_CONTROL : 33,
+MESSAGE_TYPE_CLOCKING_STATUS : 32,
+MESSAGE_TYPE_CODEC_CONTROL : 4106,
+MESSAGE_TYPE_CODEC_STATUS : 4107,
+MESSAGE_TYPE_CONFIG_CONTROL : 115,
+MESSAGE_TYPE_DDM_ENROLMENT_CONFIG_CONTROL : 65286,
+MESSAGE_TYPE_DDM_ENROLMENT_CONFIG_STATUS : 65287,
+MESSAGE_TYPE_DEVICE_REBOOT : 146,
+MESSAGE_TYPE_EDK_BOARD_CONTROL : 161,
+MESSAGE_TYPE_EDK_BOARD_STATUS : 160,
+MESSAGE_TYPE_ENCODING_CONTROL : 131,
+MESSAGE_TYPE_ENCODING_STATUS : 130,
+MESSAGE_TYPE_HAREMOTE_CONTROL : 4097,
+MESSAGE_TYPE_HAREMOTE_STATUS : 4096,
+MESSAGE_TYPE_IDENTIFY_QUERY : 99,
+MESSAGE_TYPE_IDENTIFY_STATUS : 98,
+MESSAGE_TYPE_IFSTATS_QUERY : 65,
+MESSAGE_TYPE_IFSTATS_STATUS : 64,
+MESSAGE_TYPE_IGMP_VERS_CONTROL : 81,
+MESSAGE_TYPE_IGMP_VERS_STATUS : 80,
+MESSAGE_TYPE_INTERFACE_CONTROL : 19,
+MESSAGE_TYPE_INTERFACE_STATUS : 17,
+MESSAGE_TYPE_LED_QUERY : 209,
+MESSAGE_TYPE_LED_STATUS : 208,
+MESSAGE_TYPE_LOCK_QUERY : 4104,
+MESSAGE_TYPE_LOCK_STATUS : 4105,
+MESSAGE_TYPE_MANF_VERSIONS_QUERY : 193,
+MESSAGE_TYPE_MANF_VERSIONS_STATUS : 192,
+MESSAGE_TYPE_MASTER_QUERY : 35,
+MESSAGE_TYPE_MASTER_STATUS : 34,
+MESSAGE_TYPE_METERING_CONTROL : 225,
+MESSAGE_TYPE_METERING_STATUS : 224,
+MESSAGE_TYPE_NAME_ID_CONTROL : 39,
+MESSAGE_TYPE_NAME_ID_STATUS : 38,
+MESSAGE_TYPE_PROPERTY_CHANGE : 262,
+MESSAGE_TYPE_ROUTING_DEVICE_CHANGE : 288,
+MESSAGE_TYPE_ROUTING_READY : 256,
+MESSAGE_TYPE_RX_CHANNEL_CHANGE : 258,
+MESSAGE_TYPE_RX_CHANNEL_RX_ERROR_QUERY : 273,
+MESSAGE_TYPE_RX_CHANNEL_RX_ERROR_STATUS : 272,
+MESSAGE_TYPE_RX_ERROR_THRESHOLD_CONTROL : 275,
+MESSAGE_TYPE_RX_ERROR_THRESHOLD_STATUS : 274,
+MESSAGE_TYPE_RX_FLOW_CHANGE : 261,
+MESSAGE_TYPE_SAMPLE_RATE_CONTROL : 129,
+MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL : 133,
+MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS : 132,
+MESSAGE_TYPE_SAMPLE_RATE_STATUS : 128,
+MESSAGE_TYPE_SERIAL_PORT_CONTROL : 241,
+MESSAGE_TYPE_SERIAL_PORT_STATUS : 240,
+MESSAGE_TYPE_SWITCH_VLAN_CONTROL : 21,
+MESSAGE_TYPE_SWITCH_VLAN_STATUS : 20,
+MESSAGE_TYPE_SYS_RESET : 144,
+MESSAGE_TYPE_TOPOLOGY_CHANGE : 16,
+MESSAGE_TYPE_TX_CHANNEL_CHANGE : 257,
+MESSAGE_TYPE_TX_FLOW_CHANGE : 260,
+MESSAGE_TYPE_TX_LABEL_CHANGE : 259,
+MESSAGE_TYPE_UNICAST_CLOCKING_CONTROL : 37,
+MESSAGE_TYPE_UNICAST_CLOCKING_STATUS : 36,
+MESSAGE_TYPE_UPGRADE_CONTROL : 113,
+MESSAGE_TYPE_UPGRADE_STATUS : 112,
+MESSAGE_TYPE_VERSIONS_QUERY : 97,
+MESSAGE_TYPE_VERSIONS_STATUS : 96,
+
 };
 
 
@@ -69,9 +157,10 @@ const parseChannelCount = (reply) => {
 };
 
 
-const parseChannelNames = (reply, ioString) => {
+const parseChannelNames = (reply, channelType) => {
 	const channelInfo = {};
-	channelInfo[ioString] = {};
+	channelInfo[channelType] = {};
+	let firstChannelGroup;
 	
 	const namesString = reply.toString('ascii');
 	const channelCount = reply[10];
@@ -80,45 +169,60 @@ const parseChannelNames = (reply, ioString) => {
 
 	const sourceChannelOffset = 6;
 	const sourceDeviceOffset = 8;
-	let  infoBufferSize, nameNumberOffset, nameIndexsOffset;
+	const channelStatusOffset =  12;
+	const subscriptionStatusOffset = 14;
+	let  infoBufferSize, nameNumberOffset, nameIndexOffset, sampleRateOffset;
 
 // set indices for rx or tx
-	if (ioString == 'tx') {
+	if (channelType == 'tx') {
 		infoBufferSize = 6;
 		nameNumberOffset = 2;
 		nameIndexOffset = 4;
-	} else if (ioString == 'rx') {
+	} else if (channelType == 'txInfo') {
+	  infoBufferSize = 8;
+	  nameNumberOffset = 0;
+	  sampleRateOffset = 4;
+	  nameIndexOffset = 6;
+	}
+	else if (channelType == 'rx') {
 		infoBufferSize = 20;
 		nameNumberOffset = 0;
+		sampleRateOffset = 4;
 		nameIndexOffset = 10;
-	}
+	} 
 	
 	// for each channel
-	for (let i = 0; i < namesCount; i++) {
+	for (let i = 0; i < Math.min(namesCount,32) ; i++) {
 		// get info chunk of channel
 		const infoIndex = startIndex + (infoBufferSize * i);
 		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
 		// get channel number and byte index of name
 		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset);
 		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset);
-		// get name
-		const name = parseString(namesString, nameIndex);
 		
 		// create return object if needed
-		if (channelInfo[ioString][nameNumber] == undefined) {
-			channelInfo[ioString][nameNumber]={};
+		if (channelInfo[channelType][nameNumber] == undefined) {
+			channelInfo[channelType][nameNumber]={};
 		}
-		channelInfo[ioString][nameNumber].name = name;
+		let returnChannel = channelInfo[channelType][nameNumber];
+		
+		// get name
+		returnChannel.name = parseString(namesString, nameIndex);
 		
 		// get routing
-		if (ioString == 'rx') {
+		if (channelType == 'rx') {
 			const sourceChannelIndex = bufferToInt(infoBuffer, sourceChannelOffset);
 			const sourceDeviceIndex = bufferToInt(infoBuffer, sourceDeviceOffset);
-			const sourceChannel = parseString(namesString, sourceChannelIndex);
-			const sourceDevice = parseString(namesString, sourceDeviceIndex);
-		
-			channelInfo[ioString][nameNumber].sourceDevice = sourceDevice;
-			channelInfo[ioString][nameNumber].sourceChannel = sourceChannel;
+			const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+			returnChannel.sourceChannel = parseString(namesString, sourceChannelIndex);
+			returnChannel.sourceDevice = parseString(namesString, sourceDeviceIndex);
+			returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset);
+		  returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
+		  returnChannel.sampleRate = infoBuffer.readUInt32BE(sampleRateIndex);
+		}
+		else if (channelType == 'txInfo') {
+		  const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+		  returnChannel.sampleRate = infoBuffer.readUInt32BE(sampleRateIndex);
 		}
 	}
     return channelInfo;
@@ -223,25 +327,25 @@ module.exports = {
 	
 	
 	
-	// create or update channels name in dropdown choices for either rx or tx (ioString)
-	updateChannelChoices: function(deviceIp, ioString) {
+	// create or update channels name in dropdown choices for either rx or tx (channelType)
+	updateChannelChoices: function(deviceIp, channelType) {
 
-		if (!(this.devicesData[deviceIp] && this.devicesData[deviceIp][ioString])) {
+		if (!(this.devicesData[deviceIp] && this.devicesData[deviceIp][channelType])) {
 			this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIp);
 			return;
 		}
   
 		let deviceName = this.devicesData[deviceIp].name;
-		let ioObject = this.devicesData[deviceIp][ioString];
+		let ioObject = this.devicesData[deviceIp][channelType];
   
 		let channelChoice = [{id: 0, label:'None'}];
-		if (ioString == 'tx') {
+		if (channelType == 'tx') {
 			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name;
 				channelChoice[i] = {id: channelName ?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')};
 			}
-		} else if (ioString == 'rx') {
+		} else if (channelType == 'rx') {
 			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name ?? '';
@@ -249,7 +353,7 @@ module.exports = {
 			}
 		}
 		
-		this[ioString+'ChannelsChoices'][deviceName] = channelChoice;
+		this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
 		
 		this.initActions();
 		this.initVariables();
@@ -266,8 +370,8 @@ module.exports = {
 		this.log('warn', `${deviceName} is offline. Destroying references`);
 		
 		// delete channels name choices
-		for (const ioString of ['rx', 'tx']) {
-			delete this[ioString+'ChannelsChoices'][deviceName];
+		for (const channelType of ['rx', 'tx']) {
+			delete this[channelType+'ChannelsChoices'][deviceName];
 		} 
 
 		// delete device choice
@@ -328,7 +432,8 @@ module.exports = {
                 switch (bufferToInt(commandId)) {
 					
 					// channelCount	
-				    case 4096:
+				   // case 4096:
+				    case 0x1000:
                         deviceData[deviceIp] = parseChannelCount(reply);
 						
 						// if channel count has changed, retrieve channel names
@@ -336,24 +441,33 @@ module.exports = {
 							this.getChannelNames(deviceIp, 'rx');
 						}
 						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
-							this.getChannelNames(deviceIp, 'tx');
+							this.getChannelNames(deviceIp, 'txInfo');
 						}
                         break;
 						
+						// txChannelInfo
+						        case 0x2000 :
+						           deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
+						        this.getChannelNames(deviceIp, 'tx');
+						        break;
+						        
 					// txChannelNames
-                    case 8208:
+                    //case 8208:
+                    case 0x2010:
                         deviceData[deviceIp] = parseChannelNames(reply,'tx');
 						updateFlags.push('tx');
                         break;
 						
 					// rxChannelNames
-					case 12288 : 
+					//case 12288 : 
+					case 0x3000:
 						deviceData[deviceIp] = parseChannelNames(reply,'rx');
 						updateFlags.push('rx');
 						break;
 						
 					// deviceName
-					case 4098 : 
+					//case 4098 : 
+					case 0x1002:
 						deviceData[deviceIp] = parseDeviceName(reply);
 						
 						// create or update devices choices for actions if necessary
@@ -373,8 +487,11 @@ module.exports = {
 						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
 							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
 						}
+						
+						
+						
 						break;
-                }
+          }
 				
 				
 				if (this.debug) {
@@ -544,18 +661,36 @@ module.exports = {
 
 
 
-    getChannelNames(ipaddress, io = '') {
-		let commandBuffer;
-		if (io != 'rx') {
-			commandBuffer = this.makeCommand("txChannelNames", Buffer.from("0001000100", "hex"));
-			this.sendCommand(commandBuffer, ipaddress);
+    getChannelNames(ipaddress, ...channelTypes) {
+      if (channelTypes==undefined){
+        channelTypes=['rx','txInfo'];
+      }
+		  let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
+		  for (let channelType of channelTypes) {
+		if (channelType == 'tx') {
+      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
+		    commandArguments.writeUInt8(page*2, 6);
+			  commandBuffer = this.makeCommand("txChannelNames", commandArguments);
+			  this.sendCommand(commandBuffer, ipaddress);
+      }
 		}
-		if (io != 'tx') {
-			commandBuffer = this.makeCommand("rxChannelNames", Buffer.from("0001000100", "hex"));
-			this.sendCommand(commandBuffer, ipaddress);
+		if (channelType == 'rx') {
+		  for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/16; page++ ) {
+		    commandArguments.writeUInt8(page*2, 6);
+			  commandBuffer = this.makeCommand("rxChannelNames", commandArguments);
+			  this.sendCommand(commandBuffer, ipaddress);
+		  }
 		}
+		if (channelType == 'txInfo') {
+      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
+		    commandArguments.writeUInt8(page*2, 6);
+			  commandBuffer = this.makeCommand("txChannelInfo", commandArguments);
+			  this.sendCommand(commandBuffer, ipaddress);
+      }
+		}
+		  }
 
-        return this.devicesData[ipaddress]?.channelNames;
+        return
     },
 	
 
@@ -575,15 +710,18 @@ module.exports = {
 
 	
 	
-	dante_discovery: function(response) {
+	dante_discovery: function(response, rinfo) {
 		response?.answers?.forEach((answer) => {
 			if (answer.name?.match(/_netaudio-arc._udp/)) {
+			  this.getDeviceName(rinfo.address);
+			  /*
 				let name = answer.data?.toString().slice(0, -25);
 				response.additionals.forEach((additional) => {
 					if (additional.type == 'A') {
 						this.getDeviceName(additional.data);
 					}
 				});
+				*/
 			}
 		});
 	},
@@ -625,7 +763,7 @@ module.exports = {
 		});
 		
 		for (ip in this.devicesData) {
-			this.getChannelNames(ip);
+			this.getChannelNames(ip, 'rx', 'txInfo');
 		}
 		
 		self.checkVariables();
