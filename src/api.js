@@ -152,14 +152,14 @@ const parseString = (string, startIndex) => {
 //**
 
 const parseChannelCount = (reply) => {
-    const channelInfo = { tx: {count: reply[13]}, rx :{count:reply[15]} };
-    return channelInfo;
+    const deviceInfo = { tx: {count: reply[13]}, rx :{count:reply[15]} };
+    return deviceInfo;
 };
 
 
 const parseChannelNames = (reply, channelType) => {
-	const channelInfo = {};
-	channelInfo[channelType] = {};
+	const deviceInfo = {};
+	deviceInfo[channelType] = {};
 	let firstChannelGroup;
 	
 	const namesString = reply.toString('ascii');
@@ -201,10 +201,10 @@ const parseChannelNames = (reply, channelType) => {
 		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset);
 		
 		// create return object if needed
-		if (channelInfo[channelType][nameNumber] == undefined) {
-			channelInfo[channelType][nameNumber]={};
+		if (deviceInfo[channelType][nameNumber] == undefined) {
+			deviceInfo[channelType][nameNumber]={};
 		}
-		let returnChannel = channelInfo[channelType][nameNumber];
+		let returnChannel = deviceInfo[channelType][nameNumber];
 		
 		// get name
 		returnChannel.name = parseString(namesString, nameIndex);
@@ -223,9 +223,12 @@ const parseChannelNames = (reply, channelType) => {
 		else if (channelType == 'txInfo') {
 		  const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
 		  returnChannel.sampleRate = infoBuffer.readUInt32BE(sampleRateIndex);
+		  if (i == 0) {
+		    deviceInfo.sr = returnChannel.sampleRate;
+		  }
 		}
 	}
-    return channelInfo;
+    return deviceInfo;
 }
 
 

@@ -7,45 +7,53 @@ module.exports = {
 		variables.push({variableId: 'devices', name: 'Dante Devices'});
 		
 		for (const [ip, device] of Object.entries(self.devicesData)) {
-			variables.push({variableId: device.name + 'tx', name: device.name + ' OUT'});
-			variables.push({variableId: device.name + 'rx', name: device.name + ' IN'});
+			variables.push({variableId: device.name + 'tx', name: device.name + '_OUT'});
+			variables.push({variableId: device.name + 'rx', name: device.name + '_IN'});
+			variables.push({variableId: device.name + 'sr', name: device.name + '_SampleRate'});
 		}
 			
 		self.setVariableDefinitions(variables);
 	},
 
-	checkVariables: function () {
+	checkVariables: function (...variableTypes) {
 		let self = this;
+		const variableValues = {};
 		const devicesList = [];
 
 		const channelNames = {};
+		if(!variableTypes) {
+		  variableTypes = ['devices','rx', 'tx', 'sr']
+		}
 		
 		for (const [ip, device] of Object.entries(self.devicesData)) {
 			deviceName = device?.name;
 			if (deviceName) {
-				devicesList.push(deviceName);
-				channelNames[deviceName]={rx: [], tx: []};
-				
-				for (ioString of ['rx', 'tx']){
-					channelsChoices = this[ioString+'ChannelsChoices'][deviceName];
-					if (channelsChoices) {
-						for (let i = 1; i < channelsChoices.length; i++) {
-							channelNames[deviceName][ioString].push(channelsChoices[i]?.label);
-						}
-					}
-				}
-			}		
+				for (let variableType of variableTypes) {
+					switch (variableType) {
+						case 'device' :
+							if (!variableValues.devices) {
+								variableValues.devices = [];
+							}
+		          variableValues.devices.push(deviceName)
+		          break;
+		          
+		      	case 'rx':
+		      	case 'tx':
+		      		let channelArray = variableValues[deviceName + variableType] = [];
+		      		for (let i=0; i < device[variableType]?.count; i++) {
+		      			channelArray[i] = device[variableType][i+1]?.name;
+		      		}
+		      		break;
+		          
+		    	  case 'sr':
+		    	  	variableValues[deviceName + variableType] = device[variableType];
+		    	  	break;
+		      }
+		    }
+		  }
 		}
 
 		try {
-			const variableValues = {};
-			variableValues.devices = devicesList;
-
-			for (const [deviceName, channels] of Object.entries(channelNames)) {
-				for (const ioString of ['rx', 'tx']) {
-					variableValues[deviceName + ioString] = channels[ioString];
-				}
-			}
 			self.setVariableValues(variableValues);
 		}
 		catch(error) {
