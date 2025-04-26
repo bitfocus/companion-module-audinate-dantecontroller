@@ -20,6 +20,8 @@ const DANTE_COMMANDS = {
 	setRxChannelName : Buffer.from([0x30, 0x01]),
 	setTxChannelName : Buffer.from([0x20, 0x13]),
 	setDeviceName : Buffer.from([0x10, 0x01]),
+	getLatency : Buffer.from("1100", "hex"),
+	setLatency : Buffer.from("1101", "hex"),
 	
 REQUEST_DANTE_MODEL : Buffer.from([97]),
 REQUEST_MAKE_MODEL : Buffer.from([193]),
@@ -157,8 +159,9 @@ const parseChannelCount = (reply) => {
 };
 
 
-const parseChannelNames = (reply, channelType) => {
+const parseChannelNames = (reply, infoType) => {
 	const deviceInfo = {};
+	let channelType = infoType.slice(0,2);
 	deviceInfo[channelType] = {};
 	let firstChannelGroup;
 	
@@ -174,17 +177,17 @@ const parseChannelNames = (reply, channelType) => {
 	let  infoBufferSize, nameNumberOffset, nameIndexOffset, sampleRateOffset;
 
 // set indices for rx or tx
-	if (channelType == 'tx') {
+	if (infoType == 'tx') {
 		infoBufferSize = 6;
 		nameNumberOffset = 2;
 		nameIndexOffset = 4;
-	} else if (channelType == 'txInfo') {
+	} else if (infoType == 'txInfo') {
 	  infoBufferSize = 8;
 	  nameNumberOffset = 0;
 	  sampleRateOffset = 4;
 	  nameIndexOffset = 6;
 	}
-	else if (channelType == 'rx') {
+	else if (infoType == 'rx') {
 		infoBufferSize = 20;
 		nameNumberOffset = 0;
 		sampleRateOffset = 4;
@@ -210,7 +213,7 @@ const parseChannelNames = (reply, channelType) => {
 		returnChannel.name = parseString(namesString, nameIndex);
 		
 		// get routing
-		if (channelType == 'rx') {
+		if (infoType == 'rx') {
 			const sourceChannelIndex = bufferToInt(infoBuffer, sourceChannelOffset);
 			const sourceDeviceIndex = bufferToInt(infoBuffer, sourceDeviceOffset);
 			const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
@@ -218,11 +221,11 @@ const parseChannelNames = (reply, channelType) => {
 			returnChannel.sourceDevice = parseString(namesString, sourceDeviceIndex);
 			returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset);
 		  returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
-		  returnChannel.sampleRate = infoBuffer.readUInt32BE(sampleRateIndex);
+		  returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
 		}
-		else if (channelType == 'txInfo') {
+		else if (infoType == 'txInfo') {
 		  const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
-		  returnChannel.sampleRate = infoBuffer.readUInt32BE(sampleRateIndex);
+		  //returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
 		  if (i == 0) {
 		    deviceInfo.sr = returnChannel.sampleRate;
 		  }
@@ -235,6 +238,11 @@ const parseChannelNames = (reply, channelType) => {
 
 const parseDeviceName = (reply) => {
 	return {name: parseString(reply.toString('ascii'), 10)};
+}
+
+const parseLatency = (reply) => {
+	//latency in ns is coded on bytes [24-28]
+	return {latency: readUInt32BE(reply, 24)/1000000};
 }
 
 
@@ -346,13 +354,13 @@ module.exports = {
 			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name;
-				channelChoice[i] = {id: channelName ?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')};
+				channelChoice[i] = {id: channelName, label : channelName}; //?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')};
 			}
 		} else if (channelType == 'rx') {
 			for (let i = 1; i<= ioObject.count; i++) {
 				let indexString = i.toString().padStart(2,'0');
 				let channelName = ioObject[i]?.name ?? '';
-				channelChoice.push({id: i, label: indexString + (channelName ? ' : ' + channelName : '')});
+				channelChoice.push({id: i, label: channelName}); //indexString + (channelName ? ' : ' + channelName : '')});
 			}
 		}
 		
@@ -360,7 +368,7 @@ module.exports = {
 		
 		this.initActions();
 		this.initVariables();
-		this.checkVariables();
+		this.checkVariables('rx','tx');
 		this.initFeedbacks();
 		this.checkFeedbacks();
 	},
@@ -432,7 +440,7 @@ module.exports = {
                 
 				deviceData[deviceIp] = {};
 				
-                switch (bufferToInt(commandId)) {
+        switch (bufferToInt(commandId)) {
 					
 					// channelCount	
 				   // case 4096:
@@ -448,17 +456,18 @@ module.exports = {
 						}
                         break;
 						
-						// txChannelInfo
-						        case 0x2000 :
-						           deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
-						        this.getChannelNames(deviceIp, 'tx');
-						        break;
+					// txChannelInfo
+					case 0x2000 :
+					    deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
+						updateFlags.push('tx');
+					//    this.getChannelNames(deviceIp, 'tx');
+					    break;
 						        
 					// txChannelNames
                     //case 8208:
                     case 0x2010:
-                        deviceData[deviceIp] = parseChannelNames(reply,'tx');
-						updateFlags.push('tx');
+                    //    deviceData[deviceIp] = parseChannelNames(reply,'tx');
+					//	updateFlags.push('tx');
                         break;
 						
 					// rxChannelNames
@@ -489,12 +498,17 @@ module.exports = {
 							this.getChannelCount(deviceIp);
 						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
 							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
-						}
-						
-						
-						
+							}
+							break;
+							
+					// latency
+					case 0x1101:
+					case 0x1100:
+						deviceData[deviceIp] = parseLatency(reply);
 						break;
-          }
+							
+							
+        }
 				
 				
 				if (this.debug) {
@@ -669,29 +683,34 @@ module.exports = {
         channelTypes=['rx','txInfo'];
       }
 		  let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
-		  for (let channelType of channelTypes) {
-		if (channelType == 'tx') {
-      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
-		    commandArguments.writeUInt8(page*2, 6);
-			  commandBuffer = this.makeCommand("txChannelNames", commandArguments);
-			  this.sendCommand(commandBuffer, ipaddress);
-      }
+		  for (let channelType of channelTypes) { 
+  
+		  switch (channelType) {
+			case 'tx' :
+				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
+					commandArguments.writeUInt8(page*32+1, 3);
+					commandBuffer = this.makeCommand("txChannelNames", commandArguments);
+					this.sendCommand(commandBuffer, ipaddress);
+				}
+				break;
+		
+			case 'rx' :
+				for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) { 
+					commandArguments.writeUInt8(page*16+1, 3);
+					commandBuffer = this.makeCommand("rxChannelNames", commandArguments);
+					this.sendCommand(commandBuffer, ipaddress);
+				}
+				break;
+		
+			case 'txInfo' :
+				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
+					commandArguments.writeUInt8(page*32+1, 3);
+					commandBuffer = this.makeCommand("txChannelInfo", commandArguments);
+					this.sendCommand(commandBuffer, ipaddress);
+				}
+				break;
+			}
 		}
-		if (channelType == 'rx') {
-		  for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/16; page++ ) {
-		    commandArguments.writeUInt8(page*2, 6);
-			  commandBuffer = this.makeCommand("rxChannelNames", commandArguments);
-			  this.sendCommand(commandBuffer, ipaddress);
-		  }
-		}
-		if (channelType == 'txInfo') {
-      for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) {
-		    commandArguments.writeUInt8(page*2, 6);
-			  commandBuffer = this.makeCommand("txChannelInfo", commandArguments);
-			  this.sendCommand(commandBuffer, ipaddress);
-      }
-		}
-		  }
 
         return
     },
@@ -701,6 +720,20 @@ module.exports = {
 
 	getDeviceName(ipaddress) {
 		const commandBuffer = this.makeCommand("deviceName");
+		this.sendCommand(commandBuffer, ipaddress);
+	},
+	
+	getLatency(ipaddress) {
+		const commandBuffer = this.makeCommand('getLatency')
+		this.sendCommand(commandBuffer, ipaddress);
+	},
+	
+	
+	setLatency(ipaddress, latency) {
+		let commandArguments = Buffer.from("0000050382050020021100108301002482198301830283060000000000000000", "hex");
+		commandArguments.writeUInt32BE(latency*100000,32);
+		commandArguments.writeUInt32BE(latency*100000,36);
+		const commandBuffer = this.makeCommand('setLatency', commandArguments)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 
@@ -766,10 +799,10 @@ module.exports = {
 		});
 		
 		for (ip in this.devicesData) {
-			this.getChannelNames(ip, 'rx', 'txInfo');
+			this.getChannelNames(ip, 'txInfo', 'rx');
 		}
 		
-		self.checkVariables();
+		//self.checkVariables();
 	},
 	
 	updateData: function (bytes) {

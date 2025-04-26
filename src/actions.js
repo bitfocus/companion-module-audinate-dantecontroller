@@ -149,6 +149,32 @@ module.exports = {
 		}
 		
 		
+		
+		actions.setLatency = {
+			name: 'Set Latency',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				},
+				{
+					type: 'textinput',
+					//type: 'dropdown',
+					label: 'Latency (in ms)',
+					id: 'latency',
+					default: '1',
+					useVariables: true
+				}
+			],
+			callback: async function (action) {
+				let opt = action.options;
+ 				self.setLatency(opt.destinationDevice, opt.latency);
+			}
+		}
+		
+		
 		self.setActionDefinitions(actions);
 	}
 }

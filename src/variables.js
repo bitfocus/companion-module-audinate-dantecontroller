@@ -10,6 +10,7 @@ module.exports = {
 			variables.push({variableId: device.name + 'tx', name: device.name + '_OUT'});
 			variables.push({variableId: device.name + 'rx', name: device.name + '_IN'});
 			variables.push({variableId: device.name + 'sr', name: device.name + '_SampleRate'});
+			variables.push({variableId: device.name + 'latency', name: device.name + '_Latency'});
 		}
 			
 		self.setVariableDefinitions(variables);
@@ -22,7 +23,7 @@ module.exports = {
 
 		const channelNames = {};
 		if(!variableTypes) {
-		  variableTypes = ['devices','rx', 'tx', 'sr']
+		  variableTypes = ['devices','rx', 'tx', 'sr', 'latency'];
 		}
 		
 		for (const [ip, device] of Object.entries(self.devicesData)) {
@@ -34,7 +35,7 @@ module.exports = {
 							if (!variableValues.devices) {
 								variableValues.devices = [];
 							}
-		          variableValues.devices.push(deviceName)
+		          variableValues.devices.push(deviceName);
 		          break;
 		          
 		      	case 'rx':
@@ -46,6 +47,7 @@ module.exports = {
 		      		break;
 		          
 		    	  case 'sr':
+		    	  case 'latency':
 		    	  	variableValues[deviceName + variableType] = device[variableType];
 		    	  	break;
 		      }
