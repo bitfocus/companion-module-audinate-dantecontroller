@@ -133,16 +133,9 @@ const bufferToInt = (buffer, offset = 0) => {
 };
 
 
-const parseString = (string, startIndex) => {
-  let text ='';
-  for (let i=startIndex; i< string.length; i++) {
-    if (string[i] === '\x00') {
-      break;
-    } else {
-      text += string[i];
-    }
-  }
-  return text;
+const parseString = (buffer, startIndex) => {
+  const end = buffer.indexOf(0x00, startIndex);
+  return buffer.toString('utf8', startIndex, end);
 };
 
 
@@ -165,7 +158,6 @@ const parseChannelNames = (reply, infoType) => {
 	deviceInfo[channelType] = {};
 	let firstChannelGroup;
 	
-	const namesString = reply.toString('ascii');
 	const channelCount = reply[10];
 	const recCount = reply[11];
 	const startIndex = 12;
@@ -210,7 +202,7 @@ const parseChannelNames = (reply, infoType) => {
 		let returnChannel = deviceInfo[channelType][nameNumber];
 		
 		// get name
-		returnChannel.name = parseString(namesString, nameIndex);
+		returnChannel.name = parseString(reply, nameIndex);
 		
 		// get routing
 		if (infoType == 'rx') {
@@ -223,8 +215,8 @@ const parseChannelNames = (reply, infoType) => {
 				deviceInfo.rx.count = i;
 				break;
 			}
-			returnChannel.sourceChannel = parseString(namesString, sourceChannelIndex);
-			returnChannel.sourceDevice = parseString(namesString, sourceDeviceIndex);
+			returnChannel.sourceChannel = parseString(reply, sourceChannelIndex);
+			returnChannel.sourceDevice = parseString(reply, sourceDeviceIndex);
 			returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset);
 			returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
 			returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex); 
@@ -246,7 +238,7 @@ const parseChannelNames = (reply, infoType) => {
 
 
 const parseDeviceName = (reply) => {
-	return {name: parseString(reply.toString('ascii'), 10)};
+	return {name: parseString(reply, 10)};
 }
 
 const parseLatency = (reply) => {
