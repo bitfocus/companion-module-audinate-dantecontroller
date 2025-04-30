@@ -30,7 +30,7 @@ module.exports = {
 				if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
 					let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt['destinationChannel_'+opt.destinationDevice]];
 					return (destinationChannel?.sourceDevice == self.devicesData[opt.sourceDevice]?.name) &&
-						(destinationChannel?.sourceChannel == opt['sourceChannel_'+opt.sourceDevice])
+						(destinationChannel?.sourceChannel == opt['sourceChannel_'+opt.sourceDevice]) && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
 				}	
 			},
 		}

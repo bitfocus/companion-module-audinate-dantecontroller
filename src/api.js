@@ -167,7 +167,7 @@ const parseChannelNames = (reply, infoType) => {
 	
 	const namesString = reply.toString('ascii');
 	const channelCount = reply[10];
-	const namesCount = reply[11];
+	const recCount = reply[11];
 	const startIndex = 12;
 
 	const sourceChannelOffset = 6;
@@ -195,7 +195,7 @@ const parseChannelNames = (reply, infoType) => {
 	} 
 	
 	// for each channel
-	for (let i = 0; i < Math.min(namesCount,32) ; i++) {
+	for (let i = 0; i < Math.min(recCount,32) ; i++) {
 		// get info chunk of channel
 		const infoIndex = startIndex + (infoBufferSize * i);
 		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
@@ -225,10 +225,7 @@ const parseChannelNames = (reply, infoType) => {
 		}
 		else if (infoType == 'txInfo') {
 		  const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
-		  //returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
-		  if (i == 0) {
-		    deviceInfo.sr = returnChannel.sampleRate;
-		  }
+		  returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
 		}
 	}
     return deviceInfo;
@@ -241,8 +238,32 @@ const parseDeviceName = (reply) => {
 }
 
 const parseLatency = (reply) => {
-	//latency in ns is coded on bytes [24-28]
-	return {latency: readUInt32BE(reply, 24)/1000000};
+	const deviceInfo = {};
+	const recCount = reply[11];
+	const startIndex = 12;
+	const infoBufferSize = 4;
+	
+	for (let i = 0; i < recCount ; i++) {
+		// get info chunk of channel
+		const infoIndex = startIndex + (infoBufferSize * i);
+		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
+		
+		const infoCode = infoBuffer.readUInt16BE(0);
+		const valueIndex = infoBuffer.readUInt16BE(2);
+		
+		switch (infoCode) {
+			case 0x8020:
+			// Sample rate
+				deviceInfo.sr = reply.readUInt32BE(valueIndex);
+				break;
+				
+			case 0x8204: 
+			// Latency 
+				deviceInfo.latency = reply.readUInt32BE(valueIndex)/1000000;
+				break;
+		}
+	}
+	return deviceInfo;
 }
 
 
@@ -308,10 +329,6 @@ module.exports = {
 		});
 	
 		this.initActions();
-		this.initVariables();
-		this.checkVariables();
-		this.initFeedbacks();
-		this.checkFeedbacks();
 	},
 	
 	// update device name in dropdown choice
@@ -330,10 +347,6 @@ module.exports = {
 		}
 		
 		this.initActions();
-		this.initVariables();
-		this.checkVariables();
-		this.initFeedbacks();
-		this.checkFeedbacks();
 	},
 	
 	
@@ -367,10 +380,6 @@ module.exports = {
 		this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
 		
 		this.initActions();
-		this.initVariables();
-		this.checkVariables('rx','tx');
-		this.initFeedbacks();
-		this.checkFeedbacks();
 	},
 
 
@@ -397,10 +406,7 @@ module.exports = {
 		delete this.devicesData[deviceIp];
 
 		this.initActions();
-		this.initVariables();
-		this.checkVariables();
-		this.initFeedbacks();
-		this.checkFeedbacks();
+		this.updateData();
 	},
 	
 	
@@ -421,7 +427,7 @@ module.exports = {
 // function handling incoming dante messages
     parseReply: function(reply, rinfo) {
 		const self = this;
-        const deviceIp= rinfo.address;
+        const deviceIp = rinfo.address;
         const replySize = rinfo.size;
         let deviceData = {};
     	let updateFlags = [];
@@ -440,45 +446,9 @@ module.exports = {
                 
 				deviceData[deviceIp] = {};
 				
-        switch (bufferToInt(commandId)) {
+				switch (bufferToInt(commandId)) {
 					
-					// channelCount	
-				   // case 4096:
-				    case 0x1000:
-                        deviceData[deviceIp] = parseChannelCount(reply);
-						
-						// if channel count has changed, retrieve channel names
-						if (deviceData[deviceIp].rx.count != this.devicesData[deviceIp]?.rx?.count) {
-							this.getChannelNames(deviceIp, 'rx');
-						}
-						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
-							this.getChannelNames(deviceIp, 'txInfo');
-						}
-                        break;
-						
-					// txChannelInfo
-					case 0x2000 :
-					    deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
-						updateFlags.push('tx');
-					//    this.getChannelNames(deviceIp, 'tx');
-					    break;
-						        
-					// txChannelNames
-                    //case 8208:
-                    case 0x2010:
-                    //    deviceData[deviceIp] = parseChannelNames(reply,'tx');
-					//	updateFlags.push('tx');
-                        break;
-						
-					// rxChannelNames
-					//case 12288 : 
-					case 0x3000:
-						deviceData[deviceIp] = parseChannelNames(reply,'rx');
-						updateFlags.push('rx');
-						break;
-						
 					// deviceName
-					//case 4098 : 
 					case 0x1002:
 						deviceData[deviceIp] = parseDeviceName(reply);
 						
@@ -494,32 +464,89 @@ module.exports = {
 								timeoutArray[0] = setTimeout(() => {this.destroyDevice(deviceIp)}, this.timeout);
 							}							
 
-						// retrieve channel count if new device
+						// retrieve channel count
 							this.getChannelCount(deviceIp);
+							this.getLatency(deviceIp);
+							
 						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
 							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
-							}
-							break;
-							
-					// latency
-					case 0x1101:
-					case 0x1100:
-						deviceData[deviceIp] = parseLatency(reply);
+						}
+						
+						updateFlags.push('name');
+						
+						
 						break;
 							
 							
-        }
-				
+					// channelCount	
+					case 0x1000:
+						deviceData[deviceIp] = parseChannelCount(reply);
+						
+						// if channel count has changed, retrieve channel names
+						if (deviceData[deviceIp].rx.count != this.devicesData[deviceIp]?.rx?.count) {
+							this.getChannelNames(deviceIp, 'rx'); 
+						}
+						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
+							this.getChannelNames(deviceIp, 'txInfo');
+						}
+						break;
+						
+					// txChannelInfo
+					case 0x2000 :
+						deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
+						updateFlags.push('tx');
+						break;
+								
+					// txChannelNames
+					case 0x2010:
+					    deviceData[deviceIp] = parseChannelNames(reply,'tx');
+						updateFlags.push('tx');
+						break;
+						
+					// rxChannelNames
+					case 0x3000:
+						deviceData[deviceIp] = parseChannelNames(reply,'rx');
+						updateFlags.push('rx');
+						break;
+						
+					// latency
+					case 0x1100:
+						deviceData[deviceIp] = parseLatency(reply);
+						updateFlags.push('info');
+						break;
+							
+									
+				}
+							
 				
 				if (this.debug) {
-                    // Log parsed device information when in debug mode
-				    console.log('DEVICE DATA : ', deviceData);
-                }
+					// Log parsed device information when in debug mode
+					console.log('DEVICE DATA : ', deviceData);
+				}
+				
 				this.devicesData = merge(this.devicesData, deviceData);
 				
-				// update Channels choices for actions if necessary
+				// update Channels choices for actions, feedbacks & variables
+				
 				for (const flag of updateFlags) {
-					this.updateChannelChoices(deviceIp, flag);
+					switch (flag) {
+						case 'name' : 
+							this.updateData();
+						case 'info':
+							this.checkVariables(deviceIp, 'sr', 'latency');
+							break;
+						case 'rx':
+							this.checkVariables(deviceIp, 'rx', 'rx_names');
+							this.updateChannelChoices(deviceIp, flag);
+							this.checkFeedbacks();
+							break;
+						case 'tx':
+							this.checkVariables(deviceIp, 'tx', 'tx_names');
+							this.updateChannelChoices(deviceIp, flag);
+							this.checkFeedbacks();
+							break;
+					}
+							
 				}
             }
         }
@@ -750,14 +777,6 @@ module.exports = {
 		response?.answers?.forEach((answer) => {
 			if (answer.name?.match(/_netaudio-arc._udp/)) {
 			  this.getDeviceName(rinfo.address);
-			  /*
-				let name = answer.data?.toString().slice(0, -25);
-				response.additionals.forEach((additional) => {
-					if (additional.type == 'A') {
-						this.getDeviceName(additional.data);
-					}
-				});
-				*/
 			}
 		});
 	},
@@ -800,17 +819,19 @@ module.exports = {
 		
 		for (ip in this.devicesData) {
 			this.getChannelNames(ip, 'txInfo', 'rx');
+			this.getLatency(ip);
 		}
 		
-		//self.checkVariables();
 	},
 	
 	updateData: function (bytes) {
 		let self = this;
 	
 		//do more stuff
-	
-		self.checkFeedbacks();
-		self.checkVariables();
+		this.initActions();
+		this.initVariables();
+		this.checkVariables();
+		this.initFeedbacks();
+		this.checkFeedbacks();
 	},
 }
