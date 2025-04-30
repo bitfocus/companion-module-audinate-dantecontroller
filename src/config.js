@@ -71,7 +71,7 @@ module.exports = {
 			
 			{
 				type: 'static-text',
-				id: 'intervalInfo',
+				id: 'offlineIntervalInfo',
 				width: 12,
 				label: 'Timeout Interval',
 				value: 'Please enter the time in milliseconds before a device is considered offline. Set to 0 to disable.',

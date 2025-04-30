@@ -20,8 +20,8 @@ const DANTE_COMMANDS = {
 	setRxChannelName : Buffer.from([0x30, 0x01]),
 	setTxChannelName : Buffer.from([0x20, 0x13]),
 	setDeviceName : Buffer.from([0x10, 0x01]),
-	getLatency : Buffer.from("1100", "hex"),
-	setLatency : Buffer.from("1101", "hex"),
+	deviceSettings : Buffer.from("1100", "hex"),
+	setDeviceSettings : Buffer.from("1101", "hex"),
 	
 REQUEST_DANTE_MODEL : Buffer.from([97]),
 REQUEST_MAKE_MODEL : Buffer.from([193]),
@@ -241,7 +241,7 @@ const parseDeviceName = (reply) => {
 	return {name: parseString(reply, 10)};
 }
 
-const parseLatency = (reply) => {
+const parseDeviceSettings = (reply) => {
 	const deviceInfo = {};
 	const recCount = reply[11];
 	const startIndex = 12;
@@ -468,9 +468,9 @@ module.exports = {
 								timeoutArray[0] = setTimeout(() => {this.destroyDevice(deviceIp)}, this.timeout);
 							}							
 
-						// retrieve channel count
+						// retrieve channel count and settings
 							this.getChannelCount(deviceIp);
-							this.getLatency(deviceIp);
+							this.getSettings(deviceIp);
 							
 						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
 							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
@@ -513,9 +513,9 @@ module.exports = {
 						updateFlags.push('rx');
 						break;
 						
-					// latency
+					// device settings 
 					case 0x1100:
-						deviceData[deviceIp] = parseLatency(reply);
+						deviceData[deviceIp] = parseDeviceSettings(reply);
 						updateFlags.push('info');
 						break;
 							
@@ -754,8 +754,8 @@ module.exports = {
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
-	getLatency(ipaddress) {
-		const commandBuffer = this.makeCommand('getLatency')
+	getSettings(ipaddress) {
+		const commandBuffer = this.makeCommand('deviceSettings')
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
@@ -823,7 +823,7 @@ module.exports = {
 		
 		for (ip in this.devicesData) {
 			this.getChannelNames(ip, 'txInfo', 'rx');
-			this.getLatency(ip);
+			this.getSettings();
 		}
 		
 	},
