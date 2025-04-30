@@ -217,14 +217,26 @@ const parseChannelNames = (reply, infoType) => {
 			const sourceChannelIndex = bufferToInt(infoBuffer, sourceChannelOffset);
 			const sourceDeviceIndex = bufferToInt(infoBuffer, sourceDeviceOffset);
 			const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+			if (i == 0) {
+				firstChannelGroup = sampleRateIndex;
+			} else if (sampleRateIndex != firstChannelGroup) {
+				deviceInfo.rx.count = i;
+				break;
+			}
 			returnChannel.sourceChannel = parseString(namesString, sourceChannelIndex);
 			returnChannel.sourceDevice = parseString(namesString, sourceDeviceIndex);
 			returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset);
-		  returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
-		  returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
+			returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
+			returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex); 
 		}
 		else if (infoType == 'txInfo') {
 		  const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+		  if (i == 0) {
+				firstChannelGroup = sampleRateIndex;
+			} else if (sampleRateIndex != firstChannelGroup) {
+				deviceInfo.tx.count = i;
+				break;
+			}
 		  returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
 		}
 	}
