@@ -81,7 +81,7 @@ module.exports = {
 				id: 'timeoutInterval',
 				label: 'Timeout Interval',
 				width: 3,
-				default: 2000
+				default: 3000
 			},
 			{
 				type: 'static-text',

@@ -7,13 +7,13 @@ module.exports = {
 		variables.push({variableId: 'devices', name: 'Dante Devices'});
 		
 		for (const [ip, device] of Object.entries(self.devicesData)) {
-			variables.push({variableId: device.name + '_ip', name: device.name + '_ip'});
-			variables.push({variableId: device.name + '_tx', name: device.name + '_tx'});
-			variables.push({variableId: device.name + '_tx_names', name: device.name + '_tx_names'});
-			variables.push({variableId: device.name + '_rx', name: device.name + '_rx'});
-			variables.push({variableId: device.name + '_rx_names', name: device.name + '_rx_names'});
-			variables.push({variableId: device.name + '_sr', name: device.name + '_SampleRate'});
-			variables.push({variableId: device.name + '_latency', name: device.name + '_Latency'});
+			variables.push({variableId: device.name + '_ip', name: 'Ip address of ' + device.name});
+			variables.push({variableId: device.name + '_tx', name: 'Number of outputs for ' + device.name});
+			variables.push({variableId: device.name + '_tx_names', name: 'Output names for ' + device.name});
+			variables.push({variableId: device.name + '_rx', name: 'Number of inputs for ' + device.name});
+			variables.push({variableId: device.name + '_rx_names', name: ' Input names for ' + device.name});
+			variables.push({variableId: device.name + '_sr', name: 'Sample rate of ' + device.name});
+			variables.push({variableId: device.name + '_latency', name: 'Latency of ' + device.name + ' (in ms)'});
 		}
 			
 		self.setVariableDefinitions(variables);

@@ -1,6 +1,7 @@
 const multidns = require('multicast-dns');
 const dgram = require("dgram");
 const merge = require("./utils/merge");
+const { networkInterfaces } = require('os');
 const { InstanceStatus, Regex } = require('@companion-module/base')
 
 const danteServiceTypes = ["_netaudio-cmc._udp", "_netaudio-dbc._udp", "_netaudio-arc._udp", "_netaudio-chan._udp"];
@@ -285,6 +286,20 @@ module.exports = {
 	initConnection: function () {
 		let self = this;
 		
+		// get available Ips
+		const nets = networkInterfaces();
+		let availableIps = [];
+		for (const name of Object.keys(nets)) {
+			for (const net of nets[name]) { 
+        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+        // 'IPv4' is in Node <= 17, from 18 it's a number 4 or 6
+				const familyV4Value = (typeof net.family === 'string') ? 'IPv4' : 4
+				if (net.family === familyV4Value && !net.internal) {
+					availableIps.push(net.address);
+				}
+			}
+		}
+		
 		
 		// create Dante communication udp socket
 		this.socket = dgram.createSocket({type: "udp4"}); // , reusePort: true});
@@ -294,10 +309,14 @@ module.exports = {
 			self.log('error', error.message);
 		});
 
-        this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Ok);}); 
+        this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Connecting);}); 
         
-		// bind socket to random port of configured ip address
-        this.socket.bind(0, self.config.ip);
+		// bind socket to random port of configured ip address if available
+		if (availableIps.includes(self.config.ip)) {
+			this.socket.bind(0, self.config.ip);
+		} else {
+			this.socket.bind();
+		}
 
 		this.debug = this.config.verbose;
 		this.timeout = this.config.timeoutInterval;
@@ -443,6 +462,12 @@ module.exports = {
 
         if (reply[0] === danteConstant[0] && reply[1] === sequenceId1[0]) {
             if (replySize === bufferToInt(reply.slice(2, 4))) {
+				// network is alive
+				this.updateStatus(InstanceStatus.Ok);
+				this.CONNECTED = true;
+				
+				// device is online
+				this.keepAlive(deviceIp);
                 const commandId = reply.slice(6, 8);
 				
 				// device is online

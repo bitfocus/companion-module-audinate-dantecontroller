@@ -24,7 +24,7 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 * Rx Channel count
 * Tx Channel count
 * Rx Channel names
-* Tx Channel Names
+* Tx Channel names
 * Sample Rate
 * Latency
 

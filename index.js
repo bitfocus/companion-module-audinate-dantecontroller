@@ -23,15 +23,11 @@ class danteInstance extends InstanceBase {
 			...api
 		})
 
-		this.DANTE = null;
 
 		this.INTERVAL = null; //used to poll the clock every second
 		this.CONNECTED = false; //used for friendly notifying of the user that we have not received data yet
 
-		this.DEVICEINFO = {
-			channelCount: '',
-			channelNames: ''
-		};
+		this.devicesData = {};
 	}
 
 	async destroy() {
@@ -40,6 +36,9 @@ class danteInstance extends InstanceBase {
 		if (self.INTERVAL) {
 			clearInterval(self.INTERVAL);
 			self.INTERVAL = null;
+		}
+		for (const ip of Object.keys(self.devicesData)) {
+			this.destroyDevice(ip);
 		}
 	}
 
@@ -57,14 +56,6 @@ class danteInstance extends InstanceBase {
 		this.updateStatus(InstanceStatus.Connecting);
 
 		this.initConnection();
-	
-		this.initActions();
-		this.initFeedbacks();
-		this.initVariables();
-		this.initPresets();
-	
-		this.checkFeedbacks();
-		this.checkVariables();
 	}
 }
 
