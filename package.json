@@ -12,7 +12,7 @@
 	},
 	"dependencies": {
 		"@companion-module/base": "~1.4.1",
-		"dante-control": "^0.2.2"
+		"multicast-dns": "^7.2.5"
 	},
 	"devDependencies": {
 		"@companion-module/tools": "^1.2.1"

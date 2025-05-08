@@ -9,8 +9,8 @@
 	"bugs": "https://github.com/bitfocus/companion-module-audinate-dantecontroller/issues",
 	"maintainers": [
 		{
-			"name": "Joseph Adams",
-			"email": "josephdadams@gmail.com"
+			"name": "Cédric Joder",
+			"email": "cedric.joder@gmail.com"
 		}
 	],
 	"legacyIds": [],
@@ -26,6 +26,7 @@
 	],
 	"keywords": [
 		"audio",
-		"routing"
+		"routing",
+		"Dante"
 	]
 }
