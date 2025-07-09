@@ -350,8 +350,6 @@ module.exports = {
 		this.devicesChoices.sort((deviceA, deviceB) => {
 				return deviceA.label.localeCompare(deviceB.label);
 		});
-	
-		this.initActions();
 	},
 	
 	// update device name in dropdown choice
@@ -361,15 +359,18 @@ module.exports = {
 		
 		for (let device of this.devicesChoices) {
 			if (device.id == deviceIp) {
-			device.label=deviceName;
-			this.devicesChoices.sort((deviceA, deviceB) => {
-				return deviceA.label.localeCompare(deviceB.label);
-			});
-			break;
+			  if (device.label != deviceName) {
+			    device.label=deviceName;
+			   this.devicesChoices.sort((deviceA, deviceB) => {
+				  return deviceA.label.localeCompare(deviceB.label);
+			    });
+          this.initActions();
+			  }
+			  break;
 			}
 		}
 		
-		this.initActions();
+		
 	},
 	
 	
@@ -400,9 +401,14 @@ module.exports = {
 			}
 		}
 		
-		this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
+		for (let i=1; i <= channelChoice.count; i++) {
+			if (channelChoice[i].label != this[channelType + 'ChannelsChoices'][deviceName][i].label) {
+				this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
 		
-		this.initActions();
+				this.initActions();
+				break;
+			}
+		}
 	},
 
 
