@@ -850,6 +850,13 @@ module.exports = {
 
 		self.log('debug', 'getting info');
 		
+		self.mdns?.query({
+			questions:[{
+				name:'_netaudio-arc._udp.local',
+				type:'PTR'
+			}]
+		});
+		
 		for (ip in this.devicesData) {
 			this.getChannelNames(ip, 'txInfo', 'rx');
 			this.getSettings();
