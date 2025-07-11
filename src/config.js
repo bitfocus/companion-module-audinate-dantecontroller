@@ -40,60 +40,42 @@ module.exports = {
 				label: 'Information',
 				value: 'This module controls Dante devices',
 			},
-			{
-				type: 'static-text',
-				id: 'ipInfo',
-				label: 'IP and network card',
-				value: 'Choose network card and IP address bound to Dante Controller.',
-			},
+
 			{
 				type: 'dropdown',
 				label: 'IP and network card',
 				id: 'ip',
+				tooltip: 'Choose network card and IP address bound to Dante Controller.',
 				width: 12,
 				choices: self.nicChoices
 			},
-			
-			{
-				type: 'static-text',
-				id: 'intervalInfo',
-				width: 12,
-				label: 'Update Interval',
-				value: 'Please enter the amount of time in milliseconds to request new information from the device. Set to 0 to disable.',
-			},
+
 			{
 				type: 'textinput',
 				id: 'interval',
 				label: 'Update Interval',
+				tooltip: 'Please enter the amount of time in milliseconds to request new information from the device. Set to 0 to disable.',
 				width: 3,
 				default: 1000
 			},
-			
-			{
-				type: 'static-text',
-				id: 'offlineIntervalInfo',
-				width: 12,
-				label: 'Timeout Interval',
-				value: 'Please enter the time in milliseconds before a device is considered offline. Set to 0 to disable.',
-			},
+		
 			{
 				type: 'textinput',
 				id: 'timeoutInterval',
 				label: 'Timeout Interval',
+				tooltip: 'Please enter the time in milliseconds before a device is considered offline. Set to 0 to disable.',
 				width: 3,
 				default: 3000
 			},
+			
 			{
 				type: 'static-text',
 				id: 'info2',
 				label: 'Verbose Logging',
 				width: 12,
-				value: `
-					<div class="alert alert-info">
-						Enabling this option will put more detail in the log, which can be useful for troubleshooting purposes.
-					</div>
-				`
+				value: `Enabling this option will put more detail in the log, which can be useful for troubleshooting purposes.`
 			},
+			
 			{
 				type: 'checkbox',
 				id: 'verbose',
