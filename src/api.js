@@ -337,7 +337,12 @@ module.exports = {
 		
 
 		// dante devices discover
-		self.getInformation();
+		self.mdns?.query({
+			questions:[{
+				name:'_netaudio-arc._udp.local',
+				type:'PTR'
+			}]
+		});
 		
 	},
 	
@@ -369,6 +374,8 @@ module.exports = {
 			  break;
 			}
 		}
+		
+		
 	},
 	
 	
@@ -843,15 +850,7 @@ module.exports = {
 
 		self.log('debug', 'getting info');
 		
-		self.mdns?.query({
-			questions:[{
-				name:'_netaudio-arc._udp.local',
-				type:'PTR'
-			}]
-		});
-		
 		for (ip in this.devicesData) {
-			this.getChannelCount(ip);
 			this.getChannelNames(ip, 'txInfo', 'rx');
 			this.getSettings();
 		}
