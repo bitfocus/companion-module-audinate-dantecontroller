@@ -337,7 +337,12 @@ module.exports = {
 		
 
 		// dante devices discover
-		self.getInformation();
+		self.mdns?.query({
+			questions:[{
+				name:'_netaudio-arc._udp.local',
+				type:'PTR'
+			}]
+		});
 		
 	},
 	
@@ -350,8 +355,6 @@ module.exports = {
 		this.devicesChoices.sort((deviceA, deviceB) => {
 				return deviceA.label.localeCompare(deviceB.label);
 		});
-	
-		this.initActions();
 	},
 	
 	// update device name in dropdown choice
@@ -361,15 +364,18 @@ module.exports = {
 		
 		for (let device of this.devicesChoices) {
 			if (device.id == deviceIp) {
-			device.label=deviceName;
-			this.devicesChoices.sort((deviceA, deviceB) => {
-				return deviceA.label.localeCompare(deviceB.label);
-			});
-			break;
+			  if (device.label != deviceName) {
+			    device.label=deviceName;
+				this.devicesChoices.sort((deviceA, deviceB) => {
+				  return deviceA.label.localeCompare(deviceB.label);
+			    });
+				this.updateData();
+			  }
+			  break;
 			}
 		}
 		
-		this.initActions();
+		
 	},
 	
 	
@@ -399,10 +405,18 @@ module.exports = {
 				channelChoice.push({id: i, label: channelName}); //indexString + (channelName ? ' : ' + channelName : '')});
 			}
 		}
-		
-		this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
-		
-		this.initActions();
+		if (!this[channelType + 'ChannelsChoices'][deviceName]) {
+			this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
+			this.updateData();
+		} else {
+			for (let i=1; i < channelChoice.length; i++) {
+				if (!this[channelType + 'ChannelsChoices'][deviceName][i] || channelChoice[i].label != this[channelType + 'ChannelsChoices'][deviceName][i].label) {
+					this[channelType+'ChannelsChoices'][deviceName] = channelChoice;
+					this.updateData();
+					break;
+				}	
+			}
+		}
 	},
 
 
@@ -428,7 +442,6 @@ module.exports = {
 		// delete object from devicesData
 		delete this.devicesData[deviceIp];
 
-		this.initActions();
 		this.updateData();
 	},
 	
@@ -499,9 +512,8 @@ module.exports = {
 							
 						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
 							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
+							updateFlags.push('name');
 						}
-						
-						updateFlags.push('name');
 						
 						
 						break;
@@ -561,6 +573,7 @@ module.exports = {
 					switch (flag) {
 						case 'name' : 
 							this.updateData();
+							break;
 						case 'info':
 							this.checkVariables(deviceIp, 'sr', 'latency');
 							break;
@@ -735,12 +748,11 @@ module.exports = {
 
 
     getChannelNames(ipaddress, ...channelTypes) {
-      if (channelTypes==undefined){
-        channelTypes=['rx','txInfo'];
-      }
-		  let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
+		if (channelTypes==undefined){
+				channelTypes=['rx','txInfo'];
+		}
+		let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
 		  for (let channelType of channelTypes) { 
-  
 		  switch (channelType) {
 			case 'tx' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
@@ -767,7 +779,6 @@ module.exports = {
 				break;
 			}
 		}
-
         return
     },
 	
