@@ -15,6 +15,6 @@
 		"multicast-dns": "^7.2.5"
 	},
 	"devDependencies": {
-		"@companion-module/tools": "^1.2.1"
+		"@companion-module/tools": "^1.5.2"
 	}
 }
