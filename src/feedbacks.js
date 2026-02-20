@@ -47,9 +47,6 @@ module.exports = {
 					const selectedSourceDeviceName = normalizeName(self.devicesData[opt.sourceDevice]?.name);
 					const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
 						(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice);
-					if (self.config.verbose && !(sourceDeviceMatches && sourceChannelMatches)) {
-						self.log('debug', `Feedback mismatch srcDev="${destinationChannel?.sourceDevice}" selDev="${self.devicesData[opt.sourceDevice]?.name}" srcChan="${destinationChannel?.sourceChannel}" candidates="${sourceChannelCandidates.join('|')}" status="${destinationChannel?.subscriptionStatus}"`);
-					}
 					return sourceDeviceMatches && sourceChannelMatches;
 				}	
 			},
