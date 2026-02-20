@@ -361,6 +361,7 @@ module.exports = {
 		self.devicesChoices = [];
 		self.txChannelsChoices = {};
 		self.rxChannelsChoices = {};
+		self.txFriendlyNameRefreshCounter = 0;
 
 
 
@@ -890,9 +891,16 @@ module.exports = {
 				type:'PTR'
 			}]
 		});
+
+		self.txFriendlyNameRefreshCounter = (self.txFriendlyNameRefreshCounter || 0) + 1;
+		const refreshTxFriendlyNames = self.txFriendlyNameRefreshCounter % 15 == 0;
 		
 		for (ip in this.devicesData) {
-			this.getChannelNames(ip, 'txInfo', 'rx');
+			if (refreshTxFriendlyNames) {
+				this.getChannelNames(ip, 'txInfo', 'tx', 'rx');
+			} else {
+				this.getChannelNames(ip, 'txInfo', 'rx');
+			}
 			this.getSettings();
 		}
 		
