@@ -315,6 +315,19 @@ module.exports = {
 			}
 		}
 	},
+
+	closeConnection: function () {
+		this.stopInterval();
+		if (this.mdns?.destroy) {
+			this.mdns.destroy();
+		}
+		this.mdns = null;
+		if (this.socket) {
+			this.socket.removeAllListeners();
+			this.socket.close();
+		}
+		this.socket = null;
+	},
 	
 		
 	initConnection: function () {
@@ -367,7 +380,8 @@ module.exports = {
 
 
 		self.setupInterval();
-		self.mdns = multidns({interface: self.config.ip});
+		const mdnsOptions = availableIps.includes(self.config.ip) ? {interface: self.config.ip} : {};
+		self.mdns = multidns(mdnsOptions);
 		self.mdns.on('response', self.dante_discovery.bind(this));
 		
 
@@ -902,7 +916,7 @@ module.exports = {
 			} else {
 				this.getChannelNames(ip, 'txInfo', 'rx');
 			}
-			this.getSettings();
+			this.getSettings(ip);
 		}
 		
 	},
