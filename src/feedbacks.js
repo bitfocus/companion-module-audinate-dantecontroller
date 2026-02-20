@@ -31,12 +31,19 @@ module.exports = {
 					let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt['destinationChannel_'+opt.destinationDevice]];
 					const selectedSourceChannel = opt['sourceChannel_'+opt.sourceDevice];
 					const sourceChannel = self.findTxChannelByName(opt.sourceDevice, selectedSourceChannel);
-					const normalizeChannelName = (channelName) => (channelName || '').trim().toLowerCase();
-					const destinationSourceChannelName = normalizeChannelName(destinationChannel?.sourceChannel);
-					const sourceChannelMatches = [selectedSourceChannel, sourceChannel?.name, sourceChannel?.friendlyName]
+					const normalizeName = (name) => (name || '').trim().toLowerCase();
+					const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel);
+					const sourceChannelCandidates = [selectedSourceChannel, sourceChannel?.name, sourceChannel?.friendlyName]
 						.filter(Boolean)
-						.some((channelName) => normalizeChannelName(channelName) == destinationSourceChannelName);
-					return (destinationChannel?.sourceDevice == self.devicesData[opt.sourceDevice]?.name) &&
+						.map((name) => normalizeName(name));
+					if (sourceChannel?.number != undefined) {
+						const number = parseInt(sourceChannel.number, 10);
+						if (!isNaN(number)) {
+							sourceChannelCandidates.push(String(number), String(number).padStart(2, '0'));
+						}
+					}
+					const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName);
+					return (normalizeName(destinationChannel?.sourceDevice) == normalizeName(self.devicesData[opt.sourceDevice]?.name)) &&
 						sourceChannelMatches && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
 				}	
 			},
