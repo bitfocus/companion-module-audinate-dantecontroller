@@ -783,7 +783,7 @@ module.exports = {
 
     getChannelNames(ipaddress, ...channelTypes) {
 		if (channelTypes==undefined){
-				channelTypes=['rx','txInfo','tx'];
+				channelTypes=['rx','txInfo'];
 		}
 		let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
 		  for (let channelType of channelTypes) { 
@@ -892,7 +892,7 @@ module.exports = {
 		});
 		
 		for (ip in this.devicesData) {
-			this.getChannelNames(ip, 'txInfo', 'tx', 'rx');
+			this.getChannelNames(ip, 'txInfo', 'rx');
 			this.getSettings();
 		}
 		
