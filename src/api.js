@@ -201,6 +201,7 @@ const parseChannelNames = (reply, infoType) => {
 			deviceInfo[channelType][nameNumber]={};
 		}
 		let returnChannel = deviceInfo[channelType][nameNumber];
+		returnChannel.number = nameNumber;
 		
 		// get name
 		const channelName = parseString(reply, nameIndex);
