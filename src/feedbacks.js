@@ -31,7 +31,7 @@ module.exports = {
 					let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt['destinationChannel_'+opt.destinationDevice]];
 					const selectedSourceChannel = opt['sourceChannel_'+opt.sourceDevice];
 					const sourceChannel = self.devicesData[opt.sourceDevice]?.tx?.[selectedSourceChannel] || self.findTxChannelByName(opt.sourceDevice, selectedSourceChannel);
-					const normalizeName = (name) => (name || '').trim().toLowerCase();
+					const normalizeName = (name) => String(name ?? '').trim().toLowerCase();
 					const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel);
 					const sourceChannelCandidates = [selectedSourceChannel, self.getChannelSubscriptionName(sourceChannel), sourceChannel?.name, sourceChannel?.friendlyName]
 						.filter(Boolean)
@@ -47,6 +47,9 @@ module.exports = {
 					const selectedSourceDeviceName = normalizeName(self.devicesData[opt.sourceDevice]?.name);
 					const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
 						(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice);
+					if (self.config.verbose && !(sourceDeviceMatches && sourceChannelMatches)) {
+						self.log('debug', `Feedback mismatch srcDev="${destinationChannel?.sourceDevice}" selDev="${self.devicesData[opt.sourceDevice]?.name}" srcChan="${destinationChannel?.sourceChannel}" candidates="${sourceChannelCandidates.join('|')}" status="${destinationChannel?.subscriptionStatus}"`);
+					}
 					return sourceDeviceMatches &&
 						sourceChannelMatches && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
 				}	
