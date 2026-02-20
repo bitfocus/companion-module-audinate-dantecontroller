@@ -30,10 +30,10 @@ module.exports = {
 				if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
 					let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt['destinationChannel_'+opt.destinationDevice]];
 					const selectedSourceChannel = opt['sourceChannel_'+opt.sourceDevice];
-					const sourceChannel = self.findTxChannelByName(opt.sourceDevice, selectedSourceChannel);
+					const sourceChannel = self.devicesData[opt.sourceDevice]?.tx?.[selectedSourceChannel] || self.findTxChannelByName(opt.sourceDevice, selectedSourceChannel);
 					const normalizeName = (name) => (name || '').trim().toLowerCase();
 					const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel);
-					const sourceChannelCandidates = [selectedSourceChannel, sourceChannel?.name, sourceChannel?.friendlyName]
+					const sourceChannelCandidates = [self.getChannelSubscriptionName(sourceChannel), sourceChannel?.name, sourceChannel?.friendlyName]
 						.filter(Boolean)
 						.map((name) => normalizeName(name));
 					if (sourceChannel?.number != undefined) {

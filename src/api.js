@@ -430,7 +430,7 @@ module.exports = {
 		if (channelType == 'tx') {
 			for (let i = 1; i<= ioObject.count; i++) {
 				let channelName = this.getChannelSubscriptionName(ioObject[i]);
-				channelChoice[i] = {id: channelName, label : channelName};
+				channelChoice[i] = {id: i, label : channelName};
 			}
 		} else if (channelType == 'rx') {
 			for (let i = 1; i<= ioObject.count; i++) {
