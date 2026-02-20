@@ -29,8 +29,12 @@ module.exports = {
 				let opt = feedback.options;
 				if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
 					let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt['destinationChannel_'+opt.destinationDevice]];
+					const selectedSourceChannel = opt['sourceChannel_'+opt.sourceDevice];
+					const sourceChannel = self.findTxChannelByName(opt.sourceDevice, selectedSourceChannel);
+					const sourceChannelMatches = (destinationChannel?.sourceChannel == selectedSourceChannel) ||
+						(sourceChannel && [sourceChannel.name, sourceChannel.friendlyName].includes(destinationChannel?.sourceChannel));
 					return (destinationChannel?.sourceDevice == self.devicesData[opt.sourceDevice]?.name) &&
-						(destinationChannel?.sourceChannel == opt['sourceChannel_'+opt.sourceDevice]) && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+						sourceChannelMatches && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
 				}	
 			},
 		}
