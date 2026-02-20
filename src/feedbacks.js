@@ -50,8 +50,7 @@ module.exports = {
 					if (self.config.verbose && !(sourceDeviceMatches && sourceChannelMatches)) {
 						self.log('debug', `Feedback mismatch srcDev="${destinationChannel?.sourceDevice}" selDev="${self.devicesData[opt.sourceDevice]?.name}" srcChan="${destinationChannel?.sourceChannel}" candidates="${sourceChannelCandidates.join('|')}" status="${destinationChannel?.subscriptionStatus}"`);
 					}
-					return sourceDeviceMatches &&
-						sourceChannelMatches && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+					return sourceDeviceMatches && sourceChannelMatches;
 				}	
 			},
 		}
