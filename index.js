@@ -33,7 +33,10 @@ class danteInstance extends InstanceBase {
 	async destroy() {
 		let self = this;
 
-		this.closeConnection();
+		if (self.INTERVAL) {
+			clearInterval(self.INTERVAL);
+			self.INTERVAL = null;
+		}
 		for (const ip of Object.keys(self.devicesData)) {
 			this.destroyDevice(ip);
 		}
@@ -44,7 +47,6 @@ class danteInstance extends InstanceBase {
 	}
 
 	async configUpdated(config) {
-		this.closeConnection();
 		this.config = config
 
 		if (this.config.verbose) {
