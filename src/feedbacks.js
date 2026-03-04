@@ -67,6 +67,56 @@ module.exports = {
 			feedbacks.routing_bg.options.push(nameOption);
 		}	
 		
+	feedbacks['routing_bg_manual'] = {
+		type: 'boolean',
+		name: 'Change background color by destination (manual)',
+		description: 'If the specified source channel specified is routed to the correct output, change background color of the button',
+		defaultStyle: {
+           color: combineRgb(0, 0, 0),
+			bgcolor: combineRgb(255, 255, 0),
+		},
+		options: [
+			{
+				type: 'textinput',
+				label: 'Source Channel Name',
+				id: 'sourceChannel',
+				default: 'Input 1',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Source Device Name',
+				id: 'sourceDevice',
+				default: 'MyDanteDeviceName',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Destination Channel Number',
+				id: 'destinationChannel',
+				default: '3',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Destination Device Address',
+				id: 'destinationDevice',
+				default: 'MyDanteDeviceAddress',
+				useVariables: true
+			},	
+		],
+		callback: (feedback) => {
+			let opt = feedback.options;
+			if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
+				let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt.destinationChannel];
+				return (destinationChannel?.sourceDevice == opt.sourceDevice) &&
+					(destinationChannel?.sourceChannel == opt.sourceChannel) && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+			}	
+		},
+	}
+		
+		
+		
 		self.setFeedbackDefinitions(feedbacks);
 	}
 }

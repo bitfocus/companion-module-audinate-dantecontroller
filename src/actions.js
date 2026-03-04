@@ -33,7 +33,7 @@ module.exports = {
 					type: 'textinput',
 					label: 'Destination Device Address',
 					id: 'destinationDeviceAddress',
-					default: 'MyDanteDeviceName',
+					default: 'MyDanteDeviceAddress',
 					useVariables: true
 				},
 			],

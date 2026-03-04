@@ -308,13 +308,14 @@ module.exports = {
     		this.socket.on("error", (error)=>{
 			self.log('error', error.message);
 		});
-
+		
         this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Connecting);}); 
-        
+		
 		// bind socket to random port of configured ip address if available
 		if (availableIps.includes(self.config.ip)) {
 			this.socket.bind(0, self.config.ip);
 		} else {
+			this.log('warn', "Config IP not available");
 			this.socket.bind();
 		}
 
@@ -331,8 +332,12 @@ module.exports = {
 
 
 
-		self.setupInterval();
-		self.mdns = multidns({interface: self.config.ip});
+		self.setupInterval(); 
+		if (availableIps.includes(self.config.ip)) {
+			self.mdns = multidns({interface: self.config.ip});
+		} else {
+			self.mdns = multidns();
+		}
 		self.mdns.on('response', self.dante_discovery.bind(this));
 		
 
