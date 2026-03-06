@@ -47,7 +47,8 @@ module.exports = {
 					const selectedSourceDeviceName = normalizeName(self.devicesData[opt.sourceDevice]?.name);
 					const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
 						(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice);
-					return sourceDeviceMatches && sourceChannelMatches;
+					const subscriptionOk = ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+					return sourceDeviceMatches && sourceChannelMatches && subscriptionOk;
 				}	
 			},
 		}
