@@ -316,6 +316,22 @@ module.exports = {
 		}
 	},
 	
+	findRxChannelByName: function (deviceIdentifier, channelName) {
+		let device = this.devicesData[deviceIdentifier];
+		if (!device) {
+			const deviceIp = this.findDeviceIpByName(deviceIdentifier);
+			device = this.devicesData[deviceIp];
+		}
+		if (!device?.rx) {
+			return;
+		}
+		for (const [channelNumber, channel] of Object.entries(device.rx)) {
+			if (!isNaN(channelNumber) && (channel?.name == channelName)) {
+				return channel;
+			}
+		}
+	},
+	
 		
 	initConnection: function () {
 		let self = this;
@@ -734,11 +750,25 @@ module.exports = {
 
 
 
-    makeCrosspoint(ipaddress, sourceChannelName, sourceDeviceName, destinationChannelNumber = 0) {
+    makeCrosspoint(destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel) {
+console.log('!!!!!!!!!!!!!');		
 		const sourceChannel = this.findTxChannelByName(sourceDeviceName, sourceChannelName);
 		const sourceSubscriptionName = this.getChannelSubscriptionName(sourceChannel) || sourceChannelName;
         const sourceChannelNameBuffer = Buffer.from(sourceSubscriptionName, "ascii");
         const sourceDeviceNameBuffer = Buffer.from(sourceDeviceName, "ascii");
+
+		const destinationChannelNumber = this.findRxChannelByName(destinationDevice, destinationChannel)?.number ?? destinationChannel
+	
+console.log('????????????????????');
+		// Check if destinationDevice is an IP or a name
+		const IP = RegExp(Regex.IP.slice(1,-1));
+		const ipaddress = IP.test(destinationDevice) ? destinationDevice : this.findDeviceIpByName(destinationDevice);
+		
+		if (!ipaddress) {
+			this.log('error', "Can't find " + DestinationDevice + " IP address");
+			return;
+		}
+			
 
         let commandArguments = Buffer.concat([
 			Buffer.from('0001', 'hex'), 						// unknown code
@@ -761,7 +791,19 @@ module.exports = {
 	
 	
 
-    clearCrosspoint(ipaddress, destinationChannelNumber) {
+    clearCrosspoint(destinationDevice, destinationChannel) {
+		
+		const destinationChannelNumber = this.findRxChannelByName(destinationDevice, destinationChannel)?.number ?? destinationChannel
+		console.log (destinationChannelNumber);
+		// Check if destinationDevice is an IP or a name
+		const IP = RegExp(Regex.IP.slice(1,-1));
+		const ipaddress = IP.test(destinationDevice) ? destinationDevice : this.findDeviceIpByName(destinationDevice);
+		
+		if (!ipaddress) {
+			this.log('error', "Can't find " + destinationDevice + " IP address");
+			return;
+		}
+		
         let commandArguments = Buffer.concat([
             Buffer.from("0401", "hex"),
             intToBuffer(destinationChannelNumber),
