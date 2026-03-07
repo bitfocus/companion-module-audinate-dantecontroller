@@ -201,9 +201,15 @@ const parseChannelNames = (reply, infoType) => {
 			deviceInfo[channelType][nameNumber]={};
 		}
 		let returnChannel = deviceInfo[channelType][nameNumber];
+		returnChannel.number = nameNumber;
 		
 		// get name
-		returnChannel.name = parseString(reply, nameIndex);
+		const channelName = parseString(reply, nameIndex);
+		if (infoType == 'tx') {
+			returnChannel.friendlyName = channelName;
+		} else {
+			returnChannel.name = channelName;
+		}
 		
 		// get routing
 		if (infoType == 'rx') {
@@ -281,6 +287,34 @@ const parseDeviceSettings = (reply) => {
 
 
 module.exports = {
+
+	getChannelSubscriptionName: function (channel) {
+		return channel?.friendlyName || channel?.name;
+	},
+
+	findDeviceIpByName: function (deviceName) {
+		for (const [ip, device] of Object.entries(this.devicesData)) {
+			if (device?.name == deviceName) {
+				return ip;
+			}
+		}
+	},
+
+	findTxChannelByName: function (deviceIdentifier, channelName) {
+		let device = this.devicesData[deviceIdentifier];
+		if (!device) {
+			const deviceIp = this.findDeviceIpByName(deviceIdentifier);
+			device = this.devicesData[deviceIp];
+		}
+		if (!device?.tx) {
+			return;
+		}
+		for (const [channelNumber, channel] of Object.entries(device.tx)) {
+			if (!isNaN(channelNumber) && (channel?.name == channelName || channel?.friendlyName == channelName)) {
+				return channel;
+			}
+		}
+	},
 	
 		
 	initConnection: function () {
@@ -328,6 +362,7 @@ module.exports = {
 		self.devicesChoices = [];
 		self.txChannelsChoices = {};
 		self.rxChannelsChoices = {};
+		self.txFriendlyNameRefreshCounter = 0;
 
 
 
@@ -394,9 +429,8 @@ module.exports = {
 		let channelChoice = [{id: 0, label:'None'}];
 		if (channelType == 'tx') {
 			for (let i = 1; i<= ioObject.count; i++) {
-				let indexString = i.toString().padStart(2,'0');
-				let channelName = ioObject[i]?.name;
-				channelChoice[i] = {id: channelName, label : channelName}; //?? indexString, label: indexString + (channelName ? ' : ' + channelName : '')};
+				let channelName = this.getChannelSubscriptionName(ioObject[i]);
+				channelChoice[i] = {id: i, label : channelName};
 			}
 		} else if (channelType == 'rx') {
 			for (let i = 1; i<= ioObject.count; i++) {
@@ -528,7 +562,7 @@ module.exports = {
 							this.getChannelNames(deviceIp, 'rx'); 
 						}
 						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
-							this.getChannelNames(deviceIp, 'txInfo');
+							this.getChannelNames(deviceIp, 'txInfo', 'tx');
 						}
 						break;
 						
@@ -696,7 +730,9 @@ module.exports = {
 
 
     makeCrosspoint(ipaddress, sourceChannelName, sourceDeviceName, destinationChannelNumber = 0) {
-        const sourceChannelNameBuffer = Buffer.from(sourceChannelName, "ascii");
+		const sourceChannel = this.findTxChannelByName(sourceDeviceName, sourceChannelName);
+		const sourceSubscriptionName = this.getChannelSubscriptionName(sourceChannel) || sourceChannelName;
+        const sourceChannelNameBuffer = Buffer.from(sourceSubscriptionName, "ascii");
         const sourceDeviceNameBuffer = Buffer.from(sourceDeviceName, "ascii");
 
         let commandArguments = Buffer.concat([
@@ -856,9 +892,16 @@ module.exports = {
 				type:'PTR'
 			}]
 		});
+
+		self.txFriendlyNameRefreshCounter = (self.txFriendlyNameRefreshCounter || 0) + 1;
+		const refreshTxFriendlyNames = self.txFriendlyNameRefreshCounter % 15 == 0;
 		
 		for (ip in this.devicesData) {
-			this.getChannelNames(ip, 'txInfo', 'rx');
+			if (refreshTxFriendlyNames) {
+				this.getChannelNames(ip, 'txInfo', 'tx', 'rx');
+			} else {
+				this.getChannelNames(ip, 'txInfo', 'rx');
+			}
 			this.getSettings();
 		}
 		

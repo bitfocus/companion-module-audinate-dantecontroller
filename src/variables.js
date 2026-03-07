@@ -61,7 +61,8 @@ module.exports = {
 							let channelArray = variableValues[deviceName + '_' + variableType] = [];
 							const channelType = variableType.slice(0, 2);
 							for (let i=0; i < device[channelType]?.count; i++) {
-								channelArray[i] = device[channelType][i+1]?.name;
+								const channel = device[channelType][i+1];
+								channelArray[i] = channelType == 'tx' ? self.getChannelSubscriptionName(channel) : channel?.name;
 							}
 							break;
 						
