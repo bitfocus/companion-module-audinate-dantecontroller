@@ -43,7 +43,9 @@ class danteInstance extends InstanceBase {
 	}
 
 	async init(config) {
-		this.configUpdated(config)
+		this.configUpdated(config).catch((error) => {
+			this.log('error', 'Error initiating the module');
+		})
 	}
 
 	async configUpdated(config) {

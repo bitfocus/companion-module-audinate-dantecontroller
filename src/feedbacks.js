@@ -1,4 +1,5 @@
 const { combineRgb } = require('@companion-module/base');
+const { Regex } = require('@companion-module/base')
 
 module.exports = {
 	initFeedbacks: function () {
@@ -47,7 +48,8 @@ module.exports = {
 					const selectedSourceDeviceName = normalizeName(self.devicesData[opt.sourceDevice]?.name);
 					const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
 						(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice);
-					return sourceDeviceMatches && sourceChannelMatches;
+					const subscriptionOk = ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+					return sourceDeviceMatches && sourceChannelMatches && subscriptionOk;
 				}	
 			},
 		}
@@ -83,6 +85,85 @@ module.exports = {
 			}
 			feedbacks.routing_bg.options.push(nameOption);
 		}	
+		
+	feedbacks['routing_bg_manual'] = {
+		type: 'boolean',
+		name: 'Change background color by destination (manual)',
+		description: 'If the specified source channel specified is routed to the correct output, change background color of the button',
+		defaultStyle: {
+           color: combineRgb(0, 0, 0),
+			bgcolor: combineRgb(255, 255, 0),
+		},
+		options: [
+			{
+				type: 'textinput',
+				label: 'Source Channel Name',
+				id: 'sourceChannelName',
+				default: 'Input 1',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Source Device Name',
+				id: 'sourceDeviceName',
+				default: 'MyDanteDeviceName',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Destination Channel',
+				id: 'destinationChannelId',
+				default: '1',
+				useVariables: true
+			},
+			{
+				type: 'textinput',
+				label: 'Destination Device',
+				id: 'destinationDeviceId',
+				default: 'MyDanteDevice',
+				useVariables: true
+			},	
+		],
+		callback: async function (feedback, context) {
+			const opt = feedback.options;
+			const sourceChannelName = await context.parseVariablesInString(opt.sourceChannelName);
+			const sourceDeviceName = await context.parseVariablesInString(opt.sourceDeviceName);
+			const destinationChannelId = await context.parseVariablesInString(opt.destinationChannelId);
+			const destinationDeviceId = await context.parseVariablesInString(opt.destinationDeviceId);
+
+			// Check if destinationDeviceId is an IP or a name
+			const IP = RegExp(Regex.IP.slice(1,-1));
+			const destinationDeviceIp = IP.test(destinationDeviceId) ? destinationDeviceId : self.findDeviceIpByName(destinationDeviceId);
+			
+			if (destinationDeviceIp && sourceDeviceName && self.devicesData[destinationDeviceIp]?.rx) {
+				const destinationChannel = self.findRxChannelByName(destinationDeviceIp, destinationChannelId) ?? self.devicesData[destinationDeviceIp].rx[destinationChannelId];
+				if (destinationChannel == undefined) {
+					return
+				}
+				
+				const sourceChannel = self.findTxChannelByName(sourceDeviceName, sourceChannelName);
+				const normalizeName = (name) => String(name ?? '').trim().toLowerCase();
+				const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel);
+				const sourceChannelCandidates = [sourceChannelName, self.getChannelSubscriptionName(sourceChannel), sourceChannel?.name, sourceChannel?.friendlyName]
+					.filter(Boolean)
+					.map((name) => normalizeName(name));
+				if (sourceChannel?.number != undefined) {
+					const number = parseInt(sourceChannel.number, 10);
+					if (!isNaN(number)) {
+						sourceChannelCandidates.push(String(number), String(number).padStart(2, '0'));
+					}
+				}
+				
+				const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName);
+				const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice);
+				const selectedSourceDeviceName = normalizeName(sourceDeviceName);
+				const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
+					(destinationSourceDeviceName == '.' && self.devicesData[destinationDeviceIP].name == sourceDeviceName);
+				const subscriptionOk = ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk;
+			}
+		},
+	}
 		
 		self.setFeedbackDefinitions(feedbacks);
 	}
