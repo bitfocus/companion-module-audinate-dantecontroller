@@ -24,22 +24,27 @@ module.exports = {
 				},
 				{
 					type: 'textinput',
-					label: 'Destination Channel Number',
+					label: 'Destination Channel',
 					id: 'destinationChannelNumber',
-					default: '3',
+					default: '1',
 					useVariables: true
 				},
 				{
 					type: 'textinput',
-					label: 'Destination Device Address',
+					label: 'Destination Device',
 					id: 'destinationDeviceAddress',
-					default: 'MyDanteDeviceAddress',
+					default: 'MyDanteDevice',
 					useVariables: true
 				},
 			],
-			callback: async function (action) {
-				let opt = action.options;
-				self.makeCrosspoint(opt.destinationDeviceAddress, opt.sourceChannelName, opt.sourceDeviceName, opt.destinationChannelNumber)
+			callback: async function (action, context) {
+				const opt = action.options;
+				const sourceChannelName = await context.parseVariablesInString(opt.sourceChannelName);
+				const sourceDeviceName = await context.parseVariablesInString(opt.sourceDeviceName);
+				const destinationChannel = await context.parseVariablesInString(opt.destinationChannelNumber);
+				const destinationDevice = await context.parseVariablesInString(opt.destinationDeviceAddress);
+				
+				self.makeCrosspoint(destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
 			}
 		}
 		
@@ -103,22 +108,24 @@ module.exports = {
 			options: [
 				{
 					type: 'textinput',
-					label: 'Destination Channel Number',
+					label: 'Destination Channel',
 					id: 'destinationChannelNumber',
-					default: '3',
+					default: '1',
 					useVariables: true
 				},
 				{
 					type: 'textinput',
-					label: 'Destination Device Address',
+					label: 'Destination Device',
 					id: 'destinationDeviceAdddress',
 					default: 'MyDanteDeviceName',
 					useVariables: true
 				},
 			],
-			callback: async function (action) {
-				let opt = action.options;
-				self.clearCrosspoint(opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+			callback: async function (action, context) {
+				const opt = action.options;
+				const destinationDevice = await context.parseVariablesInString(opt.destinationDeviceAdddress); 
+				const destinationChannel = await context.parseVariablesInString(opt.destinationChannel);
+				self.clearCrosspoint(destinationDevice, destinationChannel)
 			}
 		};
 		
