@@ -57,7 +57,10 @@ module.exports = {
 			],
 			callback: async function (action) {
 				let opt = action.options;
-				self.makeCrosspoint(opt.destinationDevice, opt['sourceChannel_'+opt.sourceDevice], self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
+				const sourceChannelNumber = opt['sourceChannel_'+opt.sourceDevice];
+				const sourceChannel = self.devicesData[opt.sourceDevice]?.tx?.[sourceChannelNumber] || self.findTxChannelByName(opt.sourceDevice, sourceChannelNumber);
+				const sourceChannelName = self.getChannelSubscriptionName(sourceChannel) || sourceChannelNumber;
+				self.makeCrosspoint(opt.destinationDevice, sourceChannelName, self.devicesData[opt.sourceDevice]?.name, opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
 
