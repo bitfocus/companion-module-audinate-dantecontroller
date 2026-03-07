@@ -25,14 +25,14 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Channel',
-					id: 'destinationChannel',
+					id: 'destinationChannelNumber',
 					default: '1',
 					useVariables: true
 				},
 				{
 					type: 'textinput',
 					label: 'Destination Device',
-					id: 'destinationDevice',
+					id: 'destinationDeviceAddress',
 					default: 'MyDanteDevice',
 					useVariables: true
 				},
@@ -41,8 +41,8 @@ module.exports = {
 				const opt = action.options;
 				const sourceChannelName = await context.parseVariablesInString(opt.sourceChannelName);
 				const sourceDeviceName = await context.parseVariablesInString(opt.sourceDeviceName);
-				const destinationChannel = await context.parseVariablesInString(opt.destinationChannel);
-				const destinationDevice = await context.parseVariablesInString(opt.destinationDevice);
+				const destinationChannel = await context.parseVariablesInString(opt.destinationChannelNumber);
+				const destinationDevice = await context.parseVariablesInString(opt.destinationDeviceAddress);
 				
 				self.makeCrosspoint(destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
 			}
@@ -109,21 +109,21 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Channel',
-					id: 'destinationChannel',
-					default: '3',
+					id: 'destinationChannelNumber',
+					default: '1',
 					useVariables: true
 				},
 				{
 					type: 'textinput',
 					label: 'Destination Device',
-					id: 'destinationDevice',
+					id: 'destinationDeviceAdddress',
 					default: 'MyDanteDeviceName',
 					useVariables: true
 				},
 			],
 			callback: async function (action, context) {
 				const opt = action.options;
-				const destinationDevice = await context.parseVariablesInString(opt.destinationDevice); 
+				const destinationDevice = await context.parseVariablesInString(opt.destinationDeviceAdddress); 
 				const destinationChannel = await context.parseVariablesInString(opt.destinationChannel);
 				self.clearCrosspoint(destinationDevice, destinationChannel)
 			}

@@ -1,4 +1,5 @@
 const { combineRgb } = require('@companion-module/base');
+const { Regex } = require('@companion-module/base')
 
 module.exports = {
 	initFeedbacks: function () {
@@ -97,43 +98,72 @@ module.exports = {
 			{
 				type: 'textinput',
 				label: 'Source Channel Name',
-				id: 'sourceChannel',
+				id: 'sourceChannelName',
 				default: 'Input 1',
 				useVariables: true
 			},
 			{
 				type: 'textinput',
 				label: 'Source Device Name',
-				id: 'sourceDevice',
+				id: 'sourceDeviceName',
 				default: 'MyDanteDeviceName',
 				useVariables: true
 			},
 			{
 				type: 'textinput',
-				label: 'Destination Channel Number',
-				id: 'destinationChannel',
-				default: '3',
+				label: 'Destination Channel',
+				id: 'destinationChannelId',
+				default: '1',
 				useVariables: true
 			},
 			{
 				type: 'textinput',
-				label: 'Destination Device Address',
-				id: 'destinationDevice',
-				default: 'MyDanteDeviceAddress',
+				label: 'Destination Device',
+				id: 'destinationDeviceId',
+				default: 'MyDanteDevice',
 				useVariables: true
 			},	
 		],
-		callback: (feedback) => {
-			let opt = feedback.options;
-			if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
-				let destinationChannel = self.devicesData[opt.destinationDevice].rx[opt.destinationChannel];
-				return (destinationChannel?.sourceDevice == opt.sourceDevice) &&
-					(destinationChannel?.sourceChannel == opt.sourceChannel) && ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
-			}	
+		callback: async function (feedback, context) {
+			const opt = feedback.options;
+			const sourceChannelName = await context.parseVariablesInString(opt.sourceChannelName);
+			const sourceDeviceName = await context.parseVariablesInString(opt.sourceDeviceName);
+			const destinationChannelId = await context.parseVariablesInString(opt.destinationChannelId);
+			const destinationDeviceId = await context.parseVariablesInString(opt.destinationDeviceId);
+
+			// Check if destinationDeviceId is an IP or a name
+			const IP = RegExp(Regex.IP.slice(1,-1));
+			const destinationDeviceIp = IP.test(destinationDeviceId) ? destinationDeviceId : self.findDeviceIpByName(destinationDeviceId);
+			
+			if (destinationDeviceIp && sourceDeviceName && self.devicesData[destinationDeviceIp]?.rx) {
+				const destinationChannel = self.findRxChannelByName(destinationDeviceIp, destinationChannelId) ?? self.devicesData[destinationDeviceIp].rx[destinationChannelId];
+				if (destinationChannel == undefined) {
+					return
+				}
+				
+				const sourceChannel = self.findTxChannelByName(sourceDeviceName, sourceChannelName);
+				const normalizeName = (name) => String(name ?? '').trim().toLowerCase();
+				const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel);
+				const sourceChannelCandidates = [sourceChannelName, self.getChannelSubscriptionName(sourceChannel), sourceChannel?.name, sourceChannel?.friendlyName]
+					.filter(Boolean)
+					.map((name) => normalizeName(name));
+				if (sourceChannel?.number != undefined) {
+					const number = parseInt(sourceChannel.number, 10);
+					if (!isNaN(number)) {
+						sourceChannelCandidates.push(String(number), String(number).padStart(2, '0'));
+					}
+				}
+				
+				const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName);
+				const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice);
+				const selectedSourceDeviceName = normalizeName(sourceDeviceName);
+				const sourceDeviceMatches = destinationSourceDeviceName == selectedSourceDeviceName ||
+					(destinationSourceDeviceName == '.' && self.devicesData[destinationDeviceIP].name == sourceDeviceName);
+				const subscriptionOk = ([9, 10, 14].includes(destinationChannel?.subscriptionStatus));
+				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk;
+			}
 		},
 	}
-		
-		
 		
 		self.setFeedbackDefinitions(feedbacks);
 	}

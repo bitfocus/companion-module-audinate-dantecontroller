@@ -751,7 +751,7 @@ module.exports = {
 
 
     makeCrosspoint(destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel) {
-console.log('!!!!!!!!!!!!!');		
+	
 		const sourceChannel = this.findTxChannelByName(sourceDeviceName, sourceChannelName);
 		const sourceSubscriptionName = this.getChannelSubscriptionName(sourceChannel) || sourceChannelName;
         const sourceChannelNameBuffer = Buffer.from(sourceSubscriptionName, "ascii");
@@ -759,7 +759,6 @@ console.log('!!!!!!!!!!!!!');
 
 		const destinationChannelNumber = this.findRxChannelByName(destinationDevice, destinationChannel)?.number ?? destinationChannel
 	
-console.log('????????????????????');
 		// Check if destinationDevice is an IP or a name
 		const IP = RegExp(Regex.IP.slice(1,-1));
 		const ipaddress = IP.test(destinationDevice) ? destinationDevice : this.findDeviceIpByName(destinationDevice);
