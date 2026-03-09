@@ -124,7 +124,7 @@ module.exports = {
 			callback: async function (action, context) {
 				const opt = action.options;
 				const destinationDevice = await context.parseVariablesInString(opt.destinationDeviceAdddress); 
-				const destinationChannel = await context.parseVariablesInString(opt.destinationChannel);
+				const destinationChannel = await context.parseVariablesInString(opt.destinationChannelNumber);
 				self.clearCrosspoint(destinationDevice, destinationChannel)
 			}
 		};
