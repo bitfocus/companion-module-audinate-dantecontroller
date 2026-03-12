@@ -25,6 +25,7 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Channel',
+					tooltip: 'Enter either channel name or channel number',
 					id: 'destinationChannelNumber',
 					default: '1',
 					useVariables: true
@@ -32,6 +33,7 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Device',
+					tooltip: 'Enter either device name or device IP',
 					id: 'destinationDeviceAddress',
 					default: 'MyDanteDevice',
 					useVariables: true
@@ -109,6 +111,7 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Channel',
+					tooltip: 'Enter either channer name or channel number',
 					id: 'destinationChannelNumber',
 					default: '1',
 					useVariables: true
@@ -116,6 +119,7 @@ module.exports = {
 				{
 					type: 'textinput',
 					label: 'Destination Device',
+					tooltip: 'Enter either device name or device IP',
 					id: 'destinationDeviceAdddress',
 					default: 'MyDanteDeviceName',
 					useVariables: true
