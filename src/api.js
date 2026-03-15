@@ -9,7 +9,21 @@ const danteControlPort = 4440;
 const sequenceId1 = Buffer.from([0x29]);
 const danteConstant = Buffer.from([0x27]);
 
+const DANTE_PORTS = {
+	ARC: 4400,
+	SETTINGS: 8700,
+	INFO: 8702,
+	HEARTBEAT: 8708,
+	CONTROL: 8800
+};
 
+const DANTE_PROTOCOL = {
+	CONTROL: Buffer.from("27FF", "hex"),
+	SETTINGS: Buffer.from("FFFF", "hex"),
+	CMC: Buffer.from("1200", "hex"),
+	AES67_CONFIG: Buffer.from("2809", "hex"),
+}
+	
 const DANTE_COMMANDS = {
 	channelCount : Buffer.from("1000", "hex"),
 	deviceInfo : Buffer.from("1003", "hex"),
@@ -255,20 +269,20 @@ const parseDeviceSettings = (reply) => {
 	const infoBufferSize = 4;
 	
 	for (let i = 0; i < recCount ; i++) {
-		// get info chunk of channel
+		// get info chunk
 		const infoIndex = startIndex + (infoBufferSize * i);
 		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
 		
 		const infoCode = infoBuffer.readUInt16BE(0);
 		const valueIndex = infoBuffer.readUInt16BE(2);
-		
+
 		switch (infoCode) {
 			case 0x8020:
 			// Sample rate
 				deviceInfo.sr = reply.readUInt32BE(valueIndex);
 				break;
 				
-			case 0x8204: 
+			case 0x8301 : 
 			// Latency 
 				deviceInfo.latency = reply.readUInt32BE(valueIndex)/1000000;
 				break;
@@ -698,6 +712,23 @@ module.exports = {
     },
 
 
+	makeSettingCommand(command, commandArguments = Buffer.alloc(2)) {
+		const startBlock = Buffer.from("00392f7c482ae39371ac0000", "hex");
+		let commandLength = Buffer.alloc(2);
+		commandLength.writeUInt16BE(commandArguments.length + 36);
+		const audinate = Buffer.from("Audinate", "ascii");
+		const middleBlock = Buffer.from('0734', 'hex');
+		const queueBlock = Buffer.from ('0000006400000001', 'hex');
+		
+		return Buffer.concat([
+			startBlock,
+			commandLength,
+			audinate,
+			middleBlock,
+			queueBlock
+			]);
+	},
+
 //**
 //** Specific Dante messages
 //**
@@ -793,7 +824,7 @@ module.exports = {
     clearCrosspoint(destinationDevice, destinationChannel) {
 		
 		const destinationChannelNumber = this.findRxChannelByName(destinationDevice, destinationChannel)?.number ?? destinationChannel
-		console.log (destinationChannelNumber);
+
 		// Check if destinationDevice is an IP or a name
 		const IP = RegExp(Regex.IP.slice(1,-1));
 		const ipaddress = IP.test(destinationDevice) ? destinationDevice : this.findDeviceIpByName(destinationDevice);
@@ -879,14 +910,20 @@ module.exports = {
 	
 	
 	setLatency(ipaddress, latency) {
-		let commandArguments = Buffer.from("0000050382050020021100108301002482198301830283060000000000000000", "hex");
-		commandArguments.writeUInt32BE(latency*100000,32);
-		commandArguments.writeUInt32BE(latency*100000,36);
-		const commandBuffer = this.makeCommand('setLatency', commandArguments)
+		let commandArguments = Buffer.from("050382050020021100108301002400000000000000000000000000000000", "hex");
+		commandArguments.writeUInt32BE(latency*1000000,22);
+		commandArguments.writeUInt32BE(latency*1000000,26);
+		const commandBuffer = this.makeCommand('setDeviceSettings', commandArguments)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 
-
+	setSampleRate(ipaddress, sampleRate) {
+		let sr = Buffer.alloc(4);
+		sr.writeUint32BE(sampleRate, 0);
+		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, sr);
+		
+		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
+	},	
 
     get devices() {
       return this.devicesData;
@@ -948,7 +985,7 @@ module.exports = {
 			} else {
 				this.getChannelNames(ip, 'txInfo', 'rx');
 			}
-			this.getSettings();
+			this.getSettings(ip);
 		}
 		
 	},
