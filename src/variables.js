@@ -25,7 +25,7 @@ module.exports = {
 		let devicesList;
 
 		if(ipAddress && ipAddress != 'all') {
-			devicesList = [ipAddress, self.devicesData[ipAddress]];
+			devicesList = [[ipAddress, self.devicesData[ipAddress]]];
 		} else {
 			devicesList = Object.entries(self.devicesData);
 		}
@@ -37,7 +37,7 @@ module.exports = {
 			const ip = item[0];
 			const device = item[1];
 			let deviceName = device?.name;
-			if (deviceName) { 
+			if (deviceName) {
 				for (let variableType of variableTypes) {
 					switch (variableType) {
 						case 'devices' :
