@@ -71,8 +71,8 @@ MESSAGE_TYPE_DDM_ENROLMENT_CONFIG_STATUS : 65287,
 MESSAGE_TYPE_DEVICE_REBOOT : 146,
 MESSAGE_TYPE_EDK_BOARD_CONTROL : 161,
 MESSAGE_TYPE_EDK_BOARD_STATUS : 160,
-MESSAGE_TYPE_ENCODING_CONTROL : 131,
-MESSAGE_TYPE_ENCODING_STATUS : 130,
+MESSAGE_TYPE_ENCODING_CONTROL : Buffer.from('83','hex'), //131
+MESSAGE_TYPE_ENCODING_STATUS : Buffer.from('82', 'hex'), //130
 MESSAGE_TYPE_HAREMOTE_CONTROL : 4097,
 MESSAGE_TYPE_HAREMOTE_STATUS : 4096,
 MESSAGE_TYPE_IDENTIFY_QUERY : 99,
@@ -104,10 +104,10 @@ MESSAGE_TYPE_RX_CHANNEL_RX_ERROR_STATUS : 272,
 MESSAGE_TYPE_RX_ERROR_THRESHOLD_CONTROL : 275,
 MESSAGE_TYPE_RX_ERROR_THRESHOLD_STATUS : 274,
 MESSAGE_TYPE_RX_FLOW_CHANGE : 261,
-MESSAGE_TYPE_SAMPLE_RATE_CONTROL : 129,
-MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL : 133,
-MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS : 132,
-MESSAGE_TYPE_SAMPLE_RATE_STATUS : 128,
+MESSAGE_TYPE_SAMPLE_RATE_CONTROL : Buffer.from('81', 'hex'), //129,
+MESSAGE_TYPE_SAMPLE_RATE_STATUS : Buffer.from('80', 'hex'), //128,
+MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL : Buffer.from('85', 'hex'), //133,
+MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS : Buffer.from('84', 'hex'), //132,
 MESSAGE_TYPE_SERIAL_PORT_CONTROL : 241,
 MESSAGE_TYPE_SERIAL_PORT_STATUS : 240,
 MESSAGE_TYPE_SWITCH_VLAN_CONTROL : 21,
@@ -413,7 +413,6 @@ module.exports = {
 				type:'PTR'
 			}]
 		});
-		
 	},
 	
 	
@@ -713,19 +712,23 @@ module.exports = {
 
 
 	makeSettingCommand(command, commandArguments = Buffer.alloc(2)) {
-		const startBlock = Buffer.from("00392f7c482ae39371ac0000", "hex");
 		let commandLength = Buffer.alloc(2);
 		commandLength.writeUInt16BE(commandArguments.length + 36);
+	//	const startBlock = Buffer.from("00392f7c482ae39371ac0000", "hex");
+		const startBlock = Buffer.from('00972a84342eb718b5820000', "hex");
 		const audinate = Buffer.from("Audinate", "ascii");
 		const middleBlock = Buffer.from('0734', 'hex');
 		const queueBlock = Buffer.from ('0000006400000001', 'hex');
 		
 		return Buffer.concat([
-			startBlock,
+			DANTE_PROTOCOL.SETTINGS,
 			commandLength,
+			startBlock,
 			audinate,
 			middleBlock,
-			queueBlock
+			command,
+			queueBlock,
+			commandArguments
 			]);
 	},
 
@@ -920,8 +923,7 @@ module.exports = {
 	setSampleRate(ipaddress, sampleRate) {
 		let sr = Buffer.alloc(4);
 		sr.writeUint32BE(sampleRate, 0);
-		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, sr);
-		
+		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, sr); console.log(commandBuffer);
 		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
 	},	
 

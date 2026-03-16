@@ -175,16 +175,40 @@ module.exports = {
 				},
 				{
 					type: 'textinput',
-					//type: 'dropdown',
 					label: 'Latency (in ms)',
 					id: 'latency',
 					default: '1',
 					useVariables: true
 				}
 			],
-			callback: async function (action) {
-				let opt = action.options;
+			callback: async function (action, context) {
+				const opt = action.options;
+				const latency = await context.parseVariablesInString(opt.latency);
  				self.setLatency(opt.destinationDevice, opt.latency);
+			}
+		}
+		
+		actions.setSampleRate = {
+			name: 'Set Sample rate',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				},
+				{
+					type: 'textinput',
+					label: 'Sample rate (in Hz)',
+					id: 'sr',
+					default: '48000',
+					useVariables: true
+				}
+			],
+			callback: async function (action, context) {
+				let opt = action.options;
+				const sr = await context.parseVariablesInString(opt.sr);
+ 				self.setSampleRate(opt.destinationDevice, sr);
 			}
 		}
 		
