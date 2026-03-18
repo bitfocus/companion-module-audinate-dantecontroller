@@ -14,6 +14,7 @@ module.exports = {
 			variables.push({variableId: device.name + '_rx_names', name: ' Input names for ' + device.name});
 			variables.push({variableId: device.name + '_sr', name: 'Sample rate of ' + device.name});
 			variables.push({variableId: device.name + '_latency', name: 'Latency of ' + device.name + ' (in ms)'});
+			variables.push({variableId: device.name + '_encoding', name: 'Encoding of ' + device.name});
 		}
 			
 		self.setVariableDefinitions(variables);

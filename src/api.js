@@ -3,14 +3,17 @@ const dgram = require("dgram");
 const merge = require("./utils/merge");
 const { networkInterfaces } = require('os');
 const { InstanceStatus, Regex } = require('@companion-module/base')
+const {AUDINATE_BUFFER, DANTE_PORTS, DANTE_PROTOCOL, DANTE_COMMANDS} = require("./const")
+
 
 const danteServiceTypes = ["_netaudio-cmc._udp", "_netaudio-dbc._udp", "_netaudio-arc._udp", "_netaudio-chan._udp"];
 const danteControlPort = 4440;
 const sequenceId1 = Buffer.from([0x29]);
 const danteConstant = Buffer.from([0x27]);
+/*const AUDINATE_BUFFER = Buffer.concat([Buffer.from('Audinate', 'ascii'), Buffer.from('0000', 'hex')]);
 
 const DANTE_PORTS = {
-	ARC: 4400,
+	ARC: 4440,
 	SETTINGS: 8700,
 	INFO: 8702,
 	HEARTBEAT: 8708,
@@ -125,21 +128,45 @@ MESSAGE_TYPE_VERSIONS_QUERY : 97,
 MESSAGE_TYPE_VERSIONS_STATUS : 96,
 
 };
-
+*/
 
 const getRandomInt = (max) => {
     return Math.floor(Math.random() * max);
 };
 
-
+const incrementBE = (buffer) => {
+    for (var i = buffer.length - 1; i >= 0; i--) {
+        if (buffer[i]++ !== 255) break;
+    }
+};
 
 //**
 //** utils functions to parse dante messages
 //**
 
-const intToBuffer = (int) => {
-    let intBuffer = Buffer.alloc(2);
-    intBuffer.writeUInt16BE(int);
+const intToBuffer = (number, bytes = 2) => {
+	if (bytes < 1 || bytes > 8) {
+		return;
+	}
+    let intBuffer = Buffer.alloc(bytes);
+	switch (bytes) {
+		case 1:
+			intBuffer.writeInt8(number);
+			break;
+		case 2:
+		case 3:
+			intBuffer.writeUInt16BE(number, bytes - 2);
+			break;
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			intBuffer.writeUint32BE(number, bytes - 4);
+			break;
+		case 8:
+			intBuffer.writeBigUInt64BE(number);
+	}
+			
     return intBuffer;
 };
 
@@ -257,6 +284,11 @@ const parseChannelNames = (reply, infoType) => {
 }
 
 
+const parseDeviceInfo = (reply) => {
+	const deviceInfo = {};
+	
+}
+
 
 const parseDeviceName = (reply) => {
 	return {name: parseString(reply, 10)};
@@ -349,10 +381,12 @@ module.exports = {
 		
 	initConnection: function () {
 		let self = this;
+		this.counter = Buffer.from('0000', 'hex');
 		
 		// get available Ips
 		const nets = networkInterfaces();
 		let availableIps = [];
+		let availableMacs = {};
 		for (const name of Object.keys(nets)) {
 			for (const net of nets[name]) { 
         // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
@@ -360,6 +394,7 @@ module.exports = {
 				const familyV4Value = (typeof net.family === 'string') ? 'IPv4' : 4
 				if (net.family === familyV4Value && !net.internal) {
 					availableIps.push(net.address);
+					availableMacs[net.address] = net.mac;
 				}
 			}
 		}
@@ -378,9 +413,11 @@ module.exports = {
 		// bind socket to random port of configured ip address if available
 		if (availableIps.includes(self.config.ip)) {
 			this.socket.bind(0, self.config.ip);
+			this.mac = Buffer.from(availableMacs[self.config.ip].replaceAll(':',''), 'hex');
 		} else {
 			this.log('warn', "Config IP not available");
 			this.socket.bind();
+			this.mac = Buffer.from('000000000000', 'hex');
 		}
 
 		this.debug = this.config.verbose;
@@ -541,7 +578,8 @@ module.exports = {
             this.log('debug', `Rx (${reply.length}): ${reply.toString("hex")}`);
         }
 
-        if (reply[0] === danteConstant[0] && reply[1] === sequenceId1[0]) {
+        //if (reply[0] === danteConstant[0] && reply[1] === sequenceId1[0]) {
+		if (reply[0] === DANTE_PROTOCOL.CONTROL[0]) {
             if (replySize === bufferToInt(reply.slice(2, 4))) {
 				// network is alive
 				this.updateStatus(InstanceStatus.Ok);
@@ -555,7 +593,7 @@ module.exports = {
 				this.keepAlive(deviceIp);
                 
 				deviceData[deviceIp] = {};
-				
+
 				switch (bufferToInt(commandId)) {
 					
 					// deviceName
@@ -664,7 +702,7 @@ module.exports = {
 
 
 
-    sendCommand(command, host, port = danteControlPort) {
+    sendCommand(command, host, port = DANTE_PORTS.ARC) {
         if (this.debug) {
             // Log sent bytes when in debug mode
             this.log('debug', `Tx (${command.length}): ${command.toString("hex")}`);
@@ -676,60 +714,47 @@ module.exports = {
 	
 	
 // create Dante message
-    makeCommand(command, commandArguments = Buffer.alloc(2)) {
-        let sequenceId2 = Buffer.alloc(2);
-        sequenceId2.writeUInt16BE(getRandomInt(65535));
+    makeCommand(commandType, commandArguments = Buffer.alloc(2)) {
 
         const padding = Buffer.from([0x00, 0x00]);
-        let commandLength = Buffer.alloc(2);
-        let commandId = Buffer.alloc(2);
+        let commandLength = intToBuffer(commandArguments.length + 11);
 
-		commandId = Buffer.from(DANTE_COMMANDS[command]);
-		
-        commandLength.writeUInt16BE(
-            Buffer.concat([
-                danteConstant,
-                sequenceId1,
-                sequenceId2,
-                commandId,
-                Buffer.alloc(2),
-                commandArguments,
-                Buffer.alloc(1),
-            ]).length + 2
-        );
 
-        return Buffer.concat([
-            danteConstant,
-            sequenceId1,
+		const payload = Buffer.concat([
+			DANTE_PROTOCOL.CONTROL,
             commandLength,
-            sequenceId2,
-            commandId,
-            Buffer.alloc(2),
+            this.counter,
+            commandType,
+            padding,
             commandArguments,
-            Buffer.alloc(1),
+			Buffer.from([0x00])
         ]);
+
+		incrementBE(this.counter);
+
+        return payload;
     },
 
 
-	makeSettingCommand(command, commandArguments = Buffer.alloc(2)) {
-		let commandLength = Buffer.alloc(2);
-		commandLength.writeUInt16BE(commandArguments.length + 36);
-	//	const startBlock = Buffer.from("00392f7c482ae39371ac0000", "hex");
-		const startBlock = Buffer.from('00972a84342eb718b5820000', "hex");
-		const audinate = Buffer.from("Audinate", "ascii");
-		const middleBlock = Buffer.from('0734', 'hex');
-		const queueBlock = Buffer.from ('0000006400000001', 'hex');
-		
-		return Buffer.concat([
+	makeSettingCommand(commandType, commandArguments = Buffer.alloc(2)) {
+		let commandLength = intToBuffer(commandArguments.length + 28);
+		const startBlock = Buffer.from('2a84', "hex");
+
+		const payload = Buffer.concat([
 			DANTE_PROTOCOL.SETTINGS,
 			commandLength,
+			this.counter,
 			startBlock,
-			audinate,
-			middleBlock,
-			command,
-			queueBlock,
+			this.mac,
+			Buffer.from('0000', 'hex'),
+			AUDINATE_BUFFER,
+			commandType,
 			commandArguments
-			]);
+		]);
+			
+		incrementBE(this.counter);
+
+		return payload;
 	},
 
 //**
@@ -737,20 +762,19 @@ module.exports = {
 //**
 
     resetDeviceName(ipaddress) {
-        const commandBuffer = this.makeCommand("setDeviceName");
+        const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceName);
         this.sendCommand(commandBuffer, ipaddress);
     },
 
     setDeviceName(ipaddress, name) {
-        const commandBuffer = this.makeCommand("setDeviceName", Buffer.from(name, "ascii"));
+        const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceName, Buffer.from(name, "ascii"));
         this.sendCommand(commandBuffer, ipaddress);
     },
 
     setChannelName(ipaddress, channelName = "", channelType = "rx", channelNumber = 0) {
         const channelNameBuffer = Buffer.from(channelName, "ascii");
         let commandBuffer = Buffer.alloc(1);
-        let channelNumberBuffer = Buffer.alloc(2);
-        channelNumberBuffer.writeUInt16BE(channelNumber);
+        let channelNumberBuffer = intToBuffer(channelNumber); 
 
         if (channelType === "rx") {
             const commandArguments = Buffer.concat([
@@ -760,7 +784,7 @@ module.exports = {
                 Buffer.alloc(12),
                 channelNameBuffer,
             ]);
-            commandBuffer = this.makeCommand("setRxChannelName", commandArguments);
+            commandBuffer = this.makeCommand(DANTE_COMMANDS.setRxChannelName, commandArguments);
         } else if (channelType === "tx") {
             const commandArguments = Buffer.concat([
                 Buffer.from("040100000", "hex"),
@@ -769,7 +793,7 @@ module.exports = {
                 Buffer.alloc(18),
                 channelNameBuffer,
             ]);
-            commandBuffer = this.makeCommand("setTxChannelName", commandArguments);
+            commandBuffer = this.makeCommand(DANTE_COMMANDS.setTxChannelName, commandArguments);
         } else {
             throw "Invalid Channel Type - must be 'tx' or 'rx'";
         }
@@ -814,7 +838,7 @@ module.exports = {
 			sourceDeviceNameBuffer,								// source device name
         ]);
 
-        const commandBuffer = this.makeCommand("subscription", commandArguments);
+        const commandBuffer = this.makeCommand(DANTE_COMMANDS.subscription, commandArguments);
 
         this.sendCommand(commandBuffer, ipaddress);
 		
@@ -844,7 +868,7 @@ module.exports = {
             Buffer.alloc(1),
         ]);
 
-        const commandBuffer = this.makeCommand("subscription", commandArguments);
+        const commandBuffer = this.makeCommand(DANTE_COMMANDS.subscription, commandArguments);
 
         this.sendCommand(commandBuffer, ipaddress);
 		
@@ -855,7 +879,7 @@ module.exports = {
 
 
     getChannelCount(ipaddress) {
-        const commandBuffer = this.makeCommand("channelCount");
+        const commandBuffer = this.makeCommand(DANTE_COMMANDS.channelCount);
         this.sendCommand(commandBuffer, ipaddress);
 
         return this.devicesData[ipaddress]?.channelCount;
@@ -863,7 +887,7 @@ module.exports = {
 
 
 
-    getChannelNames(ipaddress, ...channelTypes) {
+    getChannelNames(ipaddress, ...channelTypes) { 
 		if (channelTypes==undefined){
 				channelTypes=['rx','txInfo'];
 		}
@@ -873,7 +897,7 @@ module.exports = {
 			case 'tx' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
 					commandArguments.writeUInt8(page*32+1, 3);
-					commandBuffer = this.makeCommand("txChannelNames", commandArguments);
+					commandBuffer = this.makeCommand(DANTE_COMMANDS.txChannelNames, commandArguments);
 					this.sendCommand(commandBuffer, ipaddress);
 				}
 				break;
@@ -881,7 +905,7 @@ module.exports = {
 			case 'rx' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) { 
 					commandArguments.writeUInt8(page*16+1, 3);
-					commandBuffer = this.makeCommand("rxChannelNames", commandArguments);
+					commandBuffer = this.makeCommand(DANTE_COMMANDS.rxChannelNames, commandArguments);
 					this.sendCommand(commandBuffer, ipaddress);
 				}
 				break;
@@ -889,7 +913,7 @@ module.exports = {
 			case 'txInfo' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
 					commandArguments.writeUInt8(page*32+1, 3);
-					commandBuffer = this.makeCommand("txChannelInfo", commandArguments);
+					commandBuffer = this.makeCommand(DANTE_COMMANDS.txChannelInfo, commandArguments);
 					this.sendCommand(commandBuffer, ipaddress);
 				}
 				break;
@@ -902,12 +926,12 @@ module.exports = {
 
 
 	getDeviceName(ipaddress) {
-		const commandBuffer = this.makeCommand("deviceName");
+		const commandBuffer = this.makeCommand(DANTE_COMMANDS.deviceName);
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
 	getSettings(ipaddress) {
-		const commandBuffer = this.makeCommand('deviceSettings')
+		const commandBuffer = this.makeCommand(DANTE_COMMANDS.deviceSettings)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
@@ -916,16 +940,44 @@ module.exports = {
 		let commandArguments = Buffer.from("050382050020021100108301002400000000000000000000000000000000", "hex");
 		commandArguments.writeUInt32BE(latency*1000000,22);
 		commandArguments.writeUInt32BE(latency*1000000,26);
-		const commandBuffer = this.makeCommand('setDeviceSettings', commandArguments)
+		const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceSettings, commandArguments)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 
 	setSampleRate(ipaddress, sampleRate) {
-		let sr = Buffer.alloc(4);
-		sr.writeUint32BE(sampleRate, 0);
-		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, sr); console.log(commandBuffer);
+		const arguments = Buffer.concat ([
+			Buffer.from ('0000006400000001', 'hex'),
+			intToBuffer(sampleRate, 4)
+			]);
+		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, arguments); 
 		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
+		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.DVS_SETTINGS);
 	},	
+	
+	setEncoding(ipaddress, encoding) {
+		const arguments = Buffer.concat([
+			Buffer.from ('0000006400000001', 'hex'),
+			intToBuffer(encoding, 4)
+			]);
+		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, arguments); 
+		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
+		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.DVS_SETTINGS); 
+	},	
+
+	setGain(ipaddress, direction= 'out', channelNumber, gainSetting) {
+		const arguments = Buffer.concat ([
+			Buffer.from('00000000', 'hex'),
+			Buffer.from('00010001', 'hex'),
+			Buffer.from('000c0010', 'hex'),
+			Buffer.from('02010000', 'hex'),
+			intToBuffer(channelNumber, 4),
+			intToBuffer(gainSetting, 4)
+		]);
+		
+		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, arguments);
+		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
+	},
+	
 
     get devices() {
       return this.devicesData;

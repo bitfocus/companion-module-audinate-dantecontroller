@@ -1,3 +1,6 @@
+const {DANTE_ENCODING_CHOICES, DANTE_VOLUME_CONTROL} = require("./const")
+
+
 module.exports = {
 	initActions: function () {
 		let self = this;
@@ -209,6 +212,72 @@ module.exports = {
 				let opt = action.options;
 				const sr = await context.parseVariablesInString(opt.sr);
  				self.setSampleRate(opt.destinationDevice, sr);
+			}
+		}
+		
+		
+		actions.setEncoding = {
+			name: 'Set Encoding',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				},
+				{
+					type: 'dropdown',
+					label: 'Encoding',
+					id: 'enc',
+					choices: DANTE_ENCODING_CHOICES,
+					default: 24
+				}
+			],
+			callback: async function (action, context) {
+				let opt = action.options;
+ 				self.setEncoding(opt.destinationDevice, opt.enc);
+			}
+		}
+		
+		
+		actions.setGain = {
+			name: 'Set Gain',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Destination Device',
+					id: 'destinationDevice',
+					choices: self.devicesChoices
+				},
+				{
+					type: 'dropdown', 
+					label: 'Channel direction',
+					id: 'direction',
+					choices: [
+						{ id: 'in', label : 'in' },
+						{ id: 'out', label: 'out' }
+					],
+					default: 'out'
+				},
+				{
+					type: 'textinput',
+					label: 'Channel number', 
+					id: 'channel',
+					default : '1', 
+					useVariables: true,
+				},
+				{
+					type: 'dropdown',
+					label: 'Gain',
+					id: 'gain',
+					choices: DANTE_VOLUME_CONTROL,
+					default: 2
+				}
+			],
+			callback: async function (action, context) {
+				let opt = action.options;
+				const channel = await context.parseVariablesInString(opt.channel);
+ 				self.setGain(opt.destinationDevice, opt.direction, channel, opt.gain);
 			}
 		}
 		

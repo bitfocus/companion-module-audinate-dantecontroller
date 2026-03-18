@@ -57,7 +57,7 @@ class danteInstance extends InstanceBase {
 	
 		this.updateStatus(InstanceStatus.Connecting);
 
-		this.initConnection();
+		this.initConnection();this.initActions();
 	}
 }
 
