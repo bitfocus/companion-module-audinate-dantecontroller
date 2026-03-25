@@ -31,7 +31,7 @@ module.exports = {
 			devicesList = Object.entries(self.devicesData);
 		}
 		if(!(variableTypes?.length > 0)) {
-		  variableTypes = ['devices', 'ip', 'rx', 'tx', 'rx_names', 'tx_names', 'sr', 'latency'];
+		  variableTypes = ['devices', 'ip', 'rx', 'tx', 'rx_names', 'tx_names', 'sr', 'latency', 'encoding'];
 		}
 		
 		for (const item of devicesList) {
@@ -69,6 +69,7 @@ module.exports = {
 						
 						case 'sr':
 						case 'latency':
+						case 'encoding':
 							variableValues[deviceName + '_' + variableType] = device[variableType];
 							break;
 					}
