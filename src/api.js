@@ -3,16 +3,13 @@ const dgram = require("dgram");
 const merge = require("./utils/merge");
 const { networkInterfaces } = require('os');
 const { InstanceStatus, Regex } = require('@companion-module/base')
-const {AUDINATE_BUFFER, DANTE_PORTS, DANTE_PROTOCOL, DANTE_COMMANDS, DANTE_MULTICAST_IP, DANTE_ENCODING_CHOICES} = require("./const")
-
-
-const danteServiceTypes = ["_netaudio-cmc._udp", "_netaudio-dbc._udp", "_netaudio-arc._udp", "_netaudio-chan._udp"];
-const danteControlPort = 4440;
-const sequenceId1 = Buffer.from([0x29]);
-const danteConstant = Buffer.from([0x27]);
+const {DANTE_CONST, object2choices} = require("./const");
 
 
 
+const compareArrays = (a, b) => {
+  return JSON.stringify(a) === JSON.stringify(b);
+};
 
 //**
 //** utils functions to parse dante messages
@@ -65,29 +62,10 @@ const incrementBE = (buffer) => {
 
 const parseString = (buffer, startIndex) => {
   const end = buffer.indexOf(0x00, startIndex);
-  return buffer.toString('utf8', startIndex, end);
+  if (buffer.length > startIndex) {
+	return buffer.toString('utf8', startIndex, end);
+  }
 };
-
-const findLabel = (choices, id) => {
-	let result;
-	choices.forEach((entry) => {
-		if (entry.id == id) {
-			result = entry.label;
-		}
-	})
-	return result;
-};
-
-const findId = (choices, label) => {
-	let result;
-	choices.forEach((entry) => {
-		if (entry.label == label) {
-			result = entry.id
-		}
-	})
-	return result;
-};
-
 
 
 //** 
@@ -98,7 +76,6 @@ const parseChannelCount = (reply) => {
     const deviceInfo = { tx: {count: reply[13]}, rx :{count:reply[15]} };
     return deviceInfo;
 };
-
 
 const parseChannelNames = (reply, infoType) => {
 	const deviceInfo = {};
@@ -117,21 +94,27 @@ const parseChannelNames = (reply, infoType) => {
 	let  infoBufferSize, nameNumberOffset, nameIndexOffset, sampleRateOffset;
 
 // set indices for rx or tx
-	if (infoType == 'tx') {
-		infoBufferSize = 6;
-		nameNumberOffset = 2;
-		nameIndexOffset = 4;
-	} else if (infoType == 'txInfo') {
-	  infoBufferSize = 8;
-	  nameNumberOffset = 0;
-	  sampleRateOffset = 4;
-	  nameIndexOffset = 6;
-	}
-	else if (infoType == 'rx') {
-		infoBufferSize = 20;
-		nameNumberOffset = 0;
-		sampleRateOffset = 4;
-		nameIndexOffset = 10;
+	switch (infoType) {
+		case 'tx' :
+//	if (infoType == 'tx') {
+			infoBufferSize = 6;
+			nameNumberOffset = 2;
+			nameIndexOffset = 4;
+			break;
+		case 'txInfo' :
+//	} else if (infoType == 'txInfo') {
+			infoBufferSize = 8;
+			nameNumberOffset = 0;
+			sampleRateOffset = 4;
+			nameIndexOffset = 6;
+			break;
+//	} else if (infoType == 'rx') {
+		case 'rx' :
+			infoBufferSize = 20;
+			nameNumberOffset = 0;
+			sampleRateOffset = 4;
+			nameIndexOffset = 10;
+			break;
 	} 
 	
 	// for each channel
@@ -189,12 +172,152 @@ const parseChannelNames = (reply, infoType) => {
     return deviceInfo;
 }
 
+const parseTxFriendlyNames = (reply) => {
+	const deviceInfo = {};
+	deviceInfo.tx = {};
+	let firstChannelGroup;
+	
+	const channelCount = reply[10];
+	const recCount = reply[11];
+	const startIndex = 12;
+
+
+	// set offsets
+	const infoBufferSize = 6;
+	const nameNumberOffset = 2;
+	const friendlyNameIndexOffset = 4;
+	
+	// for each channel
+	for (let i = 0; i < Math.min(recCount,32) ; i++) {
+		// get info chunk of channel
+		const infoIndex = startIndex + (infoBufferSize * i);
+		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
+		// get channel number and byte index of name
+		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset);
+		const nameIndex = bufferToInt(infoBuffer, friendlyNameIndexOffset);
+		
+		// create return object if needed
+		if (deviceInfo.tx[nameNumber] == undefined) {
+			deviceInfo.tx[nameNumber]={};
+		}
+		let returnChannel = deviceInfo.tx[nameNumber];
+		returnChannel.number = nameNumber;
+		
+		// get name
+		returnChannel.friendlyName = parseString(reply, nameIndex);
+	}
+    return deviceInfo;
+}
+
+const parseRxChannels = (reply) => {
+	const deviceInfo = {};
+	deviceInfo.rx = {};
+	
+	const channelCount = reply[10];
+	const recCount = reply[11];
+	const startIndex = 12;
+
+// set offsets
+	const infoBufferSize = 20;
+	const nameNumberOffset = 0;
+	const sampleRateOffset = 4;
+	const nameIndexOffset = 10; 
+	const sourceChannelOffset = 6;
+	const sourceDeviceOffset = 8;
+	const channelStatusOffset =  12;
+	const subscriptionStatusOffset = 14;
+	
+	// for each channel
+	for (let i = 0; i < Math.min(recCount,32) ; i++) {
+		// get info chunk of channel
+		const infoIndex = startIndex + (infoBufferSize * i);
+		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
+		// get channel number and byte index of name
+		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset);
+		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset);
+		
+		// create return object if needed
+		if (deviceInfo.rx[nameNumber] == undefined) {
+			deviceInfo.rx[nameNumber]={};
+		}
+		let returnChannel = deviceInfo.rx[nameNumber];
+		returnChannel.number = nameNumber;
+		
+		// get name
+		const channelName = parseString(reply, nameIndex);
+		returnChannel.name = channelName;
+		
+		// get routing
+		const sourceChannelIndex = bufferToInt(infoBuffer, sourceChannelOffset);
+		const sourceDeviceIndex = bufferToInt(infoBuffer, sourceDeviceOffset);
+		const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+		if (i == 0) {
+			firstChannelGroup = sampleRateIndex;
+		} else if (sampleRateIndex != firstChannelGroup) {
+			deviceInfo.rx.count = i;
+			break;
+		}
+		returnChannel.sourceChannel = parseString(reply, sourceChannelIndex);
+		returnChannel.sourceDevice = parseString(reply, sourceDeviceIndex);
+		returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset);
+		returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset);
+		returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex); 
+	}
+    return deviceInfo;
+}
+
+const parseTxChannels = (reply) => {
+	const deviceInfo = {};
+	deviceInfo.tx = {};
+	let firstChannelGroup;
+	
+	const channelCount = reply[10];
+	const recCount = reply[11];
+	const startIndex = 12;
+
+// set offsets
+	const infoBufferSize = 8;
+	const nameNumberOffset = 0;
+	const sampleRateOffset = 4;
+	const nameIndexOffset = 6;
+	
+	// for each channel
+	for (let i = 0; i < Math.min(recCount,32) ; i++) {
+		// get info chunk of channel
+		const infoIndex = startIndex + (infoBufferSize * i);
+		const infoBuffer = reply.slice(infoIndex, infoIndex + infoBufferSize);
+		// get channel number and byte index of name
+		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset);
+		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset);
+		
+		// create return object if needed
+		if (deviceInfo.tx[nameNumber] == undefined) {
+			deviceInfo.tx[nameNumber]={};
+		}
+		let returnChannel = deviceInfo.tx[nameNumber];
+		returnChannel.number = nameNumber;
+		
+		// get name
+		const channelName = parseString(reply, nameIndex);
+		returnChannel.name = channelName;
+		
+		// get sampleRate
+		const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset);
+		if (i == 0) {
+			firstChannelGroup = sampleRateIndex;
+		} else if (sampleRateIndex != firstChannelGroup) {
+			deviceInfo.tx.count = i;
+			break;
+		}
+		 returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex);
+	}
+    return deviceInfo;
+}
 
 const parseDeviceInfo = (reply) => {
 	const deviceInfo = {};
 	
 }
-
 
 const parseDeviceName = (reply) => {
 	return {name: parseString(reply, 10)};
@@ -228,14 +351,6 @@ const parseDeviceSettings = (reply) => {
 	}
 	return deviceInfo;
 }
-
-const parseSettings = {
-	MESSAGE_TYPE_SAMPLE_RATE_STATUS : function (payload) {
-		const deviceInfo = {};
-		deviceInfo.sr = bufferToInt
-	}
-}
-
 
 
 //**
@@ -295,7 +410,19 @@ module.exports = {
 	initConnection: function () {
 		let self = this;
 		this.counter = Buffer.from('0000', 'hex');
+
+		this.debug = this.config.verbose;
+		this.timeout = this.config.timeoutInterval;
 		
+		// create data object
+		self.devicesData = {};
+		
+		// create actions and feedback dropdown choices
+		self.devicesChoices = [];
+		self.txChannelsChoices = {};
+		self.rxChannelsChoices = {};
+		self.txFriendlyNameRefreshCounter = 0;
+
 		// get available Ips
 		const nets = networkInterfaces();
 		let availableIps = [];
@@ -312,61 +439,62 @@ module.exports = {
 			}
 		}
 		
+	// create communication sockets
+		this.sockets = {};
 		
 		// create Dante communication udp socket
-		this.socket = dgram.createSocket({type: "udp4" , reusePort: true});
-
-       	this.socket.on("message", this.parseReply.bind(this));
-   		this.socket.on("error", (error)=>{
+		this.sockets.ARC = dgram.createSocket({type: "udp4" , reusePort: true});
+		const arcSocket = this.sockets.ARC;
+		
+       	arcSocket.on("message", this.parseReply.bind(this));
+   		arcSocket.on("error", (error)=>{
 			self.log('error', error.message);
 		});
 		
-        this.socket.on("listening", ()=>{self.updateStatus(InstanceStatus.Connecting);}); 
+        arcSocket.on("listening", ()=>{self.updateStatus(InstanceStatus.Connecting);}); 
 		
 		// bind socket to random port of configured ip address if available
 		if (availableIps.includes(self.config.ip)) {
-			this.socket.bind(0, self.config.ip);
-			this.mac = Buffer.from(availableMacs[self.config.ip].replaceAll(':',''), 'hex');
+			arcSocket.bind(0, self.config.ip);
+			this.mac = Buffer.from(availableMacs[self.config.ip].replaceAll(':',''), 'hex'); 
 		} else {
 			this.log('warn', "Config IP not available");
-			this.socket.bind();
+			arcSocket.bind();
 			this.mac = Buffer.from('000000000000', 'hex');
 		}
 
 		// create Dante settings socket
-		this.settingSocket = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
-		
-		this.settingSocket.on("message", this.parseSettingsReply.bind(this));	
+		this.sockets.SETTINGS = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
+		const settingSocket = this.sockets['SETTINGS'];
+		settingSocket.on("message", this.parseSettingsReply.bind(this));	
 
-		this.settingSocket.on ("listening", () => {  
+		settingSocket.on ("listening", () => {  
 			if (availableIps.includes(self.config.ip)) {
-				self.settingSocket.addMembership(DANTE_MULTICAST_IP.INFO, self.config.ip);
+				settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO, self.config.ip);
 			} else {
-				self.settingSocket.addMembership(DANTE_MULTICAST_IP.INFO, );
+				settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO, );
 			}
 		});
 		
 		if (availableIps.includes(self.config.ip)) {
-			this.settingSocket.bind(DANTE_PORTS.INFO, self.config.ip);
+			settingSocket.bind(DANTE_CONST.PORTS.INFO, self.config.ip);
 		} else {
-			this.settingSocket.bind(DANTE_PORTS.INFO, );
+			settingSocket.bind(DANTE_CONST.PORTS.INFO);
 		}
-
 		
 
-		this.debug = this.config.verbose;
-		this.timeout = this.config.timeoutInterval;
-		
-		// create data object
-		self.devicesData = {};
-		
-		// create actions and feedback dropdown choices
-		self.devicesChoices = [];
-		self.txChannelsChoices = {};
-		self.rxChannelsChoices = {};
-		self.txFriendlyNameRefreshCounter = 0;
+		// create Dante CMC socket
+		this.sockets.CMC = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
+		const cmcSocket = this.sockets.CMC;
+		cmcSocket.on("message", this.parseCmcReply.bind(this));	
 
-
+		if (availableIps.includes(self.config.ip)) {
+			cmcSocket.bind({address: self.config.ip});
+		} else {
+			cmcSocket.bind();
+		}
+		
+		
 
 		self.setupInterval(); 
 		if (availableIps.includes(self.config.ip)) {
@@ -378,11 +506,17 @@ module.exports = {
 		
 
 		// dante devices discover
+		let questions = []; 
+		for (service of DANTE_CONST.SERVICES_ARRAY) {
+			questions.push ({
+				name: service, 
+				type: 'PTR',
+				class: 'IN'
+			});
+		}
+
 		self.mdns?.query({
-			questions:[{
-				name:'_netaudio-arc._udp.local',
-				type:'PTR'
-			}]
+			questions: questions
 		});
 	},
 	
@@ -423,7 +557,7 @@ module.exports = {
 	// create or update channels name in dropdown choices for either rx or tx (channelType)
 	updateChannelChoices: function(deviceIp, channelType) {
 
-		if (!(this.devicesData[deviceIp] && this.devicesData[deviceIp][channelType])) {
+		if (!this.devicesData[deviceIp]?.[channelType]) {
 			this.log('error', "ERROR : Can't update channelsChoices for device " + deviceIp);
 			return;
 		}
@@ -457,6 +591,21 @@ module.exports = {
 			}
 		}
 	},
+
+
+	registerDevice : function (deviceIp, deviceName) {
+		this.devicesData[deviceIp] = {name: deviceName, ports:{}};
+		const currDevice = this.devicesData[deviceIp];
+		
+	// timeout function to destroy reference if device is offline too long
+		if (this.timeout > 0) {
+			// embed timeout object into array to avoid circular references with merge function
+			currDevice.timeoutArray = [];
+			currDevice.timeoutArray[0] = setTimeout(() => {this.destroyDevice(deviceIp)}, this.timeout);
+		}
+		
+		this.insertDeviceChoice(deviceIp, deviceName);
+	},	
 
 
 
@@ -509,137 +658,146 @@ module.exports = {
 
         if (this.debug) {
             // Log replies when in debug mode
-            this.log('debug', `Rx (${reply.length}): ${reply.toString("hex")}`);
+            this.log('debug', `ARC : Rx (${reply.length}): ${reply.toString("hex")}`);
         }
 
-        if (reply[0] === danteConstant[0]) { //&& reply[1] === sequenceId1[0]) {
-		//if (reply[0] === DANTE_PROTOCOL.CONTROL[0]) {
-		//if (bufferToInt(reply, 0, 1) == Math.floor(DANTE_PROTOCOL.CONTROL/256)) {
-            if (replySize === bufferToInt(reply.slice(2, 4))) {
-				// network is alive
-				this.updateStatus(InstanceStatus.Ok);
-				this.CONNECTED = true;
-				
-				// device is online
-				this.keepAlive(deviceIp);
-                const commandId = reply.slice(6, 8);
-				
-				// device is online
-				this.keepAlive(deviceIp);
-                
-				deviceData[deviceIp] = {};
+          if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CONTROL && replySize === bufferToInt(reply, 2)){
+ 
+			// network is alive
+			this.updateStatus(InstanceStatus.Ok);
+			this.CONNECTED = true;
+			
+			// device is online
+			this.keepAlive(deviceIp);
+            const commandId = bufferToInt(reply, 6);
+			
+			deviceData[deviceIp] = {};
 
-				switch (bufferToInt(commandId)) {
+			switch (commandId) {
+				
+				// deviceName
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_NAME_QUERY :
+					deviceData[deviceIp] = parseDeviceName(reply);
+					let currDevice = deviceData[deviceIp];
 					
-					// deviceName
-					case 0x1002:
-						deviceData[deviceIp] = parseDeviceName(reply);
+					// create or update devices choices for actions if necessary
+					if (!this.devicesData[deviceIp]?.name) {
+						registerDevice(deviceIp, deviceData[deviceIp].name);
 						
-						// create or update devices choices for actions if necessary
-						if (!this.devicesData[deviceIp]?.name) {
-							this.insertDeviceChoice(deviceIp, deviceData[deviceIp].name);
-							
-						// timeout function to destroy reference if device is offline too long
-							if (this.timeout > 0) {
-								// embed timeout object into array to avoid circular references with merge function
-								deviceData[deviceIp].timeoutArray = [];
-								const timeoutArray = deviceData[deviceIp].timeoutArray;
-								timeoutArray[0] = setTimeout(() => {this.destroyDevice(deviceIp)}, this.timeout);
-							}							
+//						this.insertDeviceChoice(deviceIp, currDevice.name);
+						updateFlags.push('name');
+						
+//					// timeout function to destroy reference if device is offline too long
+//						if (this.timeout > 0) {
+//							// embed timeout object into array to avoid circular references with merge function
+//							currDevice.timeoutArray = [];
+//							const timeoutArray = currDevice.timeoutArray;
+//							timeoutArray[0] = setTimeout(() => {this.destroyDevice(deviceIp)}, this.timeout);
+//						}							
 
-						// retrieve channel count and settings
-							this.getChannelCount(deviceIp);
-							this.getSettings(deviceIp);
-							
-						} else if (this.devicesData[deviceIp].name != deviceData[deviceIp].name) {
-							this.updateDeviceChoice(deviceIp, deviceData[deviceIp].name);
-							updateFlags.push('name');
-						}
+					// retrieve channel count and settings
+						this.getChannelCount(deviceIp);
+						this.getSettings(deviceIp);
 						
-						
-						break;
-							
-							
-					// channelCount	
-					case 0x1000:
-						deviceData[deviceIp] = parseChannelCount(reply);
-						
-						// if channel count has changed, retrieve channel names
-						if (deviceData[deviceIp].rx.count != this.devicesData[deviceIp]?.rx?.count) {
-							this.getChannelNames(deviceIp, 'rx'); 
-						}
-						if (deviceData[deviceIp].tx.count != this.devicesData[deviceIp]?.tx?.count) {
-							this.getChannelNames(deviceIp, 'txInfo', 'tx');
-						}
-						break;
-						
-					// txChannelInfo
-					case 0x2000 :
-						deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
-						updateFlags.push('tx');
-						break;
-								
-					// txChannelNames
-					case 0x2010:
-					    deviceData[deviceIp] = parseChannelNames(reply,'tx');
-						updateFlags.push('tx');
-						break;
-						
-					// rxChannelNames
-					case 0x3000:
-						deviceData[deviceIp] = parseChannelNames(reply,'rx');
-						updateFlags.push('rx');
-						break;
-						
-					// device settings 
-					case 0x1100:
-						deviceData[deviceIp] = parseDeviceSettings(reply);
-						updateFlags.push('info');
-						break;
-							
-									
-				}
-							
-				
-				if (this.debug) {
-					// Log parsed device information when in debug mode
-					console.log('DEVICE DATA : ', deviceData);
-				}
-				
-				this.devicesData = merge(this.devicesData, deviceData);
-				
-				// update Channels choices for actions, feedbacks & variables
-				
-				for (const flag of updateFlags) {
-					switch (flag) {
-						case 'name' : 
-							this.updateData();
-							break;
-						case 'info':
-							this.checkVariables(deviceIp, 'sr', 'latency');
-							break;
-						case 'rx':
-							this.checkVariables(deviceIp, 'rx', 'rx_names');
-							this.updateChannelChoices(deviceIp, flag);
-							this.checkFeedbacks();
-							break;
-						case 'tx':
-							this.checkVariables(deviceIp, 'tx', 'tx_names');
-							this.updateChannelChoices(deviceIp, flag);
-							this.checkFeedbacks();
-							break;
+					} else if (this.devicesData[deviceIp].name != currDevice.name) {
+						this.updateDeviceChoice(deviceIp, currDevice.name);
+						updateFlags.push('name');
 					}
-							
+					
+					
+					break;
+						
+						
+				// channelCount	
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_CHANNEL_COUNTS_QUERY: {
+					deviceData[deviceIp] = parseChannelCount(reply);
+					let currDevice = deviceData[deviceIp];
+					
+					// if channel count has changed, retrieve channel names
+					if (currDevice.rx.count >0 && currDevice.rx.count != this.devicesData[deviceIp]?.rx?.count) {
+						updateFlags.push('rxCount');
+					}
+					if (currDevice.tx.count >0 && currDevice.tx.count != this.devicesData[deviceIp]?.tx?.count) {
+						updateFlags.push('txCount');
+					}
+					break;
 				}
-            }
+					
+				// txChannels
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY : {
+					//deviceData[deviceIp] = parseChannelNames(reply,'txInfo');
+					deviceData[deviceIp] = parseTxChannels(reply,'txInfo');
+					updateFlags.push('tx');
+					break;
+				}
+							
+				// txChannelFriendlyNames
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY: {
+				    //deviceData[deviceIp] = parseChannelNames(reply,'tx');
+					deviceData[deviceIp] = parseTxFriendlyNames(reply,'tx');
+					updateFlags.push('tx');
+					break;
+				}
+					
+				// rxChannels
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY: {
+					//deviceData[deviceIp] = parseChannelNames(reply,'rx');
+					deviceData[deviceIp] = parseRxChannels(reply,'rx');
+					updateFlags.push('rx');
+					break;
+				}
+					
+				// device settings 
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY: {
+					deviceData[deviceIp] = parseDeviceSettings(reply);
+					updateFlags.push('info');
+					break;
+				}
+			}
+						
+			
+			if (this.debug) {
+				// Log parsed device information when in debug mode
+		//		console.log('DEVICE DATA : ', deviceData);
+			}
+			
+			this.devicesData = merge(this.devicesData, deviceData);
+			// update Channels choices for actions, feedbacks & variables
+			
+			for (const flag of updateFlags) {
+				switch (flag) {
+					case 'name' : 
+						this.updateData();
+						break;
+					case 'info':
+						this.checkVariables(deviceIp, 'sr', 'latency');
+						break;
+					case 'rx':
+						this.checkVariables(deviceIp, 'rx', 'rx_names');
+						this.updateChannelChoices(deviceIp, flag);
+						this.checkFeedbacks();
+						break;
+					case 'tx':
+						this.checkVariables(deviceIp, 'tx', 'tx_names');
+						this.updateChannelChoices(deviceIp, flag);
+						this.checkFeedbacks();
+						break;
+					case 'rxCount':
+						this.getChannelNames(deviceIp, 'rx'); 
+						break;
+					case 'txCount':
+						this.getChannelNames(deviceIp, 'txInfo', 'tx');
+						break;
+				}
+						
+			}
         }
     },
 
 
 
-// function handling incoming dante setting messages (on info port)
+// function handling incoming dante setting messages (on settings port)
     parseSettingsReply: function(reply, rinfo) {
-		const self = this;
         const deviceIp = rinfo.address;
         const replySize = rinfo.size;
         let deviceData = {};
@@ -647,113 +805,242 @@ module.exports = {
 
 		if (this.debug) {
             // Log replies when in debug mode
-            this.log('debug', `Rx Info(${reply.length}): ${reply.toString("hex")}`);
+            this.log('debug', `SETTINGS : Rx (${reply.length}): ${reply.toString("hex")}`);
         }
 
-		if (bufferToInt(reply, 0) == DANTE_PROTOCOL.SETTINGS) {
-            if (replySize == bufferToInt(reply.slice(2, 4))) {
-				// network is alive
-				this.updateStatus(InstanceStatus.Ok);
-				this.CONNECTED = true;
-				
-				// device is online
-				this.keepAlive(deviceIp);
-				
-				const payload = reply.slice(24);
-                const commandId = bufferToInt(payload, 2);
+		if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.SETTINGS && replySize == bufferToInt(reply, 2)) {
+		
+			// network is alive
+			this.updateStatus(InstanceStatus.Ok);
+			this.CONNECTED = true;
+			
+			// device is online
+			this.keepAlive(deviceIp);
+			
+			const payload = reply.slice(24);
+               const commandId = bufferToInt(payload, 2);
 
-				// device is online
-				this.keepAlive(deviceIp);
-                
-				deviceData[deviceIp] = {};
+			// device is online
+			this.keepAlive(deviceIp);
+               
+			deviceData[deviceIp] = {};
+			currDevice = deviceData[deviceIp];
+			
+			
+			switch (commandId) {
 				
-				switch (commandId) {
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_STATUS : {
+				// get encoding setting
+					const enc = bufferToInt(payload, 12, 4);
+					const encValue = DANTE_CONST.ENCODINGS[enc] ?? enc;
+					currDevice.encoding = encValue;
+				// mark flag to update variables
+					if (this.devicesData[deviceIp]?.encoding != encValue) {
+						updateFlags.push('encoding');
+					}
+				// get encoding options
+					let optionsOffset = bufferToInt(payload, 8);
+					const optionsNumber = bufferToInt(payload, 10);
+					if (optionsNumber && optionsNumber > 0) {
+						currDevice.encodingOptions = [];
+						for (let i = 0; i < optionsNumber; i++) {
+							currDevice.encodingOptions.push (bufferToInt(payload, optionsOffset, 4).toString());
+							optionsOffset += 4;
+						}
+				// mark flag to update variables
+						if (!updateFlags.includes('encodingOptions') && !compareArrays(currDevice.encodingOptions, this.devicesData[deviceIp]?.encodingOptions)) {
+							updateFlags.push('encodingOptions');
+						}
+					}
+					break;
+				}
 					
-					case DANTE_COMMANDS.MESSAGE_TYPE_ENCODING_STATUS : {
-					// get encoding setting
-						const enc = bufferToInt(payload, 12, 4);
-						deviceData[deviceIp].encoding = findLabel(DANTE_ENCODING_CHOICES, enc) ?? enc;
-					// get encoding options
-						let optionsOffset = bufferToInt(payload, 8);
-						const optionsNumber = bufferToInt(payload, 10);
-						if (optionsNumber && optionsNumber > 0) {
-							deviceData[deviceIp].encodingOptions = [];
-							for (let i = 0; i < optionsNumber; i++) {
-								deviceData[deviceIp].encodingOptions.push (bufferToInt(payload, optionsOffset, 4));
-								optionsOffset += 4;
-							}
-						}
-						break;
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_STATUS : {
+				// get sample rate setting
+					const sr = bufferToInt(payload, 12, 4);
+					currDevice.sr = sr;
+				// mark flag to update variables
+					if (this.devicesData[deviceIp]?.sr != sr) {
+						updateFlags.push('sr');
 					}
-						
-					case DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_STATUS : {
-					// get encoding setting
-						deviceData[deviceIp].sr = bufferToInt(payload, 12, 4);
-					// get encoding options
-						let optionsOffset = bufferToInt(payload, 8);
-						const optionsNumber = bufferToInt(payload, 10);
-						if (optionsNumber && optionsNumber > 0) {
-							deviceData[deviceIp].srOptions = [];
-							for (let i = 0; i < optionsNumber; i++) {
-								deviceData[deviceIp].srOptions.push (bufferToInt(payload, optionsOffset, 4));
-								optionsOffset += 4;
-							}
+				// get sample rate options
+					let optionsOffset = bufferToInt(payload, 8);
+					const optionsNumber = bufferToInt(payload, 10);
+					if (optionsNumber && optionsNumber > 0) {
+						currDevice.srOptions = [];
+						for (let i = 0; i < optionsNumber; i++) {
+							currDevice.srOptions.push(bufferToInt(payload, optionsOffset, 4).toString());
+							optionsOffset += 4;
 						}
-						break;
-					}
-					
-						
-					case DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS : {
-					// get encoding setting
-						deviceData[deviceIp].pullup = bufferToInt(payload, 12, 4);
-						deviceData[deviceIp].pullup_string = parseString(payload, 32);
-					// get encoding options
-						let optionsOffset = bufferToInt(payload, 8);
-						const optionsNumber = bufferToInt(payload, 10);
-						if (optionsNumber && optionsNumber > 0) {
-							deviceData[deviceIp].pullupOptions = [];
-							for (let i = 0; i < optionsNumber; i++) {
-								deviceData[deviceIp].srOptions.push (bufferToInt(payload, optionsOffset, 4));
-								optionsOffset += 4;
-							}
+				// mark flag to update variables
+						if (!updateFlags.includes('srOptions') && !compareArrays(currDevice.srOptions, this.devicesData[deviceIp]?.srOptions)) {
+							updateFlags.push('srOptions');
 						}
-						break;
 					}
-	
+					break;
 				}
 				
-				this.devicesData = merge(this.devicesData, deviceData); this.checkVariables(deviceIp);
-				//console.log(this.devicesData[deviceIp].encoding);
+					
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS : {
+				// get pullup setting
+					const pullup = bufferToInt(payload, 12, 4);
+					currDevice.pullup = DANTE_CONST.PULLUPS[pullup];
+					currDevice.pullup_string = parseString(payload, 32);
+				// mark flag to update variables
+					if (this.devicesData[deviceIp]?.pullup != pullup) {
+						updateFlags.push('pullup');
+					}
+				// get pullup options
+					let optionsOffset = bufferToInt(payload, 8);
+					const optionsNumber = bufferToInt(payload, 10);
+					if (optionsNumber && optionsNumber > 0) {
+						currDevice.pullupOptions = [];
+						for (let i = 0; i < optionsNumber; i++) {
+							currDevice.pullupOptions.push(bufferToInt(payload, optionsOffset, 4).toString());
+							optionsOffset += 4;
+						}
+				// mark flag to update variables
+						if (!updateFlags.includes('pullupOptions') && !compareArrays(currDevice.pullupOptions, this.devicesData[deviceIp]?.pullupOptions)) {
+							updateFlags.push('pullupOptions');
+						}
+					}
+					break;
+				}
+				
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_STATUS : {
+					// currently only handles AVIO 2out
+					const channelCount = 2; 
+					currDevice.output_levels = [];
+					for (let i = 0; i < channelCount; i++) {
+						const level = bufferToInt(payload, 24 + i*4, 4)
+						currDevice.output_levels.push(DANTE_CONST.LEVELS[level] ?? level);
+					// mark flag to update variables
+						if (!updateFlags.includes('output_levels') && !compareArrays(currDevice.output_levels, this.devicesData[deviceIp]?.output_levels)) {
+							updateFlags.push('output_levels');
+						}
+					}
+					updateFlags.push('output_levels');
+					break;
+				}
+
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_MANF_VERSIONS_STATUS : {
+					currDevice.manfShortName = parseString(payload, 8);
+					currDevice.manufacturer = parseString(payload, 52);
+					currDevice.modelName = parseString(payload, 180);
+					currDevice.softwareVersionMajor = bufferToInt(payload, 32, 1);
+					currDevice.softwareVersionMinor = bufferToInt(payload, 33, 1);
+					currDevice.softwareVersionPatch = bufferToInt(payload, 34, 2);
+					currDevice.softwareVersionBuild = bufferToInt(payload, 44, 4);
+					currDevice.productVersionMajor = bufferToInt(payload, 308, 1);
+					currDevice.productVersionMinor = bufferToInt(payload, 309, 1);
+					currDevice.productVersionPatch = bufferToInt(payload, 310, 2);
+					currDevice.productVersionString = parseString(payload, 312); 
+					updateFlags.push('manf');
+					break;
+				}
+				
+				case DANTE_CONST.COMMANDS.MESSAGE_TYPE_VERSIONS_STATUS : {
+					currDevice.danteSoftwareVersionMajor = bufferToInt(payload, 8, 1);
+					currDevice.danteSoftwareVersionMinor = bufferToInt(payload, 9, 1);
+					currDevice.danteSoftwareVersionPatch = bufferToInt(payload, 10, 2);
+					currDevice.danteSoftwareVersionBuild = bufferToInt(payload, 40, 4);
+					currDevice.hardwareVersionMajor = bufferToInt(payload, 12, 1);
+					currDevice.hardwareVersionMinor = bufferToInt(payload, 13, 1);
+					currDevice.hardwareVersionPatch = bufferToInt(payload, 14, 2);
+					currDevice.hardwareVersionBuild = bufferToInt(payload, 6, 1);
+					currDevice.danteModel = parseString (payload, 64);
+					break;
+				}
+				
+			}
+			
+			this.devicesData = merge(this.devicesData, deviceData); this.checkVariables(deviceIp);
+			this.checkVariables(deviceIp, ...updateFlags);
+
+			for (const flag of updateFlags) {
+				if (flag.slice(-7) == 'Options') {
+					this.initActions()
+				break;
+				}
 			}
 		}
 	},
+	
+	
+// function handling incoming dante cmc messages (on cmc port)
+	parseCmcReply : function (reply, rinfo) {
+        const deviceIp = rinfo.address;
+        const replySize = rinfo.size;
+        let deviceData = {};
 
-		
-
-
-    sendCommand(command, host, port = DANTE_PORTS.ARC) {
-        if (this.debug) {
-            // Log sent bytes when in debug mode
-            this.log('debug', `Tx (${command.length}): ${command.toString("hex")}`);
+		if (this.debug) {
+            // Log replies when in debug mode
+            this.log('debug', `CMC : Rx Info(${reply.length}): ${reply.toString("hex")}`);
         }
 
-        this.socket.send(command, 0, command.length, port, host);
+		if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CMC && replySize == bufferToInt(reply,2)) {
+			const commandId = bufferToInt(reply, 6);
+			deviceData[deviceIp] = {};
+			currDevice = deviceData[deviceIp];
+			
+			switch (commandId) {
+				case 0x1001 : {
+					currDevice.ports = {SETTINGS: bufferToInt(reply, 28)};
+					if (this.debug) {
+						this.log('info', `Port for service SETTINGS of device ${deviceIp} is : ${bufferToInt(reply, 28)}`);
+					}
+					this.devicesData = merge(this.devicesData, deviceData); 
+					this.checkVariables(deviceIp); 
+					this.refreshSettings(deviceIp);
+					break;
+				}
+			}
+			
+			this.checkVariables();
+		}
+	},
+	
+	
+
+
+    sendCommand(command, host, service = "ARC", forcePort) {
+        if (this.debug) {
+            // Log sent bytes when in debug mode
+            this.log('debug', `${service} : Tx (${command.length}): ${command.toString("hex")}`);
+        }
+		
+		// find port
+//		if (!port) {
+//			if (!this.devicesData[host]?.ports) { 
+//				port = DANTE_CONST.PORTS[service];
+//			} else {
+//				port = this.devicesData[host].ports[service] ?? DANTE_CONST.PORTS[service];
+//			}
+//		}
+
+		const port = forcePort ?? this.devicesData?.[host]?.ports?.[service];
+		if (port) {	
+			this.sockets[service]?.send(command, 0, command.length, port, host); 
+		} else {
+			this.log('error', `Undefined port for service ${service}`); return;
+		}
     },
 
-	
+
+
 	
 // create Dante message
     makeCommand(commandType, commandArguments = Buffer.alloc(2)) {
 
-        const padding = Buffer.from([0x00, 0x00]);
-        let commandLength = intToBuffer(commandArguments.length + 11);
+        const requestFlag = Buffer.from([0x00, 0x00]);
+        const commandLength = intToBuffer(commandArguments.length + 11);
 
 		const payload = Buffer.concat([
-			intToBuffer(DANTE_PROTOCOL.CONTROL),
+			intToBuffer(DANTE_CONST.PROTOCOL.CONTROL),
             commandLength,
             this.counter,
             intToBuffer(commandType),
-            padding,
+            requestFlag,
             commandArguments,
 			Buffer.from([0x00])
         ]);
@@ -769,13 +1056,13 @@ module.exports = {
 		const startBlock = Buffer.from('2a84', "hex");
 
 		const payload = Buffer.concat([
-			intToBuffer(DANTE_PROTOCOL.SETTINGS),
+			intToBuffer(DANTE_CONST.PROTOCOL.SETTINGS),
 			commandLength,
 			this.counter,
 			startBlock,
 			this.mac,
 			Buffer.from('0000', 'hex'),
-			AUDINATE_BUFFER,
+			DANTE_CONST.AUDINATE_BUFFER,
 			intToBuffer(commandType),
 			commandArguments
 		]);
@@ -790,12 +1077,12 @@ module.exports = {
 //**
 
     resetDeviceName(ipaddress) {
-        const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceName);
+        const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.setDeviceName);
         this.sendCommand(commandBuffer, ipaddress);
     },
 
     setDeviceName(ipaddress, name) {
-        const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceName, Buffer.from(name, "ascii"));
+        const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.setDeviceName, Buffer.from(name, "ascii"));
         this.sendCommand(commandBuffer, ipaddress);
     },
 
@@ -812,7 +1099,7 @@ module.exports = {
                 Buffer.alloc(12),
                 channelNameBuffer,
             ]);
-            commandBuffer = this.makeCommand(DANTE_COMMANDS.setRxChannelName, commandArguments);
+            commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.setRxChannelName, commandArguments);
         } else if (channelType === "tx") {
             const commandArguments = Buffer.concat([
                 Buffer.from("040100000", "hex"),
@@ -821,7 +1108,7 @@ module.exports = {
                 Buffer.alloc(18),
                 channelNameBuffer,
             ]);
-            commandBuffer = this.makeCommand(DANTE_COMMANDS.setTxChannelName, commandArguments);
+            commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.setTxChannelName, commandArguments);
         } else {
             throw "Invalid Channel Type - must be 'tx' or 'rx'";
         }
@@ -866,7 +1153,7 @@ module.exports = {
 			sourceDeviceNameBuffer,								// source device name
         ]);
 
-        const commandBuffer = this.makeCommand(DANTE_COMMANDS.subscription, commandArguments);
+        const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.subscription, commandArguments);
 
         this.sendCommand(commandBuffer, ipaddress);
 		
@@ -896,7 +1183,7 @@ module.exports = {
             Buffer.alloc(1),
         ]);
 
-        const commandBuffer = this.makeCommand(DANTE_COMMANDS.subscription, commandArguments);
+        const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.subscription, commandArguments);
 
         this.sendCommand(commandBuffer, ipaddress);
 		
@@ -907,7 +1194,7 @@ module.exports = {
 
 
     getChannelCount(ipaddress) {
-        const commandBuffer = this.makeCommand(DANTE_COMMANDS.channelCount);
+        const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.channelCount);
         this.sendCommand(commandBuffer, ipaddress);
 
         return this.devicesData[ipaddress]?.channelCount;
@@ -915,25 +1202,25 @@ module.exports = {
 
 
 
-    getChannelNames(ipaddress, ...channelTypes) { 
+    getChannelNames(ipaddress, ...channelTypes) {
 		if (channelTypes==undefined){
 				channelTypes=['rx','txInfo'];
-		}
-		let commandBuffer, commandArguments= Buffer.from("0001000100", "hex");
-		  for (let channelType of channelTypes) { 
+		} 
+		let commandBuffer, commandArguments = Buffer.from("0001000100", "hex");
+		  for (let channelType of channelTypes) {
 		  switch (channelType) {
-			case 'tx' :
+			case 'tx' : 
 				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
 					commandArguments.writeUInt8(page*32+1, 3);
-					commandBuffer = this.makeCommand(DANTE_COMMANDS.txChannelNames, commandArguments);
-					this.sendCommand(commandBuffer, ipaddress);
+					commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.txChannelNames, commandArguments);
+					this.sendCommand(commandBuffer, ipaddress); 
 				}
 				break;
 		
 			case 'rx' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.rx?.count/16; page++ ) { 
 					commandArguments.writeUInt8(page*16+1, 3);
-					commandBuffer = this.makeCommand(DANTE_COMMANDS.rxChannelNames, commandArguments);
+					commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.rxChannelNames, commandArguments);
 					this.sendCommand(commandBuffer, ipaddress);
 				}
 				break;
@@ -941,12 +1228,12 @@ module.exports = {
 			case 'txInfo' :
 				for (let page = 0; page < this.devicesData[ipaddress]?.tx?.count/32; page++ ) {
 					commandArguments.writeUInt8(page*32+1, 3);
-					commandBuffer = this.makeCommand(DANTE_COMMANDS.txChannelInfo, commandArguments);
+					commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.txChannelInfo, commandArguments);
 					this.sendCommand(commandBuffer, ipaddress);
 				}
 				break;
 			}
-		}
+		} 
         return
     },
 	
@@ -954,12 +1241,12 @@ module.exports = {
 
 
 	getDeviceName(ipaddress) {
-		const commandBuffer = this.makeCommand(DANTE_COMMANDS.deviceName);
+		const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.deviceName);
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
 	getSettings(ipaddress) {
-		const commandBuffer = this.makeCommand(DANTE_COMMANDS.deviceSettings)
+		const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.deviceSettings)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 	
@@ -968,59 +1255,189 @@ module.exports = {
 		let commandArguments = Buffer.from("050382050020021100108301002400000000000000000000000000000000", "hex");
 		commandArguments.writeUInt32BE(latency*1000000,22);
 		commandArguments.writeUInt32BE(latency*1000000,26);
-		const commandBuffer = this.makeCommand(DANTE_COMMANDS.setDeviceSettings, commandArguments)
+		const commandBuffer = this.makeCommand(DANTE_CONST.COMMANDS.setDeviceSettings, commandArguments)
 		this.sendCommand(commandBuffer, ipaddress);
 	},
 
 	setSampleRate(ipaddress, sampleRate) {
+		const flag = intToBuffer(sampleRate > 0 ? 1 : 0, 4);
 		const arguments = Buffer.concat ([
-			Buffer.from ('0000006400000001', 'hex'),
+			Buffer.from ('00000064', 'hex'),
+			flag,
 			intToBuffer(sampleRate, 4)
 			]);
-		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, arguments); 
-		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
-		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.DVS_SETTINGS);
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, arguments); 
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
 	},	
 	
+	getSampleRate (ipaddress) {
+		this.setSampleRate(ipaddress, 0)
+	},
+	
+	setPullup (ipaddress, pullup) {
+		const flag = intToBuffer(3, 4);
+		const arguments = Buffer.concat ([
+			Buffer.from ('00000064', 'hex'),
+			flag,
+			intToBuffer(pullup, 4),
+			intToBuffer(0, 2)
+			]);
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, arguments); 
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
+	},
+	
+	getPullup (ipaddress) {
+		const flag = intToBuffer(0, 4);
+		const arguments = Buffer.concat ([
+			Buffer.from ('00000064', 'hex'),
+			flag,
+			intToBuffer(0, 4)
+			]);
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, arguments); 
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
+	},
+	
 	setEncoding(ipaddress, encoding) {
-		const arguments = Buffer.concat([
-			Buffer.from ('0000006400000001', 'hex'),
+		const flag = intToBuffer(encoding >0 ? 1 : 0, 4);
+		const arguments = Buffer.concat ([
+			Buffer.from ('00000064', 'hex'),
+			flag,
 			intToBuffer(encoding, 4)
 			]);
-		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, arguments); 
-		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
-		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.DVS_SETTINGS); 
-	},	
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, arguments); 
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
+	},
 
-	setGain(ipaddress, direction= 'out', channelNumber, gainSetting) {
+	getEncoding(ipaddress) {
+		this.setEncoding(ipaddress, 0);
+	},
+
+	setLevel(ipaddress, direction= 'out', channelNumber, levelSetting) {
 		const arguments = Buffer.concat ([
 			Buffer.from('00000000', 'hex'),
 			Buffer.from('00010001', 'hex'),
 			Buffer.from('000c0010', 'hex'),
 			Buffer.from('02010000', 'hex'),
 			intToBuffer(channelNumber, 4),
-			intToBuffer(gainSetting, 4)
+			intToBuffer(LevelSetting, 4)
 		]);
 		
-		const commandBuffer = this.makeSettingCommand(DANTE_COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, arguments);
-		this.sendCommand(commandBuffer, ipaddress, DANTE_PORTS.SETTINGS);
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, arguments);
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
 	},
 	
-
-    get devices() {
-      return this.devicesData;
-    },
-
-
-	
-	
-	dante_discovery: function(response, rinfo) {
-		response?.answers?.forEach((answer) => {
-			if (answer.name?.match(/_netaudio-arc._udp/)) {
-			  this.getDeviceName(rinfo.address);
-			}
-		});
+	getLevel(ipaddress) {
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, intToBuffer(0, 4));
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
 	},
+
+	getManfVersion(ipaddress) {
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_MANF_VERSIONS_QUERY, intToBuffer(0, 4));
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
+	},
+	
+	getVersion(ipaddress) {
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_VERSIONS_QUERY, intToBuffer(0, 4));
+		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
+		// additionnal command to work with DVS
+	//	this.sendCommand(commandBuffer, ipaddress, 'SETTINGS', DANTE_CONST.PORTS.DVS_SETTINGS);
+	},
+
+	getSettingsPort (ipaddress) { 
+		const commandBuffer = Buffer.concat([
+			intToBuffer(0x1200, 2),
+			intToBuffer(20), // command size
+			this.counter,
+			intToBuffer(0x1001),
+			intToBuffer(0000),
+			intToBuffer(0x3520),
+			this.mac,
+			intToBuffer(0x0000)
+			]);			
+
+		this.sendCommand(commandBuffer, ipaddress, 'CMC');
+		
+		incrementBE(this.counter);
+	},
+	
+	
+	
+	dante_discovery: function(response, rinfo) { 
+		for (payload of ['answers', 'additionals']) {
+			response[payload]?.forEach((answer) => {
+				const name = answer.name
+				// identify devices
+				if (answer.type == 'PTR' && DANTE_CONST.SERVICES_ARRAY.includes(name)) { 	
+					this.mdns.query({
+						questions:[{
+							name: answer.data,
+							type:'SRV',
+							class: 'IN',
+						}]
+					}); 
+				} else if (answer.type == 'SRV') {
+					// register services and port
+					for ([id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
+						const dotIndex = name.indexOf('.');
+						const deviceName = name.slice(0, dotIndex);
+						const serviceName = name.slice(dotIndex + 1);
+						
+						
+						if (serviceName == danteService) {
+							const deviceIp = rinfo.address;
+							let currDevice = this.devicesData[deviceIp];
+							
+						// create data objects if needed
+							if (!this.devicesData[deviceIp]) {
+								this.registerDevice(deviceIp, deviceName);
+								currDevice = this.devicesData[deviceIp];				
+								this.updateData();
+							}
+							
+							if (currDevice.name != deviceName) {
+								currDevice.name = deviceName;
+								this.updateDeviceChoice(deviceIp, deviceName); 
+								this.updateData();
+							}
+							
+							if (currDevice.ports?.[id] != answer.data.port) { 
+								if (this.debug) {
+									this.log('info', `Port for service ${id} of device ${deviceIp} is : ${answer.data.port}`);
+								}
+								
+								currDevice.ports[id] = answer.data.port;
+								switch (id) {
+									case 'ARC' : 
+									//	this.getDeviceName(deviceIp); 
+										this.getChannelCount(deviceIp);
+										this.getSettings(deviceIp);
+										break;
+									case 'CMC' :
+										this.getSettingsPort(deviceIp);
+										break;
+								}
+							}
+						}
+					}
+				}	
+			});
+		} 
+	},
+	
 	
 	
 	setupInterval: function() {
@@ -1041,6 +1458,18 @@ module.exports = {
 			self.log('info', 'Stopping Update Interval.');
 			clearInterval(self.INTERVAL);
 			self.INTERVAL = null;
+		}
+	},
+	
+	refreshSettings: function(deviceIp) {
+		const ipArray = deviceIp ? [deviceIp] : Object.entries(this.devicesData).map((e) => e[0]);
+		for (ip of ipArray) {
+			this.getSampleRate(ip);
+			this.getPullup(ip);
+			this.getEncoding(ip);
+			this.getLevel(ip);
+			this.getVersion(ip);
+			this.getManfVersion(ip);
 		}
 	},
 	

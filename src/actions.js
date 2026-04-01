@@ -1,5 +1,4 @@
-const {DANTE_ENCODING_CHOICES, DANTE_VOLUME_CONTROL} = require("./const")
-
+const {DANTE_CONST, object2choices, object2PartialChoices, array2choices} = require("./const");
 
 module.exports = {
 	initActions: function () {
@@ -148,7 +147,7 @@ module.exports = {
 				}
 			],
 			callback: async function (action) {
-				let opt = action.options;
+				const opt = action.options;
  				self.clearCrosspoint(opt.destinationDevice,	opt['destinationChannel_'+opt.destinationDevice]);
 			}
 		}
@@ -160,12 +159,75 @@ module.exports = {
 				id: 'destinationChannel_'+ ip,
 				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : ip,
-				isVisible: (options, deviceIp) => { return (options.destinationDevice == deviceIp);}
+				isVisible: (options, deviceIp) => { options.destinationDevice == deviceIp}
 			}
 			actions.clearCrosspointDropDown.options.push(nameOption);
 		}
 		
+		actions.setDeviceName = {
+			name: 'Set Device name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				},
+				{
+					type: 'textinput',
+					label: 'New name',
+					id: 'name',
+					default: '',
+					useVariables: true
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const name = await context.parseVariablesInString(opt.name);
+ 				self.setDeviceName(opt.device, name);
+			},
+		}
+
+
+		actions.setDeviceNameCustom = {
+			name: 'Set Device name (custom device)',
+			options: [
+				{
+					type: 'textinput',
+					label: 'Device',
+					id: 'device',
+					useVariables: true,
+				},
+				{
+					type: 'textinput',
+					label: 'New name',
+					id: 'name',
+					default: '',
+					useVariables: true
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const device = await context.parseVariablesInString(opt.device);
+ 				self.setDeviceName(device, opt.name);
+			},
+		}
 		
+		actions.resetDeviceName = {
+			name: 'Reset Device name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				},
+			],
+			callback: async function (action, context) {
+				let opt = action.options;
+ 				self.resetDeviceName(opt.device);
+			},
+		}
 		
 		actions.setLatency = {
 			name: 'Set Latency',
@@ -191,13 +253,13 @@ module.exports = {
 			}
 		}
 		
-		actions.setSampleRate = {
-			name: 'Set Sample rate',
+		actions.setSampleRateCustom = {
+			name: 'Set Sample rate (custom)',
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Destination Device',
-					id: 'destinationDevice',
+					label: 'Device',
+					id: 'device',
 					choices: self.devicesChoices
 				},
 				{
@@ -211,37 +273,101 @@ module.exports = {
 			callback: async function (action, context) {
 				let opt = action.options;
 				const sr = await context.parseVariablesInString(opt.sr);
- 				self.setSampleRate(opt.destinationDevice, sr);
+ 				self.setSampleRate(opt.device, sr);
 			}
 		}
 		
+		actions.setSampleRate = {
+			name: 'Set Sample rate',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				},
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const ip = opt.device;
+ 				self.setSampleRate(ip, opt['sr_' + ip]);
+			},
+		}
+
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let srOptions = {
+				type: 'dropdown',
+				label: 'Sample rate',
+				id: 'sr_'+ ip,
+				choices: array2choices(device.srOptions, (f) => { return (f/1000).toString() + ' kHz'}),
+				isVisibleData : {deviceIp: ip},
+				isVisible: (options, data) => { return options.device == data.deviceIp}
+			}
+			actions.setSampleRate.options.push(srOptions);
+		}
+
+		
+		actions.setPullup = {
+			name: 'Set Sample rate pullup',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				},
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+ 				self.setPullup(ip, opt['pullup_' + ip]);
+			},
+		}
+
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let pullupOptions = {
+				type: 'dropdown',
+				label: 'Sample rate pullup',
+				id: 'pullup_'+ ip,
+				choices: object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
+				isVisibleData : {deviceIp: ip},
+				isVisible: (options, data) => { return options.device == data.deviceIp}
+			}
+			actions.setPullup.options.push(pullupOptions);
+		}
+
 		
 		actions.setEncoding = {
 			name: 'Set Encoding',
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Destination Device',
-					id: 'destinationDevice',
+					label: 'Device',
+					id: 'device',
 					choices: self.devicesChoices
 				},
-				{
-					type: 'dropdown',
-					label: 'Encoding',
-					id: 'enc',
-					choices: DANTE_ENCODING_CHOICES,
-					default: 24
-				}
 			],
 			callback: async function (action, context) {
 				let opt = action.options;
  				self.setEncoding(opt.destinationDevice, opt.enc);
-			}
+			},
 		}
+
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let encodingOptions = {
+				type: 'dropdown',
+				label: 'Encoding',
+				id: 'encoding_'+ ip,
+				choices: object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
+				isVisibleData : {deviceIp: ip},
+				isVisible: (options, data) => { return (options.device == data.deviceIp);}
+			}
+			actions.setEncoding.options.push(encodingOptions);
+		}
+
 		
 		
-		actions.setGain = {
-			name: 'Set Gain',
+		actions.setLevel = {
+			name: 'Set Level',
 			options: [
 				{
 					type: 'dropdown',
@@ -268,19 +394,28 @@ module.exports = {
 				},
 				{
 					type: 'dropdown',
-					label: 'Gain',
-					id: 'gain',
-					choices: DANTE_VOLUME_CONTROL,
+					label: 'Level',
+					id: 'level',
+					choices: object2choices(DANTE_CONST.LEVELS),
 					default: 2
 				}
 			],
 			callback: async function (action, context) {
 				let opt = action.options;
 				const channel = await context.parseVariablesInString(opt.channel);
- 				self.setGain(opt.destinationDevice, opt.direction, channel, opt.gain);
+ 				self.setLevel(opt.destinationDevice, opt.direction, channel, opt.level);
 			}
 		}
 		
+		
+		actions.refresh = {
+			name: 'Refresh parameters',
+			options : [],
+			callback : async function (action, context) {
+				self.refreshSettings();
+			}
+		};
+				
 		
 		self.setActionDefinitions(actions);
 	}
