@@ -26,14 +26,8 @@ module.exports = {
 
 	checkVariables: function (ipAddress, ...variableTypes) {
 		let self = this;
-		const variableValues = {};
-//		let devicesList;
-//
-//		if(ipAddress && ipAddress != 'all') {
-//			devicesList = [[ipAddress, self.devicesData[ipAddress]]];
-//		} else {
-//			devicesList = Object.entries(self.devicesData);
-//		}
+		const variableValues = {devices:[]};
+
 		if(!(variableTypes?.length > 0)) {
 		  variableTypes = ['ip', 'rx', 'tx', 'rx_names', 'tx_names', 'sr', 'latency', 'encoding', 'output_levels', 'manf'];
 		}
@@ -41,12 +35,9 @@ module.exports = {
 		for ([ip, device] of Object.entries(self.devicesData)) { 
 			let deviceName = device?.name;
 			if (deviceName) {
-				if (!variableValues.devices) {
-						variableValues.devices = [];
-					}
 				variableValues.devices.push(deviceName);
 				
-				if (ip == ipAddress) {
+				if (ip == ipAddress || !ipAddress) {
 					for (let variableType of variableTypes) {
 						switch (variableType) {
 							case 'devices' :
@@ -72,7 +63,7 @@ module.exports = {
 								for (let i=0; i < device[channelType]?.count; i++) {
 									const channel = device[channelType][i+1];
 									channelArray[i] = channelType == 'tx' ? self.getChannelSubscriptionName(channel) : channel?.name;
-								}
+								};
 								break;
 							
 							case 'sr':

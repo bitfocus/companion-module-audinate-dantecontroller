@@ -159,7 +159,7 @@ module.exports = {
 				id: 'destinationChannel_'+ ip,
 				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : ip,
-				isVisible: (options, deviceIp) => { options.destinationDevice == deviceIp}
+				isVisible: (options, deviceIp) => { return options.destinationDevice == deviceIp}
 			}
 			actions.clearCrosspointDropDown.options.push(nameOption);
 		}
@@ -228,6 +228,131 @@ module.exports = {
  				self.resetDeviceName(opt.device);
 			},
 		}
+		
+		actions.setRxChannelName = {
+			name: 'Set Rx channel name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const newName = await context.parseVariablesInString(opt.newName);
+				self.setRxChannelName(opt.device, opt['channel_'+opt.device], newName);
+			}
+		}
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'channel',
+				id: 'channel_'+ ip,
+				choices: this.rxChannelsChoices[device.name],
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return options.device == deviceIp}
+			}
+			actions.setRxChannelName.options.push(nameOption);
+		}
+		actions.setRxChannelName.options.push({
+			type: 'textinput',
+			label: 'New name', 
+			id: 'newName',
+			useVariables: true,
+		});
+		
+		actions.resetRxChannelName = {
+			name: 'Reset Rx channel name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const newName = await context.parseVariablesInString(opt.newName);
+				self.resetRxChannelName(opt.device, opt['channel_'+opt.device]);
+			}
+		}
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'channel',
+				id: 'channel_'+ ip,
+				choices: this.rxChannelsChoices[device.name],
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return options.device == deviceIp}
+			}
+			actions.resetRxChannelName.options.push(nameOption);
+		}
+		
+		actions.setTxChannelName = {
+			name: 'Set Tx channel name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const newName = await context.parseVariablesInString(opt.newName);
+				self.setTxChannelName(opt.device, opt['channel_'+opt.device], newName);
+			}
+		}
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'channel',
+				id: 'channel_'+ ip,
+				choices: this.txChannelsChoices[device.name],
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return options.device == deviceIp}
+			}
+			actions.setTxChannelName.options.push(nameOption);
+		}
+		actions.setTxChannelName.options.push({
+			type: 'textinput',
+			label: 'New name', 
+			id: 'newName',
+			useVariables: true,
+		});
+		
+		actions.resetTxChannelName = {
+			name: 'Reset Tx channel name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					choices: self.devicesChoices
+				}
+			],
+			callback: async function (action, context) {
+				const opt = action.options;
+				const newName = await context.parseVariablesInString(opt.newName);
+				self.resetTxChannelName(opt.device, opt['channel_'+opt.device]);
+			}
+		}
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let nameOption = {
+				type: 'dropdown',
+				label: 'channel',
+				id: 'channel_'+ ip,
+				choices: this.txChannelsChoices[device.name],
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return options.device == deviceIp}
+			}
+			actions.resetTxChannelName.options.push(nameOption);
+		}
+
 		
 		actions.setLatency = {
 			name: 'Set Latency',
@@ -347,8 +472,9 @@ module.exports = {
 				},
 			],
 			callback: async function (action, context) {
-				let opt = action.options;
- 				self.setEncoding(opt.destinationDevice, opt.enc);
+				const opt = action.options;
+				const device = opt.device;
+ 				self.setEncoding(device, opt['encoding_' + device]);
 			},
 		}
 
@@ -366,31 +492,14 @@ module.exports = {
 
 		
 		
-		actions.setLevel = {
-			name: 'Set Level',
+		actions.setOutputLevel = {
+			name: 'Set Output Level',
 			options: [
 				{
 					type: 'dropdown',
 					label: 'Destination Device',
 					id: 'destinationDevice',
 					choices: self.devicesChoices
-				},
-				{
-					type: 'dropdown', 
-					label: 'Channel direction',
-					id: 'direction',
-					choices: [
-						{ id: 'in', label : 'in' },
-						{ id: 'out', label: 'out' }
-					],
-					default: 'out'
-				},
-				{
-					type: 'textinput',
-					label: 'Channel number', 
-					id: 'channel',
-					default : '1', 
-					useVariables: true,
 				},
 				{
 					type: 'dropdown',
@@ -402,17 +511,27 @@ module.exports = {
 			],
 			callback: async function (action, context) {
 				let opt = action.options;
-				const channel = await context.parseVariablesInString(opt.channel);
- 				self.setLevel(opt.destinationDevice, opt.direction, channel, opt.level);
+ 				self.setLevel(opt.destinationDevice, 'out', opt.channel, opt.level);
 			}
 		}
-		
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			let levelOption = {
+				type: 'dropdown',
+				label: 'channel',
+				id: 'channel_'+ ip,
+				choices: this.txChannelsChoices[device.name],
+				isVisibleData : ip,
+				isVisible: (options, deviceIp) => { return options.device == deviceIp}
+			}
+			actions.resetTxChannelName.options.push(levelOption);
+		}
 		
 		actions.refresh = {
 			name: 'Refresh parameters',
 			options : [],
 			callback : async function (action, context) {
 				self.refreshSettings();
+				self.refreshArc();
 			}
 		};
 				
