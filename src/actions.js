@@ -497,34 +497,34 @@ module.exports = {
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Destination Device',
-					id: 'destinationDevice',
+					label: 'Device',
+					id: 'device',
 					choices: self.devicesChoices
-				},
-				{
-					type: 'dropdown',
-					label: 'Level',
-					id: 'level',
-					choices: object2choices(DANTE_CONST.LEVELS),
-					default: 2
 				}
 			],
 			callback: async function (action, context) {
 				let opt = action.options;
- 				self.setLevel(opt.destinationDevice, 'out', opt.channel, opt.level);
+ 				self.setLevel(opt.destinationDevice, 'out', opt['channel_' + opt.destinationDevice], opt.level);
 			}
 		}
 		for (const [ip, device] of Object.entries(self.devicesData)) {
 			let levelOption = {
 				type: 'dropdown',
-				label: 'channel',
+				label: 'Channel',
 				id: 'channel_'+ ip,
-				choices: this.txChannelsChoices[device.name],
+				choices: this.rxChannelsChoices[device.name],
 				isVisibleData : ip,
 				isVisible: (options, deviceIp) => { return options.device == deviceIp}
 			}
-			actions.resetTxChannelName.options.push(levelOption);
+			actions.setOutputLevel.options.push(levelOption);
 		}
+		actions.setOutputLevel.options.push({
+					type: 'dropdown',
+					label: 'Level',
+					id: 'level',
+					choices: object2choices(DANTE_CONST.LEVELS),
+					default: 2
+				});
 		
 		actions.refresh = {
 			name: 'Refresh parameters',

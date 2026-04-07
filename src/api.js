@@ -311,6 +311,23 @@ module.exports = {
 		}
 	},
 	
+	checkConnections() {
+		for (service of ['ARC', 'CMC', 'SETTINGS', 'HEARTBEAT']) {
+			if (!this.activeConnections[service]) {
+				if (this.CONNECTED) {
+					this.CONNECTED = false;
+					this.updateStatus(InstanceStatus.Disconnected);
+				}
+				return false;
+			}
+		}
+		if (!this.CONNECTED) {
+			this.CONNECTED = true;
+			this.updateStatus(InstanceStatus.Ok);
+		}
+		return true
+	},
+	
 		
 	initConnection: function () {
 		let self = this;
@@ -318,6 +335,8 @@ module.exports = {
 
 		this.debug = this.config.verbose;
 		this.timeout = this.config.timeoutInterval;
+		this.activeConnections = {};
+		self.updateStatus(InstanceStatus.Connecting);
 		
 		// create data object
 		self.devicesData = {};
@@ -353,10 +372,27 @@ module.exports = {
 		
        	arcSocket.on("message", this.parseReply.bind(this));
    		arcSocket.on("error", (error)=>{
-			self.log('error', error.message);
+			self.log('error','ARC socket : ', error.message);
+			self.activeConnections.ARC = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
 		});
-		arcSocket.on("close", ()=> {console.log('socket closed')});
-        arcSocket.on("listening", ()=>{self.updateStatus(InstanceStatus.Connecting);}); 
+		
+		arcSocket.on("close", ()=> {
+			self.log('warn', 'ARC socket closed');
+			self.activeConnections.ARC = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
+        arcSocket.on("listening", ()=>{
+			self.activeConnections.ARC = true;
+			self.checkConnections();
+		}); 
 		
 		// bind socket to random port of configured ip address if available
 		if (availableIps.includes(self.config.ip)) {
@@ -368,17 +404,38 @@ module.exports = {
 			this.mac = Buffer.from('000000000000', 'hex');
 		}
 
+
 		// create Dante settings socket
 		this.sockets.SETTINGS = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
 		const settingSocket = this.sockets.SETTINGS;
 		settingSocket.on("message", this.parseSettingsReply.bind(this));	
-
+		
+  		settingSocket.on("error", (error)=>{
+			self.log('error', 'Settings socket : ', error.message);
+			self.activeConnections.SETTINGS = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
+		settingSocket.on("close", ()=> {
+			self.log('warn', 'Settings socket closed');
+			self.activeConnections.SETTINGS = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+ 
 		settingSocket.on ("listening", () => {  
 			if (availableIps.includes(self.config.ip)) {
 				settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO, self.config.ip);
 			} else {
 				settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO, );
 			}
+			self.activeConnections.SETTINGS = true;
+			self.checkConnections();
 		});
 		
 		if (availableIps.includes(self.config.ip)) {
@@ -392,7 +449,30 @@ module.exports = {
 		this.sockets.CMC = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
 		const cmcSocket = this.sockets.CMC;
 		cmcSocket.on("message", this.parseCmcReply.bind(this));	
-
+		
+  		cmcSocket.on("error", (error)=>{
+			self.log('error', 'CMC socket : ', error.message);
+			self.activeConnections.CMC = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
+		cmcSocket.on("close", ()=> {
+			self.log('warn', 'CMC socket closed');
+			self.activeConnections.CMC = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
+		cmcSocket.on("listening", ()=>{
+			self.activeConnections.CMC = true;
+			self.checkConnections();
+		}); 
+		
 		if (availableIps.includes(self.config.ip)) {
 			cmcSocket.bind({address: self.config.ip});
 		} else {
@@ -404,13 +484,33 @@ module.exports = {
 		this.sockets.HEARTBEAT = dgram.createSocket({type: "udp4", reusePort:true, reuseAddr: true});
 		const heartbeatSocket = this.sockets.HEARTBEAT;
 		heartbeatSocket.on("message", this.parseHeartbeatReply.bind(this));	
-
+		
+  		heartbeatSocket.on("error", (error)=>{
+			self.log('error', 'Heartbeat socket : ', error.message);
+			self.activeConnections.HEARTBEAT = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
+		heartbeatSocket.on("close", ()=> {
+			self.log('warn', 'Heartbeat socket closed');
+			self.activeConnections.HEARTBEAT = false;
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected);
+				self.CONNECTED = false;
+			}
+		});
+		
 		heartbeatSocket.on ("listening", () => {  
 			if (availableIps.includes(self.config.ip)) {
 				heartbeatSocket.addMembership(DANTE_CONST.MULTICAST_IP.HEARTBEAT, self.config.ip);
 			} else {
 				heartbeatSocket.addMembership(DANTE_CONST.MULTICAST_IP.HEARTBEAT, );
 			}
+			self.activeConnections.HEARTBEAT = true;
+			self.checkConnections();
 		});
 		
 		if (availableIps.includes(self.config.ip)) {
@@ -431,17 +531,6 @@ module.exports = {
 
 		// dante devices discover
 		this.getMdnsServices();
-//		let questions = []; 
-//		for (service of DANTE_CONST.SERVICES_ARRAY) {
-//			questions.push ({
-//				name: service, 
-//				type: 'PTR',
-//			});
-//		}
-//		
-//		self.mdns?.query({
-//			questions: questions
-//		});
 	},
 	
 	
@@ -1300,7 +1389,7 @@ module.exports = {
 			Buffer.from('000c0010', 'hex'),
 			Buffer.from('02010000', 'hex'),
 			intToBuffer(channelNumber, 4),
-			intToBuffer(LevelSetting, 4)
+			intToBuffer(levelSetting, 4)
 		]);
 		
 		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, arguments);
@@ -1377,8 +1466,11 @@ module.exports = {
 								this.updateDeviceChoice(deviceIp, deviceName); 
 								this.updateData();
 							}
+							if (!currDevice.ports) {
+								currDevice.ports = {};
+							}
 							
-							if (currDevice.ports?.[id] != answer.data.port) { 
+							if (currDevice.ports[id] != answer.data.port) { 
 		
 								this.log('info', `Port for service ${id} of device ${deviceName} is : ${answer.data.port}`);						
 								currDevice.ports[id] = answer.data.port;
@@ -1425,7 +1517,7 @@ module.exports = {
 	},
 	
 	refreshSettings: function(deviceIp) {
-		const ipArray = deviceIp ? [deviceIp] : Object.entries(this.devicesData).map((e) => e[0]);
+		const ipArray = deviceIp ? [deviceIp] : Object.keys(this.devicesData);
 		for (ip of ipArray) {
 			this.getSampleRate(ip);
 			this.getPullup(ip);
@@ -1437,7 +1529,7 @@ module.exports = {
 	},
 	
 	refreshArc:  function(deviceIp) {
-		const ipArray = deviceIp ? [deviceIp] : Object.entries(this.devicesData).map((e) => e[0]);
+		const ipArray = deviceIp ? [deviceIp] : Object.keys(this.devicesData);
 		for (ip of ipArray) {
 			this.getDeviceName(ip);
 			this.getSettings(ip);

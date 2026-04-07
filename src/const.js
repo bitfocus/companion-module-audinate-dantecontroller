@@ -6,7 +6,7 @@ DANTE_CONST = {
 	},
 	
 	get SERVICES_ARRAY() { 
-		return Object.entries(DANTE_CONST.SERVICES).map((e) => { return e[1]});
+		return Object.values(DANTE_CONST.SERVICES);
 	},
 	
 	AUDINATE_BUFFER : Buffer.concat([Buffer.from('Audinate', 'ascii'), Buffer.from('0734', 'hex')]),

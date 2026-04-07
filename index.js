@@ -40,6 +40,10 @@ class danteInstance extends InstanceBase {
 		for (const ip of Object.keys(self.devicesData)) {
 			this.destroyDevice(ip);
 		}
+		
+		for (const socket of Object.values(self.sockets)) {
+			socket.close();
+		}
 	}
 
 	async init(config) {
