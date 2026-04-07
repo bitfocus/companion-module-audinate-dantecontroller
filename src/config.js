@@ -54,7 +54,7 @@ module.exports = {
 				type: 'textinput',
 				id: 'interval',
 				label: 'Update Interval',
-				tooltip: 'Please enter the amount of time in milliseconds to request new information from the device. Set to 0 to disable.',
+				tooltip: 'Please enter the amount of time in milliseconds to periodically discover new devices. Set to 0 to disable.',
 				width: 3,
 				default: 1000
 			},

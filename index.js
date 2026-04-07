@@ -40,12 +40,16 @@ class danteInstance extends InstanceBase {
 		for (const ip of Object.keys(self.devicesData)) {
 			this.destroyDevice(ip);
 		}
+		
+		for (const socket of Object.values(self.sockets)) {
+			socket.close();
+		}
 	}
 
 	async init(config) {
-		this.configUpdated(config).catch((error) => {
-			this.log('error', 'Error initiating the module');
-		})
+		this.configUpdated(config)//.catch((error) => {
+//			this.log('error', 'Error initiating the module');
+//		})
 	}
 
 	async configUpdated(config) {
@@ -57,7 +61,7 @@ class danteInstance extends InstanceBase {
 	
 		this.updateStatus(InstanceStatus.Connecting);
 
-		this.initConnection();
+		this.initConnection();this.initActions();
 	}
 }
 
