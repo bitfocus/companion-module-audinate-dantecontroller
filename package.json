@@ -10,6 +10,9 @@
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-audinate-dantecontroller.git"
 	},
+	"engines": {
+		"node": "^22.20"
+	},
 	"dependencies": {
 		"@companion-module/base": "~1.11.0",
 		"multicast-dns": "^7.2.5"
