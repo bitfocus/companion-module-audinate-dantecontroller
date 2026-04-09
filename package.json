@@ -18,8 +18,7 @@
 		"multicast-dns": "^7.2.5"
 	},
 	"devDependencies": {
-		"@companion-module/tools": "^2.1.0",
-		"eslint": "^10.2.0",
-		"prettier": "^3.8.1"
-	}
+		"@companion-module/tools": "^2.1.0"
+	},
+	"packageManager": "yarn@1.22.22"
 }
