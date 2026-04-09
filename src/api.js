@@ -1330,12 +1330,12 @@ module.exports = {
 
 	setSampleRate(ipaddress, sampleRate) {
 		const flag = intToBuffer(sampleRate > 0 ? 1 : 0, 4);
-		const arguments = Buffer.concat ([
+		const commandArguments = Buffer.concat ([
 			Buffer.from ('00000064', 'hex'),
 			flag,
 			intToBuffer(sampleRate, 4)
 			]);
-		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, arguments); 
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL, commandArguments); 
 		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
 	},	
 	
@@ -1345,36 +1345,36 @@ module.exports = {
 	
 	setPullup (ipaddress, pullup) {
 		const flag = intToBuffer(3, 4);
-		const arguments = Buffer.concat ([
+		const commandArguments = Buffer.concat ([
 			Buffer.from ('00000064', 'hex'),
 			flag,
 			intToBuffer(pullup, 4),
 			intToBuffer(0, 2)
 			]);
-		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, arguments); 
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, commandArguments); 
 		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
 	},
 	
 	getPullup (ipaddress) {
 		const flag = intToBuffer(0, 4);
-		const arguments = Buffer.concat ([
+		const commandArguments = Buffer.concat ([
 			Buffer.from ('00000064', 'hex'),
 			flag,
 			intToBuffer(0, 4)
 			]);
-		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, arguments); 
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL, commandArguments); 
 		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
 	},
 	
 	setEncoding(ipaddress, encoding) {
 		const flag = intToBuffer(encoding >0 ? 1 : 0, 4);
-		const arguments = Buffer.concat ([
+		const commandArguments = Buffer.concat ([
 			Buffer.from ('00000064', 'hex'),
 			flag,
 			intToBuffer(encoding, 4)
 			]);
 
-		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, arguments); 
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, commandArguments); 
 		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
 	},
 
@@ -1383,7 +1383,7 @@ module.exports = {
 	},
 
 	setLevel(ipaddress, direction= 'out', channelNumber, levelSetting) {
-		const arguments = Buffer.concat ([
+		const commandArguments = Buffer.concat ([
 			Buffer.from('00000000', 'hex'),
 			Buffer.from('00010001', 'hex'),
 			Buffer.from('000c0010', 'hex'),
@@ -1392,7 +1392,7 @@ module.exports = {
 			intToBuffer(levelSetting, 4)
 		]);
 		
-		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, arguments);
+		const commandBuffer = this.makeSettingCommand(DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, commandArguments);
 		this.sendCommand(commandBuffer, ipaddress, 'SETTINGS');
 	},
 	
