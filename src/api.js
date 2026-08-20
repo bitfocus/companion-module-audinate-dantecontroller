@@ -357,7 +357,7 @@ export default {
 
 		arcSocket.on('message', this.parseReply.bind(this))
 		arcSocket.on('error', (error) => {
-			self.log('error', 'ARC socket : ', error.message)
+			self.log('error', `ARC socket : ${error.message}`)
 			self.activeConnections.ARC = false
 			if (self.CONNECTED) {
 				self.updateStatus(InstanceStatus.Disconnected)
@@ -395,7 +395,7 @@ export default {
 		settingSocket.on('message', this.parseSettingsReply.bind(this))
 
 		settingSocket.on('error', (error) => {
-			self.log('error', 'Settings socket : ', error.message)
+			self.log('error', `Settings socket : ${error.message}`)
 			self.activeConnections.SETTINGS = false
 			if (self.CONNECTED) {
 				self.updateStatus(InstanceStatus.Disconnected)
@@ -434,7 +434,7 @@ export default {
 		cmcSocket.on('message', this.parseCmcReply.bind(this))
 
 		cmcSocket.on('error', (error) => {
-			self.log('error', 'CMC socket : ', error.message)
+			self.log('error', `CMC socket : ${error.message}`)
 			self.activeConnections.CMC = false
 			if (self.CONNECTED) {
 				self.updateStatus(InstanceStatus.Disconnected)
@@ -468,7 +468,7 @@ export default {
 		heartbeatSocket.on('message', this.parseHeartbeatReply.bind(this))
 
 		heartbeatSocket.on('error', (error) => {
-			self.log('error', 'Heartbeat socket : ', error.message)
+			self.log('error', `Heartbeat socket : ${error.message}`)
 			self.activeConnections.HEARTBEAT = false
 			if (self.CONNECTED) {
 				self.updateStatus(InstanceStatus.Disconnected)
