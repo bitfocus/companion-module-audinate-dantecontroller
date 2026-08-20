@@ -1,6 +1,12 @@
-import type { CompanionVariableDefinition, CompanionVariableValues } from '@companion-module/base'
+import {
+	createModuleLogger,
+	type CompanionVariableDefinition,
+	type CompanionVariableValues,
+} from '@companion-module/base'
 import { getChannelSubscriptionName } from './api.js'
 import type DanteInstance from './main.js'
+
+const logger = createModuleLogger('variables')
 
 /** Builds and registers the set of variable definitions for all known devices. */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
@@ -101,6 +107,6 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 	try {
 		self.setVariableValues(variableValues)
 	} catch (error) {
-		self.log('error', 'Error setting variables: ' + error)
+		logger.error('Error setting variables: ' + error)
 	}
 }

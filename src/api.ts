@@ -2,12 +2,14 @@ import multidns from 'multicast-dns'
 import dgram from 'node:dgram'
 import merge from './utils/merge.js'
 import { networkInterfaces } from 'node:os'
-import { InstanceStatus, Regex, type DropdownChoice } from '@companion-module/base'
+import { InstanceStatus, Regex, createModuleLogger, type DropdownChoice } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from './variables.js'
 import type DanteInstance from './main.js'
+
+const logger = createModuleLogger('api')
 
 //**
 //** Types
@@ -508,7 +510,7 @@ export function initConnection(self: DanteInstance): void {
 
 	arcSocket.on('message', (reply, rinfo) => parseReply(self, reply, rinfo))
 	arcSocket.on('error', (error) => {
-		self.log('error', `ARC socket : ${error.message}`)
+		logger.error(`ARC socket : ${error.message}`)
 		self.activeConnections.ARC = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -517,7 +519,7 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	arcSocket.on('close', () => {
-		self.log('warn', 'ARC socket closed')
+		logger.warn('ARC socket closed')
 		self.activeConnections.ARC = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -535,7 +537,7 @@ export function initConnection(self: DanteInstance): void {
 		arcSocket.bind(0, self.config.ip)
 		self.mac = Buffer.from((availableMacs[self.config.ip] ?? '').replaceAll(':', ''), 'hex')
 	} else {
-		self.log('warn', 'Config IP not available')
+		logger.warn('Config IP not available')
 		arcSocket.bind()
 		self.mac = Buffer.from('000000000000', 'hex')
 	}
@@ -546,7 +548,7 @@ export function initConnection(self: DanteInstance): void {
 	settingSocket.on('message', (reply, rinfo) => parseSettingsReply(self, reply, rinfo))
 
 	settingSocket.on('error', (error) => {
-		self.log('error', `Settings socket : ${error.message}`)
+		logger.error(`Settings socket : ${error.message}`)
 		self.activeConnections.SETTINGS = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -555,7 +557,7 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	settingSocket.on('close', () => {
-		self.log('warn', 'Settings socket closed')
+		logger.warn('Settings socket closed')
 		self.activeConnections.SETTINGS = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -586,7 +588,7 @@ export function initConnection(self: DanteInstance): void {
 	cmcSocket.on('message', (reply, rinfo) => parseCmcReply(self, reply, rinfo))
 
 	cmcSocket.on('error', (error) => {
-		self.log('error', `CMC socket : ${error.message}`)
+		logger.error(`CMC socket : ${error.message}`)
 		self.activeConnections.CMC = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -595,7 +597,7 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	cmcSocket.on('close', () => {
-		self.log('warn', 'CMC socket closed')
+		logger.warn('CMC socket closed')
 		self.activeConnections.CMC = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -620,7 +622,7 @@ export function initConnection(self: DanteInstance): void {
 	heartbeatSocket.on('message', (reply, rinfo) => parseHeartbeatReply(self, reply, rinfo))
 
 	heartbeatSocket.on('error', (error) => {
-		self.log('error', `Heartbeat socket : ${error.message}`)
+		logger.error(`Heartbeat socket : ${error.message}`)
 		self.activeConnections.HEARTBEAT = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -629,7 +631,7 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	heartbeatSocket.on('close', () => {
-		self.log('warn', 'Heartbeat socket closed')
+		logger.warn('Heartbeat socket closed')
 		self.activeConnections.HEARTBEAT = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -669,7 +671,7 @@ export function initConnection(self: DanteInstance): void {
 
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */
 export function insertDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
-	self.log('info', `INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)
+	logger.info(`INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)
 
 	self.devicesChoices.push({ id: deviceIp, label: deviceName })
 	self.devicesChoices.sort((deviceA, deviceB) => {
@@ -682,7 +684,7 @@ export function insertDeviceChoice(self: DanteInstance, deviceIp: string, device
  * re-sorting and rebuilding action/feedback/variable definitions when it does.
  */
 export function updateDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
-	self.log('info', 'UPDATE DEVICE NAME : ' + deviceName)
+	logger.info('UPDATE DEVICE NAME : ' + deviceName)
 
 	for (const device of self.devicesChoices) {
 		if (device.id == deviceIp) {
@@ -704,7 +706,7 @@ export function updateDeviceChoice(self: DanteInstance, deviceIp: string, device
  */
 export function updateChannelChoices(self: DanteInstance, deviceIp: string, channelType: 'tx' | 'rx'): void {
 	if (!self.devicesData[deviceIp]?.[channelType]) {
-		self.log('error', "ERROR : Can't update channelsChoices for device " + deviceIp)
+		logger.error("ERROR : Can't update channelsChoices for device " + deviceIp)
 		return
 	}
 
@@ -765,7 +767,7 @@ export function registerDevice(self: DanteInstance, deviceIp: string, deviceName
  */
 export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	const deviceName = self.devicesData[deviceIp]?.name
-	self.log('warn', `${deviceName} (${deviceIp}) is offline. Destroying references`)
+	logger.warn(`${deviceName} (${deviceIp}) is offline. Destroying references`)
 
 	// delete channels name choices
 	if (deviceName !== undefined) {
@@ -815,7 +817,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 
 	if (self.debug) {
 		// Log replies when in debug mode
-		self.log('debug', `ARC : Rx (${reply.length}): ${reply.toString('hex')}`)
+		logger.debug(`ARC : Rx (${reply.length}): ${reply.toString('hex')}`)
 	}
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CONTROL && replySize === bufferToInt(reply, 2)) {
@@ -955,7 +957,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 
 	if (self.debug) {
 		// Log replies when in debug mode
-		self.log('debug', `SETTINGS : Rx (${reply.length}): ${reply.toString('hex')}`)
+		logger.debug(`SETTINGS : Rx (${reply.length}): ${reply.toString('hex')}`)
 	}
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.SETTINGS && replySize == bufferToInt(reply, 2)) {
@@ -1160,7 +1162,7 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 
 	if (self.debug) {
 		// Log replies when in debug mode
-		self.log('debug', `CMC : Rx Info(${reply.length}): ${reply.toString('hex')}`)
+		logger.debug(`CMC : Rx Info(${reply.length}): ${reply.toString('hex')}`)
 	}
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CMC && replySize == bufferToInt(reply, 2)) {
@@ -1181,7 +1183,7 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 				currDevice.ports = { SETTINGS: bufferToInt(reply, 28) }
 
 				const deviceId = self.devicesData[deviceIp]?.name ?? deviceIp
-				self.log('info', `Port for service SETTINGS of device ${deviceId} is : ${bufferToInt(reply, 28)}`)
+				logger.info(`Port for service SETTINGS of device ${deviceId} is : ${bufferToInt(reply, 28)}`)
 
 				self.devicesData = merge(self.devicesData, deviceData)
 				CheckVariables(self, deviceIp)
@@ -1206,7 +1208,7 @@ export function sendCommand(
 ): void {
 	if (self.debug) {
 		// Log sent bytes when in debug mode
-		self.log('debug', `${service} : Tx (${command.length}): ${command.toString('hex')}`)
+		logger.debug(`${service} : Tx (${command.length}): ${command.toString('hex')}`)
 	}
 
 	const port = forcePort ?? self.devicesData[host]?.ports?.[service]
@@ -1214,7 +1216,7 @@ export function sendCommand(
 		self.sockets[service]?.send(command, 0, command.length, port, host)
 	} else {
 		const deviceId = self.devicesData[host]?.name ?? host
-		self.log('error', `Undefined port for service ${service} for device ${deviceId}`)
+		logger.error(`Undefined port for service ${service} for device ${deviceId}`)
 		return
 	}
 }
@@ -1405,7 +1407,7 @@ export function makeCrosspoint(
 	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
 
 	if (!ipaddress) {
-		self.log('error', "Can't find " + destinationDevice + ' IP address')
+		logger.error("Can't find " + destinationDevice + ' IP address')
 		return
 	}
 
@@ -1442,7 +1444,7 @@ export function clearCrosspoint(
 	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
 
 	if (!ipaddress) {
-		self.log('error', "Can't find " + destinationDevice + ' IP address')
+		logger.error("Can't find " + destinationDevice + ' IP address')
 		return
 	}
 
@@ -1711,7 +1713,7 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 
 					const serviceId = id as ServiceName
 					if (currDevice.ports[serviceId] != answer.data.port) {
-						self.log('info', `Port for service ${serviceId} of device ${deviceName} is : ${answer.data.port}`)
+						logger.info(`Port for service ${serviceId} of device ${deviceName} is : ${answer.data.port}`)
 						currDevice.ports[serviceId] = answer.data.port
 
 						switch (serviceId) {
@@ -1740,14 +1742,14 @@ export function setupInterval(self: DanteInstance): void {
 
 	if (self.config.interval > 0) {
 		self.INTERVAL = setInterval(() => void getMdnsServices(self), self.config.interval)
-		self.log('info', 'Starting Update Interval: Every ' + self.config.interval + 'ms')
+		logger.info('Starting Update Interval: Every ' + self.config.interval + 'ms')
 	}
 }
 
 /** Stops the periodic mDNS device-discovery poll, if running. */
 export function stopInterval(self: DanteInstance): void {
 	if (self.INTERVAL !== null) {
-		self.log('info', 'Stopping Update Interval.')
+		logger.info('Stopping Update Interval.')
 		clearInterval(self.INTERVAL)
 		self.INTERVAL = null
 	}
@@ -1787,7 +1789,7 @@ export function refreshArc(self: DanteInstance, deviceIp?: string): void {
 /** Sends an mDNS query for all Dante service types, to discover devices on the network. */
 export function getMdnsServices(self: DanteInstance): void {
 	if (self.debug) {
-		self.log('debug', 'Mdns discovery')
+		logger.debug('Mdns discovery')
 	}
 
 	const questions = DANTE_CONST.SERVICES_ARRAY.map((service) => ({
