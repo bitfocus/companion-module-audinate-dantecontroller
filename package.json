@@ -1,6 +1,6 @@
 {
 	"name": "audinate-dantecontroller",
-	"version": "1.2.0",
+	"version": "2.00.0",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {
