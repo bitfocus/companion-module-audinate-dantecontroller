@@ -117,7 +117,7 @@ const REUSE_PORT_OPTION: { reusePort?: true } = process.platform === 'linux' ? {
 //**
 
 /** Encodes an integer into a big-endian byte buffer. */
-function intToBuffer(value: number, bytes: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 = 2): Buffer {
+export function intToBuffer(value: number, bytes: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 = 2): Buffer {
 	const intBuffer = Buffer.alloc(bytes)
 	switch (bytes) {
 		case 1:
@@ -142,7 +142,7 @@ function intToBuffer(value: number, bytes: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 = 2): B
 }
 
 /** Decodes a big-endian integer from a byte buffer. */
-function bufferToInt(buffer: Buffer, offset = 0, bytes: 1 | 2 | 4 = 2): number {
+export function bufferToInt(buffer: Buffer, offset = 0, bytes: 1 | 2 | 4 = 2): number {
 	switch (bytes) {
 		case 1:
 			return buffer.readInt8(offset)
@@ -154,14 +154,14 @@ function bufferToInt(buffer: Buffer, offset = 0, bytes: 1 | 2 | 4 = 2): number {
 }
 
 /** Increments a big-endian byte buffer in place by 1, carrying across bytes as needed. */
-function incrementBE(buffer: Buffer): void {
+export function incrementBE(buffer: Buffer): void {
 	for (let i = buffer.length - 1; i >= 0; i--) {
 		if (buffer[i]++ !== 255) break
 	}
 }
 
 /** Reads a NUL-terminated UTF-8 string out of a Dante message buffer. */
-function parseString(buffer: Buffer, startIndex: number): string | undefined {
+export function parseString(buffer: Buffer, startIndex: number): string | undefined {
 	const end = buffer.indexOf(0x00, startIndex)
 	if (buffer.length > startIndex) {
 		return buffer.toString('utf8', startIndex, end)
