@@ -1,4 +1,6 @@
 {
+	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+	"type": "connection",
 	"id": "audinate-dantecontroller",
 	"name": "audinate-dantecontroller",
 	"shortname": "audinate-dantecontroller",
@@ -21,12 +23,6 @@
 		"entrypoint": "../index.js"
 	},
 	"manufacturer": "Audinate",
-	"products": [
-		"Dante Controller"
-	],
-	"keywords": [
-		"audio",
-		"routing",
-		"Dante"
-	]
+	"products": ["Dante Controller"],
+	"keywords": ["audio", "routing", "Dante"]
 }

@@ -2,8 +2,14 @@
 	"name": "audinate-dantecontroller",
 	"version": "1.1.2",
 	"main": "index.js",
+	"type": "module",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"lint:raw": "eslint",
+		"lint": "yarn lint:raw .",
+		"dist": "yarn companion-module-build",
+		"package": "run build && companion-module-build",
+		"format": "prettier -w ."
 	},
 	"license": "MIT",
 	"repository": {
@@ -14,11 +20,13 @@
 		"node": "^22.20"
 	},
 	"dependencies": {
-		"@companion-module/base": "~1.11.0",
+		"@companion-module/base": "~1.14.1",
 		"multicast-dns": "^7.2.5"
 	},
 	"devDependencies": {
-		"@companion-module/tools": "^2.1.0"
+		"@companion-module/tools": "^2.7.2",
+		"eslint": "^10.8.1",
+		"prettier": "^3.9.6"
 	},
 	"packageManager": "yarn@4.18.0"
 }
