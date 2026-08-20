@@ -51,4 +51,4 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Feedbacks
 
-- Change background if crosspoint is active
+- Crosspoint Connected
