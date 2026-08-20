@@ -161,7 +161,7 @@ export const DANTE_CONST = {
 		3: '-0.1%',
 		4: '-4%',
 	} as Record<number, string>,
-}
+} as const
 
 /** Converts a plain `{ id: label }` map into a Companion dropdown `choices` array. */
 export function object2choices(obj: Record<string | number, string>): DropdownChoice[] {
