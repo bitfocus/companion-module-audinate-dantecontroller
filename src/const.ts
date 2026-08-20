@@ -1,10 +1,12 @@
-const DANTE_CONST = {
+import type { DropdownChoice } from '@companion-module/base'
+
+export const DANTE_CONST = {
 	SERVICES: {
 		ARC: '_netaudio-arc._udp.local',
 		CMC: '_netaudio-cmc._udp.local',
 	},
 
-	get SERVICES_ARRAY() {
+	get SERVICES_ARRAY(): string[] {
 		return Object.values(DANTE_CONST.SERVICES)
 	},
 
@@ -142,7 +144,7 @@ const DANTE_CONST = {
 		16: 'PCM16',
 		24: 'PCM24',
 		32: 'PCM32',
-	},
+	} as Record<number, string>,
 
 	LEVELS: {
 		1: '+18dBu',
@@ -150,7 +152,7 @@ const DANTE_CONST = {
 		3: '+0dBu',
 		4: '0dBV',
 		5: '-10dBV',
-	},
+	} as Record<number, string>,
 
 	PULLUPS: {
 		0: 'NONE',
@@ -158,19 +160,24 @@ const DANTE_CONST = {
 		2: '+0.1%',
 		3: '-0.1%',
 		4: '-4%',
-	},
+	} as Record<number, string>,
 }
 
-export const object2choices = (obj) => {
-	let choices = []
+/** Converts a plain `{ id: label }` map into a Companion dropdown `choices` array. */
+export function object2choices(obj: Record<string | number, string>): DropdownChoice[] {
+	const choices: DropdownChoice[] = []
 	for (const [id, label] of Object.entries(obj)) {
 		choices.push({ id: id, label: label })
 	}
 	return choices
 }
 
-export const object2PartialChoices = (obj, optionsArray) => {
-	let choices = []
+/** Like {@link object2choices}, but only includes entries whose id is present in `optionsArray`. */
+export function object2PartialChoices(
+	obj: Record<string | number, string>,
+	optionsArray: (string | number)[] | undefined,
+): DropdownChoice[] {
+	const choices: DropdownChoice[] = []
 	for (const [id, label] of Object.entries(obj)) {
 		if (optionsArray?.includes(id)) {
 			choices.push({ id: id, label: label })
@@ -179,11 +186,14 @@ export const object2PartialChoices = (obj, optionsArray) => {
 	return choices
 }
 
-export const array2choices = (array, mapping) => {
-	const choices = array?.map((e) => {
-		return { id: e, label: mapping ? mapping(e) : e }
+/**
+ * Converts an array of raw values into a Companion dropdown `choices` array, or `undefined` if `array` is nullish.
+ */
+export function array2choices<T extends string | number>(
+	array: T[] | undefined,
+	mapping?: (value: T) => string,
+): DropdownChoice[] | undefined {
+	return array?.map((e) => {
+		return { id: e, label: mapping ? mapping(e) : String(e) }
 	})
-	return choices
 }
-
-export { DANTE_CONST }

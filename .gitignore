@@ -10,5 +10,6 @@ node_modules/
 package-lock.json
 /pkg
 /pkg.tz
+/dist
 *.tgz
 DEBUG-*

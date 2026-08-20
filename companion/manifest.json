@@ -17,10 +17,10 @@
 	],
 	"legacyIds": [],
 	"runtime": {
-		"type": "node22",
+		"type": "node26",
 		"api": "nodejs-ipc",
 		"apiVersion": "0.0.0",
-		"entrypoint": "../index.js"
+		"entrypoint": "../dist/main.js"
 	},
 	"manufacturer": "Audinate",
 	"products": ["Dante Controller"],
