@@ -18,6 +18,8 @@ import {
 	refreshArc,
 	findTxChannelByName,
 	getChannelSubscriptionName,
+	hasRxChannels,
+	hasTxChannels,
 } from './api.js'
 import type DanteInstance from './main.js'
 
@@ -168,38 +170,38 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Destination Device',
 					id: 'destinationDevice',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasRxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
-					}),
-				),
+					})),
 				{
 					type: 'dropdown',
 					label: 'Source Device',
 					id: 'sourceDevice',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasTxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Source channel',
 						id: `sourceChannel_${ip}`,
 						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
-					}),
-				),
+					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
@@ -251,20 +253,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Destination Device',
 					id: 'destinationDevice',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasRxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
-					}),
-				),
+					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
@@ -344,20 +346,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasRxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:device) == '${ip}'`,
-					}),
-				),
+					})),
 				{
 					type: 'textinput',
 					label: 'New name',
@@ -379,20 +381,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasRxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:device) == '${ip}'`,
-					}),
-				),
+					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
@@ -407,20 +409,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasTxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
 						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:device) == '${ip}'`,
-					}),
-				),
+					})),
 				{
 					type: 'textinput',
 					label: 'New name',
@@ -442,20 +444,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasTxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
 						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:device) == '${ip}'`,
-					}),
-				),
+					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
@@ -608,20 +610,20 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices,
+					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData).map(
-					([ip, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
+				...Object.entries(self.devicesData)
+					.filter(([, device]) => hasRxChannels(device))
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
 						isVisibleExpression: `$(options:device) == '${ip}'`,
-					}),
-				),
+					})),
 				{
 					type: 'dropdown',
 					label: 'Level',

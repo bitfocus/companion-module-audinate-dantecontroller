@@ -5,7 +5,14 @@ import {
 	type CompanionFeedbackDefinitions,
 	type SomeCompanionFeedbackInputField,
 } from '@companion-module/base'
-import { findTxChannelByName, findRxChannelByName, findDeviceIpByName, getChannelSubscriptionName } from './api.js'
+import {
+	findTxChannelByName,
+	findRxChannelByName,
+	findDeviceIpByName,
+	getChannelSubscriptionName,
+	hasRxChannels,
+	hasTxChannels,
+} from './api.js'
 import type DanteInstance from './main.js'
 
 type RoutingBgOptions = {
@@ -53,38 +60,38 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				type: 'dropdown',
 				label: 'Destination Device',
 				id: 'destinationDevice',
-				choices: self.devicesChoices,
+				choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
 				default: self.devicesChoices[0]?.id ?? '',
 				disableAutoExpression: true,
 			},
-			...Object.entries(self.devicesData).map(
-				([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+			...Object.entries(self.devicesData)
+				.filter(([, device]) => hasRxChannels(device))
+				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Destination channel',
 					id: `destinationChannel_${ip}`,
 					choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 					default: 0,
 					isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
-				}),
-			),
+				})),
 			{
 				type: 'dropdown',
 				label: 'Source Device',
 				id: 'sourceDevice',
-				choices: self.devicesChoices,
+				choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
 				default: self.devicesChoices[0]?.id ?? '',
 				disableAutoExpression: true,
 			},
-			...Object.entries(self.devicesData).map(
-				([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+			...Object.entries(self.devicesData)
+				.filter(([, device]) => hasTxChannels(device))
+				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Source channel',
 					id: `sourceChannel_${ip}`,
 					choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
 					default: 0,
 					isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
-				}),
-			),
+				})),
 		],
 		callback: (feedback) => {
 			const opt = feedback.options

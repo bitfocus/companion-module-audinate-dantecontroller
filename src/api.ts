@@ -106,8 +106,9 @@ function compareArrays(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b)
 }
 
-// dgram's reusePort option wraps SO_REUSEPORT, which Node only supports on Linux 3.9+ -
-// binding to a specific (non-wildcard) address with it throws ENOTSUP on macOS, so only
+// dgram's reusePort option wraps SO_REUSEPORT, which Node/libuv only supports on Linux -
+// requesting it on macOS/BSD throws ENOTSUP regardless of bind address (confirmed: it fails
+// the same way whether bound to a specific interface or the wildcard address), so only
 // request it on Linux.
 const REUSE_PORT_OPTION: { reusePort?: true } = process.platform === 'linux' ? { reusePort: true } : {}
 
@@ -363,6 +364,16 @@ export function getChannelSubscriptionName(
 	channel: { friendlyName?: string; name?: string } | undefined,
 ): string | undefined {
 	return channel?.friendlyName || channel?.name
+}
+
+/** @returns True if the device has at least one rx (destination) channel. */
+export function hasRxChannels(device: DeviceData | undefined): boolean {
+	return (device?.rx?.count ?? 0) > 0
+}
+
+/** @returns True if the device has at least one tx (source) channel. */
+export function hasTxChannels(device: DeviceData | undefined): boolean {
+	return (device?.tx?.count ?? 0) > 0
 }
 
 /** @returns The IP address of the device with this name, if known. */
