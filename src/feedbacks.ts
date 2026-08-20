@@ -42,9 +42,8 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const routingBg: CompanionBooleanFeedbackDefinition<RoutingBgOptions> = {
 		type: 'boolean',
-		name: 'Change background color by destination',
-		description:
-			'If the specified source channel specified is routed to the correct output, change background color of the button',
+		name: 'Crosspoint Connected',
+		description: 'True If the specified source channel specified is routed to the correct output',
 		defaultStyle: {
 			color: combineRgb(0, 0, 0),
 			bgcolor: combineRgb(255, 255, 0),
@@ -128,9 +127,8 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const routingBgManual: CompanionBooleanFeedbackDefinition<RoutingBgManualOptions> = {
 		type: 'boolean',
-		name: 'Change background color by destination (manual)',
-		description:
-			'If the specified source channel specified is routed to the correct output, change background color of the button',
+		name: 'Crosspoint Connected (manual)',
+		description: 'True if the specified source channel specified is routed to the correct output',
 		defaultStyle: {
 			color: combineRgb(0, 0, 0),
 			bgcolor: combineRgb(255, 255, 0),
