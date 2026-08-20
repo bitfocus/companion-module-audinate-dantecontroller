@@ -573,11 +573,12 @@ export function initConnection(self: DanteInstance): void {
 		checkConnections(self)
 	})
 
-	if (availableIps.includes(self.config.ip)) {
-		settingSocket.bind(DANTE_CONST.PORTS.INFO, self.config.ip)
-	} else {
-		settingSocket.bind(DANTE_CONST.PORTS.INFO)
-	}
+	// Always bind to the wildcard address - a socket bound to a specific unicast interface
+	// address can silently fail to receive multicast-addressed packets on some platforms
+	// (e.g. macOS/BSD), since the packet's destination (the multicast group IP) won't match
+	// the bound address. `addMembership` above already scopes group membership to the chosen
+	// interface, so the wildcard bind doesn't widen which interface's traffic we receive.
+	settingSocket.bind(DANTE_CONST.PORTS.INFO)
 
 	// create Dante CMC socket
 	self.sockets.CMC = dgram.createSocket({ type: 'udp4', reuseAddr: true, ...REUSE_PORT_OPTION })
@@ -646,16 +647,17 @@ export function initConnection(self: DanteInstance): void {
 		checkConnections(self)
 	})
 
-	if (availableIps.includes(self.config.ip)) {
-		heartbeatSocket.bind(DANTE_CONST.PORTS.HEARTBEAT, self.config.ip)
-	} else {
-		heartbeatSocket.bind(DANTE_CONST.PORTS.HEARTBEAT)
-	}
+	// Always bind to the wildcard address - see the comment on the SETTINGS socket's bind above.
+	heartbeatSocket.bind(DANTE_CONST.PORTS.HEARTBEAT)
 
 	setupInterval(self)
 
 	if (availableIps.includes(self.config.ip)) {
-		self.mdns = multidns({ interface: self.config.ip })
+		// `multicast-dns` binds its socket to `bind ?? interface` - passing only `interface` binds
+		// to that specific unicast address, which (like our own sockets above) can silently drop
+		// incoming multicast-addressed replies on macOS/BSD. Bind the socket to the wildcard address
+		// explicitly, while still scoping multicast group membership to the chosen interface.
+		self.mdns = multidns({ interface: self.config.ip, bind: '0.0.0.0' })
 	} else {
 		self.mdns = multidns()
 	}
@@ -817,6 +819,14 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 	}
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CONTROL && replySize === bufferToInt(reply, 2)) {
+		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's
+		// existence - ignore ARC traffic from a device we haven't registered yet, so an unsolicited
+		// broadcast can't race ahead of discovery and silently stub in a devicesData entry via merge()
+		// (which would skip registerDevice's insertDeviceChoice()/timeoutArray setup).
+		if (!self.devicesData[deviceIp]) {
+			return
+		}
+
 		const commandId = bufferToInt(reply, 6)
 
 		deviceData[deviceIp] = {}
@@ -954,6 +964,15 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 			self.updateStatus(InstanceStatus.Ok)
 			self.CONNECTED = true
 		}
+
+		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's
+		// existence - ignore SETTINGS traffic (often unsolicited multicast) from a device we haven't
+		// registered yet, so it can't race ahead of discovery and silently stub in a devicesData
+		// entry via merge() (which would skip registerDevice's insertDeviceChoice()/timeoutArray setup).
+		if (!self.devicesData[deviceIp]) {
+			return
+		}
+
 		const payload = reply.subarray(24)
 		const commandId = bufferToInt(payload, 2)
 
@@ -1145,6 +1164,14 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 	}
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CMC && replySize == bufferToInt(reply, 2)) {
+		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's
+		// existence - ignore CMC traffic from a device we haven't registered yet, so it can't race
+		// ahead of discovery and silently stub in a devicesData entry via merge() (which would skip
+		// registerDevice's insertDeviceChoice()/timeoutArray setup).
+		if (!self.devicesData[deviceIp]) {
+			return
+		}
+
 		const commandId = bufferToInt(reply, 6)
 		deviceData[deviceIp] = {}
 		const currDevice = deviceData[deviceIp]
