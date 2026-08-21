@@ -20,6 +20,10 @@ import {
 	scheduleUpdateData,
 	scheduleCheckVariables,
 	cancelCheckVariables,
+	scheduleCheckFeedbacks,
+	cancelCheckFeedbacks,
+	trackFeedbackDevices,
+	untrackFeedback,
 	cancelUpdateData,
 	flushUpdateData,
 	sendCommand,
@@ -86,6 +90,8 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		log: vi.fn(),
 		updateStatus: vi.fn(),
 		checkFeedbacks: vi.fn(),
+		checkFeedbacksById: vi.fn(),
+		checkAllFeedbacks: vi.fn(),
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),
 		setVariableDefinitions: vi.fn(),
@@ -539,6 +545,145 @@ describe('scheduleCheckVariables', () => {
 		scheduleCheckVariables(b, '10.0.0.5', 'rx')
 		expect(pushes(a)).toHaveLength(1)
 		expect(pushes(b)).toHaveLength(1)
+	})
+})
+
+describe('scheduleCheckFeedbacks', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function byId(self: DanteInstance) {
+		return (self.checkFeedbacksById as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	function byType(self: DanteInstance) {
+		return (self.checkAllFeedbacks as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	it('checks only the feedbacks that read the changed device', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.7', '10.0.0.8'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byId(self)[0]).toEqual(['fb-a'])
+	})
+
+	it('matches on the source device too, not just the destination', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		// a tx-channel rename on the *source* device must still re-check the feedback
+		scheduleCheckFeedbacks(self, '10.0.0.6')
+		expect(byId(self)[0]).toEqual(['fb-a'])
+	})
+
+	it('always includes wildcard feedbacks whose devices did not resolve', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-wild', ['10.0.0.9', undefined])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byId(self)[0]).toContain('fb-wild')
+		expect(byId(self)[0]).toContain('fb-a')
+	})
+
+	it('does not repeat a wildcard feedback that also matches on a resolved device', () => {
+		const self = createMockInstance()
+		// resolved on one end, unresolved on the other: present in both the wildcard set and the map
+		trackFeedbackDevices(self, 'fb-wild', ['10.0.0.9', undefined])
+
+		scheduleCheckFeedbacks(self, '10.0.0.9')
+		expect(byId(self)[0]).toEqual(['fb-wild'])
+	})
+
+	it('issues no check when no tracked feedback reads the changed device', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.99')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+		expect(byType(self)).toHaveLength(0)
+	})
+
+	it('falls back to a type-level check for an unattributable change', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		scheduleCheckFeedbacks(self)
+		expect(byType(self)).toHaveLength(1)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('falls back to a type-level check when nothing has been tracked yet', () => {
+		const self = createMockInstance()
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byType(self)).toHaveLength(1)
+	})
+
+	it('unions devices queued behind the leading edge into one targeted check', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-c', ['10.0.0.7'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.7') // consumes the leading edge
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		scheduleCheckFeedbacks(self, '10.0.0.6')
+		vi.advanceTimersByTime(30)
+
+		expect(byId(self)).toHaveLength(2)
+		expect(byId(self)[1].sort()).toEqual(['fb-a', 'fb-b'])
+	})
+
+	it('re-tracking a feedback replaces its previous devices', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.6']) // user repointed the dropdown
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('re-tracking with resolved devices clears an earlier wildcard registration', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', undefined])
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6']) // the device was discovered
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.9'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.9')
+		expect(byId(self)[0]).toEqual(['fb-b'])
+	})
+
+	it('untrackFeedback stops a removed feedback being checked', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		untrackFeedback(self, 'fb-a')
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('cancelCheckFeedbacks drops a pending trailing check', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.6'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5') // leading
+		scheduleCheckFeedbacks(self, '10.0.0.6') // queued
+		const before = byId(self).length
+
+		cancelCheckFeedbacks(self)
+		vi.advanceTimersByTime(1000)
+		expect(byId(self)).toHaveLength(before)
 	})
 })
 

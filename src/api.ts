@@ -542,6 +542,7 @@ export function initConnection(self: DanteInstance): void {
 	// about to discard
 	cancelUpdateData(self)
 	cancelCheckVariables(self)
+	cancelCheckFeedbacks(self)
 	if (self.mdns) {
 		// drop the old listeners first, so a late callback from the outgoing instance can't
 		// write into the fresh state we're about to build
@@ -1030,12 +1031,15 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 				case 'rx':
 					scheduleCheckVariables(self, deviceIp, 'rx', 'rx_names')
 					updateChannelChoices(self, deviceIp, 'rx')
-					self.checkFeedbacks('routing_bg', 'routing_bg_manual')
+					// routes into this device changed - only feedbacks reading it can have flipped
+					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'tx':
 					scheduleCheckVariables(self, deviceIp, 'tx', 'tx_names')
 					updateChannelChoices(self, deviceIp, 'tx')
-					self.checkFeedbacks('routing_bg', 'routing_bg_manual')
+					// this device's transmit channel names changed - feedbacks using it as a source match on
+					// those names, so they need re-checking too
+					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'rxCount':
 					getRxChannels(self, deviceIp)
@@ -2082,11 +2086,157 @@ export function cancelCheckVariables(self: DanteInstance): void {
 	pendingVariables.delete(self)
 }
 
+/**
+ * Which devices each live feedback instance depends on, keyed by feedback instance id.
+ *
+ * Both routing feedbacks read two devices: the destination (its rx channel's subscription status
+ * and source labels) and the source (its tx channel's name/friendlyName/number, used to match
+ * against what the destination reports). So a change to *either* device can flip the result, and
+ * indexing on destination alone would leave feedbacks stale whenever a source device renamed a
+ * transmit channel.
+ */
+const feedbackDevices = new WeakMap<DanteInstance, Map<string, Set<string>>>()
+
+/**
+ * Feedbacks whose devices could not be resolved - a manual feedback naming a device that is not
+ * discovered yet, or whose name came from a variable that does not resolve. They are checked on
+ * every tick, since we cannot tell whether they are affected.
+ */
+const wildcardFeedbacks = new WeakMap<DanteInstance, Set<string>>()
+
+interface PendingFeedbacks {
+	devices: Set<string>
+	/** Something changed that is not attributable to one device, so check everything. */
+	allDevices: boolean
+}
+
+const pendingFeedbacks = new WeakMap<DanteInstance, PendingFeedbacks>()
+const throttledFeedbacks = new WeakMap<DanteInstance, DebouncedFunc<() => void>>()
+
+/**
+ * Records which devices a feedback instance depends on, so later changes to those devices can
+ * re-check just this feedback instead of every feedback of its type.
+ *
+ * Called from the feedback callbacks, which are the only place the resolved device identities are
+ * known - `@companion-module/base` 2.x has no `subscribe` hook. Companion re-runs a callback when
+ * its options or referenced variables change, so the mapping stays current.
+ *
+ * @param deviceIps The devices this feedback reads; any `undefined` entry marks it as a wildcard.
+ */
+export function trackFeedbackDevices(self: DanteInstance, feedbackId: string, deviceIps: (string | undefined)[]): void {
+	let byId = feedbackDevices.get(self)
+	if (!byId) {
+		byId = new Map()
+		feedbackDevices.set(self, byId)
+	}
+
+	let wildcards = wildcardFeedbacks.get(self)
+	if (!wildcards) {
+		wildcards = new Set()
+		wildcardFeedbacks.set(self, wildcards)
+	}
+
+	const resolved = new Set<string>()
+	let unresolved = false
+	for (const ip of deviceIps) {
+		if (ip) {
+			resolved.add(ip)
+		} else {
+			unresolved = true
+		}
+	}
+
+	byId.set(feedbackId, resolved)
+	if (unresolved) {
+		wildcards.add(feedbackId)
+	} else {
+		wildcards.delete(feedbackId)
+	}
+}
+
+/** Forgets a feedback instance that Companion has removed or disabled. */
+export function untrackFeedback(self: DanteInstance, feedbackId: string): void {
+	feedbackDevices.get(self)?.delete(feedbackId)
+	wildcardFeedbacks.get(self)?.delete(feedbackId)
+}
+
+function flushCheckFeedbacks(self: DanteInstance): void {
+	const pending = pendingFeedbacks.get(self)
+	if (!pending) return
+	pendingFeedbacks.delete(self)
+
+	const byId = feedbackDevices.get(self)
+
+	// Nothing tracked yet means no feedback callback has run, so we have no ids to target. Fall back
+	// to the type-level check, which is also what a full rebuild wants.
+	if (pending.allDevices || !byId || byId.size === 0) {
+		self.checkAllFeedbacks()
+		return
+	}
+
+	// A Set, not an array: a wildcard feedback is also present in `byId` (one end resolved, the other
+	// not), so it would otherwise be emitted twice whenever its resolved device is the one that changed.
+	const ids = new Set<string>(wildcardFeedbacks.get(self))
+	for (const [feedbackId, devices] of byId) {
+		for (const deviceIp of devices) {
+			if (pending.devices.has(deviceIp)) {
+				ids.add(feedbackId)
+				break
+			}
+		}
+	}
+
+	if (ids.size > 0) {
+		self.checkFeedbacksById(...ids)
+	}
+}
+
+function getThrottledFeedbacks(self: DanteInstance): DebouncedFunc<() => void> {
+	let throttled = throttledFeedbacks.get(self)
+	if (!throttled) {
+		throttled = throttle(() => flushCheckFeedbacks(self), VARIABLES_THROTTLE_MS, {
+			leading: true,
+			trailing: true,
+		})
+		throttledFeedbacks.set(self, throttled)
+	}
+	return throttled
+}
+
+/**
+ * Requests a feedback re-check, coalescing requests within {@link VARIABLES_THROTTLE_MS}.
+ *
+ * @param deviceIp The device whose data changed. Omit to re-check every feedback, for changes that
+ * are not attributable to a single device (such as a full definitions rebuild).
+ */
+export function scheduleCheckFeedbacks(self: DanteInstance, deviceIp?: string): void {
+	let pending = pendingFeedbacks.get(self)
+	if (!pending) {
+		pending = { devices: new Set(), allDevices: false }
+		pendingFeedbacks.set(self, pending)
+	}
+
+	if (deviceIp === undefined) {
+		pending.allDevices = true
+	} else {
+		pending.devices.add(deviceIp)
+	}
+
+	getThrottledFeedbacks(self)()
+}
+
+/** Drops any pending feedback re-check, for when the state it would evaluate is going away. */
+export function cancelCheckFeedbacks(self: DanteInstance): void {
+	throttledFeedbacks.get(self)?.cancel()
+	pendingFeedbacks.delete(self)
+}
+
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
 export function updateData(self: DanteInstance): void {
 	UpdateActions(self)
 	UpdateVariableDefinitions(self)
 	CheckVariables(self)
 	UpdateFeedbacks(self)
-	self.checkFeedbacks('routing_bg', 'routing_bg_manual')
+	// a full rebuild is not attributable to one device
+	scheduleCheckFeedbacks(self)
 }

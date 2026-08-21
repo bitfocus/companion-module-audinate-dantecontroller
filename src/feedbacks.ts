@@ -12,6 +12,8 @@ import {
 	getChannelSubscriptionName,
 	hasRxChannels,
 	hasTxChannels,
+	trackFeedbackDevices,
+	untrackFeedback,
 } from './api.js'
 import type DanteInstance from './main.js'
 
@@ -93,8 +95,11 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
 				})),
 		],
+		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: (feedback) => {
 			const opt = feedback.options
+			// Both dropdown ids are device IPs, so this instance's dependencies are known exactly.
+			trackFeedbackDevices(self, feedback.id, [opt.destinationDevice, opt.sourceDevice])
 			if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
 				const destinationChannel =
 					self.devicesData[opt.destinationDevice].rx?.[opt[`destinationChannel_${opt.destinationDevice}`]]
@@ -172,6 +177,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				useVariables: true,
 			},
 		],
+		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: async (feedback) => {
 			const opt = feedback.options
 			const sourceChannelName = opt.sourceChannelName
@@ -184,6 +190,11 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			const destinationDeviceIp = IP.test(destinationDeviceId)
 				? destinationDeviceId
 				: findDeviceIpByName(self, destinationDeviceId)
+
+			// These options are free text (and may come from variables), so either device may fail to
+			// resolve - against a device that has not been discovered yet, for instance. An unresolved
+			// entry registers this feedback as a wildcard so it keeps being checked regardless.
+			trackFeedbackDevices(self, feedback.id, [destinationDeviceIp, findDeviceIpByName(self, sourceDeviceName)])
 
 			if (destinationDeviceIp && sourceDeviceName && self.devicesData[destinationDeviceIp]?.rx) {
 				const destinationChannel =
