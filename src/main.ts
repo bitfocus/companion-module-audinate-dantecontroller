@@ -45,9 +45,10 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	}
 
 	async init(config: ModuleConfig): Promise<void> {
-		// Fire-and-forget, matching the original behaviour - init doesn't wait for the
-		// connection/discovery cycle kicked off by configUpdated to complete.
-		void this.configUpdated(config)
+		this.configUpdated(config).catch((error: unknown) => {
+			this.log('error', `Initialisation failed : ${error instanceof Error ? error.message : String(error)}`)
+			this.updateStatus(InstanceStatus.UnknownError)
+		})
 	}
 
 	async destroy(): Promise<void> {
@@ -60,6 +61,7 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		}
 
 		for (const socket of Object.values(this.sockets)) {
+			socket?.removeAllListeners()
 			try {
 				socket?.close()
 			} catch {
