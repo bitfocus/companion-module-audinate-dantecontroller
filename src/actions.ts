@@ -33,7 +33,7 @@ import {
 	txDeviceChoices,
 	channelChoices,
 	getChannelSubscriptionName,
-} from './api.js'
+} from './api/index.js'
 import type DanteInstance from './main.js'
 
 type MakeCrosspointOptions = {

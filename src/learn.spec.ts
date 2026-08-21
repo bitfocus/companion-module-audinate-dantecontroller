@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { UpdateActions } from './actions.js'
-import type { DevicesData } from './api.js'
+import type { DevicesData } from './api/index.js'
 import type DanteInstance from './main.js'
 
 /**

@@ -9,6 +9,8 @@ import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions } from './actions.js'
 import {
+	DanteConnection,
+	cancelCheckFeedbacks,
 	initConnection,
 	destroyDevice,
 	cancelUpdateData,
@@ -16,7 +18,7 @@ import {
 	type DevicesData,
 	type DanteSockets,
 	type ConnectionName,
-} from './api.js'
+} from './api/index.js'
 import type { DanteModuleTypes } from './types.js'
 
 export { UpgradeScripts }
@@ -33,23 +35,73 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	config!: ModuleConfig
 
 	devicesData: DevicesData = {}
-	sockets: DanteSockets = {}
 	/** Discovered devices, keyed by name - see `resolveDeviceIp`. */
 	devicesChoices: DropdownChoice<string>[] = []
 	txChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	rxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	txFriendlyNameRefreshCounter = 0
 
-	counter: Buffer = Buffer.alloc(2)
-	mac: Buffer = Buffer.alloc(6)
 	debug = false
 	timeout = 0
-	activeConnections: Partial<Record<ConnectionName, boolean>> = {}
-	/** Why the configured network interface is unusable, or null when it is fine. */
-	configError: string | null = null
-	CONNECTED = false
-	INTERVAL: NodeJS.Timeout | null = null
-	mdns!: multidns.MulticastDNS
+
+	/**
+	 * The network connection: sockets, discovery, and the state saying whether they are usable.
+	 *
+	 * The accessors below forward to it so the rest of the module keeps reading `self.sockets`,
+	 * `self.counter` and so on - the state lives in one place, without every call site having to
+	 * spell out the indirection.
+	 */
+	readonly connection: DanteConnection = new DanteConnection(this)
+
+	get sockets(): DanteSockets {
+		return this.connection.sockets
+	}
+	set sockets(value: DanteSockets) {
+		this.connection.sockets = value
+	}
+	get mdns(): multidns.MulticastDNS {
+		// only read after initConnection has created it
+		return this.connection.mdns as multidns.MulticastDNS
+	}
+	set mdns(value: multidns.MulticastDNS) {
+		this.connection.mdns = value
+	}
+	get counter(): Buffer {
+		return this.connection.counter
+	}
+	set counter(value: Buffer) {
+		this.connection.counter = value
+	}
+	get mac(): Buffer {
+		return this.connection.mac
+	}
+	set mac(value: Buffer) {
+		this.connection.mac = value
+	}
+	get activeConnections(): Partial<Record<ConnectionName, boolean>> {
+		return this.connection.activeConnections
+	}
+	set activeConnections(value: Partial<Record<ConnectionName, boolean>>) {
+		this.connection.activeConnections = value
+	}
+	get configError(): string | null {
+		return this.connection.configError
+	}
+	set configError(value: string | null) {
+		this.connection.configError = value
+	}
+	get CONNECTED(): boolean {
+		return this.connection.connected
+	}
+	set CONNECTED(value: boolean) {
+		this.connection.connected = value
+	}
+	get INTERVAL(): NodeJS.Timeout | null {
+		return this.connection.interval
+	}
+	set INTERVAL(value: NodeJS.Timeout | null) {
+		this.connection.interval = value
+	}
 
 	constructor(internal: unknown) {
 		super(internal)
@@ -63,31 +115,15 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	}
 
 	async destroy(): Promise<void> {
-		if (this.INTERVAL) {
-			clearInterval(this.INTERVAL)
-			this.INTERVAL = null
-		}
 		for (const ip of Object.keys(this.devicesData)) {
 			destroyDevice(this, ip)
 		}
 		// destroyDevice queues a rebuild per device; none of them should reach a torn-down instance
 		cancelUpdateData(this)
 		cancelCheckVariables(this)
+		cancelCheckFeedbacks(this)
 
-		for (const socket of Object.values(this.sockets)) {
-			socket?.removeAllListeners()
-			try {
-				socket?.close()
-			} catch {
-				// already closed - nothing to do on teardown
-			}
-		}
-		this.sockets = {}
-
-		if (this.mdns) {
-			this.mdns.removeAllListeners()
-			this.mdns.destroy()
-		}
+		this.connection.close()
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {

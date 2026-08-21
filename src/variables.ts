@@ -1,5 +1,5 @@
 import { createModuleLogger, type CompanionVariableDefinitions } from '@companion-module/base'
-import { getChannelSubscriptionName } from './api.js'
+import { getChannelSubscriptionName } from './api/index.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 

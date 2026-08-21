@@ -49,7 +49,7 @@ import {
 	parseReply,
 	parseSettingsReply,
 	type DevicesData,
-} from './api.js'
+} from './api/index.js'
 import { DANTE_CONST } from './const.js'
 import type DanteInstance from './main.js'
 
