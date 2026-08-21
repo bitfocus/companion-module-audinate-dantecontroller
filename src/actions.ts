@@ -88,15 +88,18 @@ type SetSampleRateCustomOptions = {
 
 type SetSampleRateOptions = {
 	device: string
-} & Record<`sr_${string}`, number>
+	/** String, because the choice ids these dropdowns carry are strings. */
+} & Record<`sr_${string}`, string>
 
 type SetPullupOptions = {
 	device: string
-} & Record<`pullup_${string}`, number>
+	/** String, because the choice ids these dropdowns carry are strings. */
+} & Record<`pullup_${string}`, string>
 
 type SetEncodingOptions = {
 	device: string
-} & Record<`encoding_${string}`, number>
+	/** String, because the choice ids these dropdowns carry are strings. */
+} & Record<`encoding_${string}`, string>
 
 type SetOutputLevelOptions = {
 	device: string
@@ -630,7 +633,7 @@ export function UpdateActions(self: DanteInstance): void {
 						default: currentChoiceId(
 							array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? [],
 							device.sr,
-							0,
+							'',
 						),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
@@ -645,13 +648,13 @@ export function UpdateActions(self: DanteInstance): void {
 				if (!choices.some((choice) => String(choice.id) === String(device.sr))) return undefined
 
 				const learnt: Partial<SetSampleRateOptions> = {}
-				learnt[`sr_${ip}`] = Number(device.sr)
+				learnt[`sr_${ip}`] = String(device.sr)
 				return learnt
 			},
 			callback: async (action) => {
 				const opt = action.options
 				const ip = opt.device
-				setSampleRate(self, ip, opt[`sr_${ip}`])
+				setSampleRate(self, ip, Number(opt[`sr_${ip}`]))
 			},
 		},
 
@@ -675,7 +678,7 @@ export function UpdateActions(self: DanteInstance): void {
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
 							device.pullup,
-							0,
+							'',
 						),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
@@ -692,13 +695,13 @@ export function UpdateActions(self: DanteInstance): void {
 				if (!match) return undefined
 
 				const learnt: Partial<SetPullupOptions> = {}
-				learnt[`pullup_${ip}`] = Number(match.id)
+				learnt[`pullup_${ip}`] = String(match.id)
 				return learnt
 			},
 			callback: async (action) => {
 				const opt = action.options
 				const ip = opt.device
-				setPullup(self, ip, opt[`pullup_${ip}`])
+				setPullup(self, ip, Number(opt[`pullup_${ip}`]))
 			},
 		},
 
@@ -722,7 +725,7 @@ export function UpdateActions(self: DanteInstance): void {
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
 							device.encoding,
-							0,
+							'',
 						),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
@@ -731,7 +734,7 @@ export function UpdateActions(self: DanteInstance): void {
 			callback: async (action) => {
 				const opt = action.options
 				const device = opt.device
-				setEncoding(self, device, opt[`encoding_${device}`])
+				setEncoding(self, device, Number(opt[`encoding_${device}`]))
 			},
 		},
 

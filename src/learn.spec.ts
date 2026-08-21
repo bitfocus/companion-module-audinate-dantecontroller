@@ -52,12 +52,27 @@ function devicesData(): DevicesData {
 	}
 }
 
+/** Builds the per-device channel choice lists the way `updateChannelChoices` does. */
+function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
+	const byDevice: Record<string, { id: number; label: string }[]> = {}
+	for (const device of Object.values(data)) {
+		const io = device[channelType] as Record<string, { number?: number; name?: string }> | undefined
+		if (!device.name || !io) continue
+		byDevice[device.name] = Object.entries(io)
+			.filter(([key]) => !isNaN(Number(key)))
+			.map(([key, channel]) => ({ id: Number(key), label: channel?.name ?? '' }))
+	}
+	return byDevice
+}
+
 function definitions(data: DevicesData = devicesData()) {
 	const self = {
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
-		rxChannelsChoices: { DeviceA: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
-		txChannelsChoices: { DeviceA: [{ id: 1, label: '01' }], DeviceB: [{ id: 1, label: '01' }] },
+		// derived from the devices' channels, as updateChannelChoices does in production - a fixture
+		// with fewer choices than channels would let a learn return an unselectable value
+		rxChannelsChoices: channelChoicesFor(data, 'rx'),
+		txChannelsChoices: channelChoicesFor(data, 'tx'),
 		setActionDefinitions: vi.fn(),
 		log: vi.fn(),
 	} as unknown as DanteInstance
@@ -181,8 +196,8 @@ describe('settings learn', () => {
 	})
 
 	it('setSampleRate learns into the selected device its own option key', async () => {
-		expect(await learn('setSampleRate', { device: A })).toEqual({ [`sr_${A}`]: 48000 })
-		expect(await learn('setSampleRate', { device: B })).toEqual({ [`sr_${B}`]: 96000 })
+		expect(await learn('setSampleRate', { device: A })).toEqual({ [`sr_${A}`]: '48000' })
+		expect(await learn('setSampleRate', { device: B })).toEqual({ [`sr_${B}`]: '96000' })
 	})
 
 	it('setSampleRate declines when the current rate is not one of the offered options', async () => {
@@ -193,7 +208,7 @@ describe('settings learn', () => {
 
 	it('setPullup learns the code behind the reported label', async () => {
 		// device reports '+0.1%', whose code in DANTE_CONST.PULLUPS is 2
-		expect(await learn('setPullup', { device: A })).toEqual({ [`pullup_${A}`]: 2 })
+		expect(await learn('setPullup', { device: A })).toEqual({ [`pullup_${A}`]: '2' })
 	})
 
 	it('setPullup declines for a device that does not support pullup', async () => {
@@ -208,6 +223,31 @@ describe('settings learn', () => {
 
 	it('setOutputLevel declines for a device that reports no levels', async () => {
 		expect(await learn('setOutputLevel', { device: B, [`channel_${B}`]: 1 })).toBeUndefined()
+	})
+})
+
+describe('learnt values are selectable', () => {
+	/**
+	 * A learnt value has to equal one of the ids its own dropdown offers, or Companion has nothing
+	 * to select and the learn silently does nothing. The two are easy to drift apart: choice ids are
+	 * strings here, while the underlying protocol values are numbers.
+	 */
+	const cases: [string, Record<string, unknown>, string][] = [
+		['setSampleRate', { device: A }, `sr_${A}`],
+		['setPullup', { device: A }, `pullup_${A}`],
+		['setOutputLevel', { device: A, [`channel_${A}`]: 1 }, 'level'],
+		['makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, `sourceChannel_${A}`],
+	]
+
+	it.each(cases)('%s learns a value its dropdown can select', async (actionId, options, optionId) => {
+		const learnt = await learn(actionId, options)
+		expect(learnt).toBeDefined()
+
+		const option = (definitions()[actionId].options ?? []).find(
+			(candidate: { id: string }) => candidate.id === optionId,
+		)
+		expect(option?.choices, `${actionId}.${optionId} has no choices`).toBeDefined()
+		expect(option.choices.map((choice: { id: unknown }) => choice.id)).toContain(learnt[optionId])
 	})
 })
 

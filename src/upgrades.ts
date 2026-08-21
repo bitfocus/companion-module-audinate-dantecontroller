@@ -17,6 +17,22 @@ const numericOptionsByActionId: Record<string, string[]> = {
 	setSampleRateCustom: ['sr'],
 }
 
+/**
+ * Option ids whose stored value must be a string to match their dropdown's choice ids.
+ *
+ * The per-device settings options are named after the device (`sr_10.0.0.5`), so they are matched
+ * by prefix rather than listed.
+ */
+const NUMERIC_TO_STRING_PREFIXES = ['sr_', 'pullup_', 'encoding_']
+
+function numericToStringOptionIds(action: CompanionMigrationAction): string[] {
+	if (action.actionId === 'setOutputLevel') return ['level']
+	if (action.actionId === 'setSampleRate' || action.actionId === 'setPullup' || action.actionId === 'setEncoding') {
+		return Object.keys(action.options).filter((id) => NUMERIC_TO_STRING_PREFIXES.some((p) => id.startsWith(p)))
+	}
+	return []
+}
+
 /** Actions which gained the `clearAll` checkbox, and so need it present rather than undefined. */
 const clearAllActionIds = ['clearCrosspoint', 'clearCrosspointDropDown']
 
@@ -79,13 +95,14 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 				changed = true
 			}
 
-			// setOutputLevel's Level dropdown draws its choices from object2choices, which builds ids
-			// with Object.entries and so always yields strings. Its default was the number 2, which
-			// matched no choice - so saved actions can hold a number the dropdown cannot display.
-			if (action.actionId === 'setOutputLevel') {
-				const level = action.options.level
-				if (level !== undefined && !level.isExpression && typeof level.value === 'number') {
-					action.options.level = { value: String(level.value), isExpression: false }
+			// Several dropdowns carry string choice ids while their stored values could be numbers: the
+			// Level list is built by object2choices (ids come from Object.entries, so always strings),
+			// and the per-device sample rate, pullup and encoding lists likewise. A stored number
+			// matches no choice, so the dropdown shows nothing and a learn cannot select anything.
+			for (const optionId of numericToStringOptionIds(action)) {
+				const stored = action.options[optionId]
+				if (stored !== undefined && !stored.isExpression && typeof stored.value === 'number') {
+					action.options[optionId] = { value: String(stored.value), isExpression: false }
 					changed = true
 				}
 			}
