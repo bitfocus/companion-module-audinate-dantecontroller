@@ -1,33 +1,30 @@
-import {
-	createModuleLogger,
-	type CompanionVariableDefinition,
-	type CompanionVariableValues,
-} from '@companion-module/base'
+import { createModuleLogger, type CompanionVariableDefinitions } from '@companion-module/base'
 import { getChannelSubscriptionName } from './api.js'
+import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('variables')
 
 /** Builds and registers the set of variable definitions for all known devices. */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
-	const variables: Record<string, CompanionVariableDefinition> = {
+	const variables: CompanionVariableDefinitions<DanteVariableValues> = {
 		devices: { name: 'Dante Devices' },
 	}
 
 	for (const device of Object.values(self.devicesData)) {
 		if (!device.name) continue
-		variables[device.name + '_ip'] = { name: 'Ip address of ' + device.name }
-		variables[device.name + '_tx'] = { name: 'Number of outputs for ' + device.name }
-		variables[device.name + '_tx_names'] = { name: 'Output names for ' + device.name }
-		variables[device.name + '_rx'] = { name: 'Number of inputs for ' + device.name }
-		variables[device.name + '_rx_names'] = { name: ' Input names for ' + device.name }
-		variables[device.name + '_sr'] = { name: 'Sample rate of ' + device.name }
-		variables[device.name + '_pullup'] = { name: 'Sample rate pullup of ' + device.name }
-		variables[device.name + '_latency'] = { name: 'Latency of ' + device.name + ' (in ms)' }
-		variables[device.name + '_encoding'] = { name: 'Encoding of ' + device.name }
-		variables[device.name + '_output_levels'] = { name: 'Output levels of ' + device.name }
-		variables[device.name + '_model_name'] = { name: 'Model name of ' + device.name }
-		variables[device.name + '_product_version'] = { name: 'Product version of ' + device.name }
+		variables[`${device.name}_ip`] = { name: 'Ip address of ' + device.name }
+		variables[`${device.name}_tx`] = { name: 'Number of outputs for ' + device.name }
+		variables[`${device.name}_tx_names`] = { name: 'Output names for ' + device.name }
+		variables[`${device.name}_rx`] = { name: 'Number of inputs for ' + device.name }
+		variables[`${device.name}_rx_names`] = { name: ' Input names for ' + device.name }
+		variables[`${device.name}_sr`] = { name: 'Sample rate of ' + device.name }
+		variables[`${device.name}_pullup`] = { name: 'Sample rate pullup of ' + device.name }
+		variables[`${device.name}_latency`] = { name: 'Latency of ' + device.name + ' (in ms)' }
+		variables[`${device.name}_encoding`] = { name: 'Encoding of ' + device.name }
+		variables[`${device.name}_output_levels`] = { name: 'Output levels of ' + device.name }
+		variables[`${device.name}_model_name`] = { name: 'Model name of ' + device.name }
+		variables[`${device.name}_product_version`] = { name: 'Product version of ' + device.name }
 	}
 
 	self.setVariableDefinitions(variables)
@@ -60,7 +57,7 @@ export const ALL_VARIABLE_TYPES = [
  * @param variableTypes Which variable categories to refresh; defaults to all categories if none are given.
  */
 export function CheckVariables(self: DanteInstance, ipAddress?: string, ...variableTypes: string[]): void {
-	const variableValues: CompanionVariableValues = { devices: [] }
+	const variableValues: Partial<DanteVariableValues> = { devices: [] }
 
 	if (!(variableTypes.length > 0)) {
 		variableTypes = [...ALL_VARIABLE_TYPES]
@@ -80,12 +77,12 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 							break
 
 						case 'ip':
-							variableValues[deviceName + '_ip'] = ip
+							variableValues[`${deviceName}_ip`] = ip
 							break
 
 						case 'rx':
 						case 'tx':
-							variableValues[deviceName + '_' + variableType] = device[variableType]?.count
+							variableValues[`${deviceName}_${variableType}`] = device[variableType]?.count
 							break
 
 						case 'rx_names':
@@ -97,24 +94,38 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 								const channel = ioObject?.[i + 1]
 								channelArray[i] = (channelType == 'tx' ? getChannelSubscriptionName(channel) : channel?.name) ?? ''
 							}
-							variableValues[deviceName + '_' + variableType] = channelArray
+							variableValues[`${deviceName}_${variableType}`] = channelArray
 							break
 						}
 
+						// Split rather than grouped: each of these has its own value type in the schema, so a
+						// single indexed write would be checked against the union of them all.
 						case 'sr':
+							variableValues[`${deviceName}_sr`] = device.sr
+							break
+
 						case 'latency':
+							variableValues[`${deviceName}_latency`] = device.latency
+							break
+
 						case 'encoding':
+							variableValues[`${deviceName}_encoding`] = device.encoding
+							break
+
 						case 'pullup':
+							variableValues[`${deviceName}_pullup`] = device.pullup
+							break
+
 						case 'output_levels':
-							variableValues[deviceName + '_' + variableType] = device[variableType]
+							variableValues[`${deviceName}_output_levels`] = device.output_levels
 							break
 
 						case 'manf': {
-							variableValues[deviceName + '_model_name'] = device.modelName
+							variableValues[`${deviceName}_model_name`] = device.modelName
 							const versionString = device.productVersionString
 								? device.productVersionString
 								: '' + device.productVersionMajor + '.' + device.productVersionMinor + '.' + device.productVersionPatch
-							variableValues[deviceName + '_product_version'] = versionString
+							variableValues[`${deviceName}_product_version`] = versionString
 							break
 						}
 					}
