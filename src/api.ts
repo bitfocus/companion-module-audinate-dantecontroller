@@ -443,6 +443,39 @@ export function findRxChannelByName(
 }
 
 /**
+ * Joins a multicast group, scoped to `interfaceIp` when one is available.
+ *
+ * `dgram.addMembership` throws synchronously (EADDRNOTAVAIL, ENODEV, ENOBUFS...) rather than
+ * emitting - and it is called from a 'listening' handler, so an uncaught throw here would take
+ * down the module process. The interface can disappear between the availability check in
+ * `initConnection` and the socket actually binding, which makes this reachable in practice.
+ *
+ * @returns True if the socket joined the group and can receive its traffic.
+ */
+function joinMulticastGroup(
+	socket: dgram.Socket,
+	group: string,
+	service: ServiceName,
+	interfaceIp: string | undefined,
+): boolean {
+	try {
+		if (interfaceIp) {
+			socket.addMembership(group, interfaceIp)
+		} else {
+			socket.addMembership(group)
+		}
+		return true
+	} catch (error) {
+		logger.error(
+			`${service} socket : failed to join multicast group ${group} : ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		)
+		return false
+	}
+}
+
+/**
  * Re-evaluates overall connection status from the ARC/CMC/SETTINGS/HEARTBEAT socket states
  * and mDNS discovery, and updates the instance status accordingly.
  * @returns True if all connections are active.
@@ -474,7 +507,13 @@ export function initConnection(self: DanteInstance): void {
 	// try to rebind the fixed Settings/Heartbeat ports while the old sockets still hold them
 	if (self.sockets) {
 		for (const socket of Object.values(self.sockets)) {
-			socket?.close()
+			try {
+				socket?.close()
+			} catch (error) {
+				// closing an already-closed socket throws ERR_SOCKET_DGRAM_NOT_RUNNING - reachable
+				// because destroy() closes the sockets without clearing them off the instance
+				logger.debug(`Closing stale socket : ${error instanceof Error ? error.message : String(error)}`)
+			}
 		}
 	}
 	if (self.mdns) {
@@ -586,12 +625,14 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	settingSocket.on('listening', () => {
-		if (availableIps.includes(self.config.ip)) {
-			settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO, self.config.ip)
-		} else {
-			settingSocket.addMembership(DANTE_CONST.MULTICAST_IP.INFO)
-		}
-		self.activeConnections.SETTINGS = true
+		const joined = joinMulticastGroup(
+			settingSocket,
+			DANTE_CONST.MULTICAST_IP.INFO,
+			'SETTINGS',
+			availableIps.includes(self.config.ip) ? self.config.ip : undefined,
+		)
+		// without the group membership the socket is bound but deaf, so don't report it as active
+		self.activeConnections.SETTINGS = joined
 		checkConnections(self)
 	})
 
@@ -660,12 +701,14 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	heartbeatSocket.on('listening', () => {
-		if (availableIps.includes(self.config.ip)) {
-			heartbeatSocket.addMembership(DANTE_CONST.MULTICAST_IP.HEARTBEAT, self.config.ip)
-		} else {
-			heartbeatSocket.addMembership(DANTE_CONST.MULTICAST_IP.HEARTBEAT)
-		}
-		self.activeConnections.HEARTBEAT = true
+		const joined = joinMulticastGroup(
+			heartbeatSocket,
+			DANTE_CONST.MULTICAST_IP.HEARTBEAT,
+			'HEARTBEAT',
+			availableIps.includes(self.config.ip) ? self.config.ip : undefined,
+		)
+		// see the SETTINGS socket above - no membership means no traffic
+		self.activeConnections.HEARTBEAT = joined
 		checkConnections(self)
 	})
 
