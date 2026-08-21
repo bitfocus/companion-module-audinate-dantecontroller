@@ -13,6 +13,7 @@
 		"lint:raw": "eslint",
 		"lint": "run lint:raw .",
 		"test": "vitest run",
+		"probe": "node tools/dante-rx-probe.mjs",
 		"test:watch": "vitest"
 	},
 	"license": "MIT",
