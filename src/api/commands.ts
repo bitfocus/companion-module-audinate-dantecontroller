@@ -9,7 +9,7 @@ import { intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import { findDeviceIpByName, findRxChannelByName, findTxChannelByName, getChannelSubscriptionName } from './devices.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:commands')
 
 /** Resets a device's name back to its factory default. */
 export function resetDeviceName(self: DanteInstance, ipaddress: string): void {

@@ -13,7 +13,7 @@ import {
 	scheduleUpdateData,
 } from './devices.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:choices')
 
 /**
  * The id to use as a dropdown's default: the first entry of the list that dropdown actually offers.

@@ -11,7 +11,7 @@ import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort } from './queries.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:discovery')
 
 /**
  * Handles an mDNS response: follows up PTR records with SRV queries, and for SRV records

@@ -19,7 +19,7 @@ import {
 } from './devices.js'
 import { getRxChannels, getSettings, getTxChannelFriendlyNames, getTxChannels, refreshSettings } from './queries.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:protocol')
 
 function compareArrays(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b)

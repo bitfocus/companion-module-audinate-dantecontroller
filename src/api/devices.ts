@@ -13,7 +13,7 @@ import type DanteInstance from '../main.js'
 import type { DeviceData, RxChannelSource, TxChannel, RxChannel } from './types.js'
 import { insertDeviceChoice } from './choices.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:devices')
 
 //**
 //** Types

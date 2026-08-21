@@ -19,7 +19,7 @@ import {
 import { parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
 
-const logger = createModuleLogger('api')
+const logger = createModuleLogger('api:connection')
 
 // dgram's reusePort option wraps SO_REUSEPORT, which Node/libuv only supports on Linux -
 // requesting it on macOS/BSD throws ENOTSUP regardless of bind address (confirmed: it fails
