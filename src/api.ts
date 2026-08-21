@@ -532,7 +532,13 @@ export function checkConnections(self: DanteInstance): boolean {
 	}
 	if (!self.CONNECTED) {
 		self.CONNECTED = true
-		self.updateStatus(InstanceStatus.Ok)
+		// Sockets are up, so discovery and routing work - but without a usable interface the
+		// settings socket gets no replies, so report the misconfiguration rather than a plain Ok.
+		if (self.configError) {
+			self.updateStatus(InstanceStatus.BadConfig, self.configError)
+		} else {
+			self.updateStatus(InstanceStatus.Ok)
+		}
 	}
 	return true
 }
@@ -658,10 +664,25 @@ export function initConnection(self: DanteInstance): void {
 
 	// bind socket to random port of configured ip address if available
 	if (availableIps.includes(self.config.ip)) {
+		self.configError = null
 		arcSocket.bind(0, self.config.ip)
 		self.mac = Buffer.from((availableMacs[self.config.ip] ?? '').replaceAll(':', ''), 'hex')
 	} else {
-		logger.warn('Config IP not available')
+		// Every settings command embeds this MAC, and devices ignore commands carrying a zero one.
+		// Discovery and routing still work, but sample rate, encoding, pullup, output level and the
+		// model/manufacturer variables all stay empty - which looks like the module is broken rather
+		// than misconfigured. Say so explicitly, here and in the instance status.
+		self.configError = self.config.ip
+			? `Configured interface ${self.config.ip} is not available on this machine`
+			: 'No network interface selected'
+		logger.error(
+			`${self.configError}. Device settings (sample rate, encoding, pullup, output level, model info) ` +
+				`will not be readable until this is fixed. Available: ${availableIps.join(', ') || 'none'}`,
+		)
+		self.log(
+			'error',
+			`${self.configError} - device settings will be unavailable. Set 'IP and network card' in the connection config.`,
+		)
 		arcSocket.bind()
 		self.mac = Buffer.from('000000000000', 'hex')
 	}
@@ -844,6 +865,31 @@ export function firstChoiceId<T extends string | number>(choices: DropdownChoice
 	return choices[0]?.id ?? fallback
 }
 
+/**
+ * The id to use as a dropdown's default when the device has a current value for that setting: the
+ * choice matching what the device reports, falling back to the first choice it offers.
+ *
+ * Matches on id or label because the two are not stored consistently - a sample rate is kept as the
+ * raw number (`48000`, matching the choice id) while encoding and pullup are kept as their decoded
+ * label (`PCM24`, `NONE`), the choice ids for those being the underlying codes.
+ */
+export function currentChoiceId<T extends string | number>(
+	choices: DropdownChoice[],
+	current: string | number | undefined,
+	fallback: T,
+): string | number {
+	if (current !== undefined) {
+		const wanted = String(current)
+		// Two passes, so an exact id match always wins over a label match on an earlier entry - the
+		// id is the authoritative value, the label only a fallback for the decoded-label cases.
+		const byId = choices.find((choice) => String(choice.id) === wanted)
+		if (byId) return byId.id
+		const byLabel = choices.find((choice) => choice.label === wanted)
+		if (byLabel) return byLabel.id
+	}
+	return firstChoiceId(choices, fallback)
+}
+
 /** Devices that have receive channels, as dropdown choices. */
 export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
 	return self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id]))
@@ -852,6 +898,40 @@ export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
 /** Devices that have transmit channels, as dropdown choices. */
 export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
 	return self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id]))
+}
+
+/**
+ * Devices that carry audio, as dropdown choices.
+ *
+ * Excludes devices with neither receive nor transmit channels - a software controller, say - which
+ * cannot have a sample rate, pullup, encoding or latency. Offering them means the per-device option
+ * list below the picker is empty, which looks like the module failed rather than like a device that
+ * has nothing to configure.
+ */
+export function audioDeviceChoices(self: DanteInstance): DropdownChoice[] {
+	return self.devicesChoices.filter((choice) => {
+		const device = self.devicesData[choice.id]
+		return hasRxChannels(device) || hasTxChannels(device)
+	})
+}
+
+/**
+ * Devices that reported options for a given setting, as dropdown choices.
+ *
+ * More precise than {@link audioDeviceChoices} for settings a device may simply not implement -
+ * neither of the devices tested here supports sample rate pullup, so they never report pullup
+ * options and offering them only yields an empty picker.
+ *
+ * Note this is empty until the device's settings reply arrives, so an action built during that
+ * window briefly offers nothing. `UpdateActions` re-runs when device data changes, so it fills in
+ * shortly after discovery. A list that stays empty means either nothing on the network supports
+ * the setting, or no settings replies are arriving at all - which `configError` reports separately.
+ */
+export function devicesWithOptions(
+	self: DanteInstance,
+	options: 'srOptions' | 'pullupOptions' | 'encodingOptions',
+): DropdownChoice[] {
+	return self.devicesChoices.filter((choice) => (self.devicesData[choice.id]?.[options]?.length ?? 0) > 0)
 }
 
 /** A device's rx or tx channel choices, or an empty list if it has none yet. */

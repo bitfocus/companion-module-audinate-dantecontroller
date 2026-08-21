@@ -12,6 +12,13 @@ import type DanteInstance from './main.js'
  * they cover the per-device option fields that are built dynamically from `devicesData`.
  */
 
+/** The option lists a fully-featured device reports once its settings replies arrive. */
+const settingsOptions = {
+	srOptions: ['44100', '48000'],
+	pullupOptions: ['0', '1'],
+	encodingOptions: ['16', '24'],
+}
+
 /** Two devices with channels, so the per-device dynamic option fields are generated. */
 function devicesData(): DevicesData {
 	const channels = (count: number, prefix: string) => {
@@ -20,8 +27,20 @@ function devicesData(): DevicesData {
 		return io
 	}
 	return {
-		'10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 }, rx: channels(4, 'In'), tx: channels(4, 'Out') },
-		'10.0.0.6': { name: 'DeviceB', ports: { ARC: 4440 }, rx: channels(2, 'In'), tx: channels(2, 'Out') },
+		'10.0.0.5': {
+			name: 'DeviceA',
+			ports: { ARC: 4440 },
+			rx: channels(4, 'In'),
+			tx: channels(4, 'Out'),
+			...settingsOptions,
+		},
+		'10.0.0.6': {
+			name: 'DeviceB',
+			ports: { ARC: 4440 },
+			rx: channels(2, 'In'),
+			tx: channels(2, 'Out'),
+			...settingsOptions,
+		},
 	} as unknown as DevicesData
 }
 
@@ -137,6 +156,120 @@ function defaultsNotInChoices(definitions: Record<string, DefinitionLike>): stri
 	}
 	return bad
 }
+
+describe('device dropdowns exclude devices that cannot perform the action', () => {
+	/** A controller-style device: discovered and nameable, but with no audio channels at all. */
+	function withController() {
+		const self = mockInstance()
+		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
+		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		return self
+	}
+
+	/** The device picker of an action, which is named `device` or `destinationDevice` depending on the action. */
+	function deviceOption(definitions: Record<string, DefinitionLike>, actionId: string) {
+		const options = definitions[actionId]?.options ?? []
+		const found = options.find((option) => option.id === 'device' || option.id === 'destinationDevice')
+		expect(found, `${actionId} has no device picker`).toBeDefined()
+		return found
+	}
+
+	const audioActions = ['setLatency', 'setSampleRate', 'setSampleRateCustom', 'setPullup', 'setEncoding']
+
+	it.each(audioActions)('%s does not offer a device with no audio channels', (actionId) => {
+		const self = withController()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		const ids = deviceOption(definitions, actionId)?.choices?.map((choice) => choice.id) ?? []
+		expect(ids).not.toContain('10.0.0.1')
+		expect(ids).toContain('10.0.0.5')
+	})
+
+	it.each(audioActions)('%s does not default to a device with no audio channels', (actionId) => {
+		const self = withController()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		// the controller sorts first, so an unfiltered default would land on it
+		expect(deviceOption(definitions, actionId)?.default).not.toBe('10.0.0.1')
+	})
+
+	it('still offers every device for renaming, including one with no audio channels', () => {
+		const self = withController()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		for (const actionId of ['setDeviceName', 'resetDeviceName']) {
+			const ids = deviceOption(definitions, actionId)?.choices?.map((choice) => choice.id) ?? []
+			expect(ids).toContain('10.0.0.1')
+		}
+	})
+})
+
+describe('settings actions offer only devices that support the setting', () => {
+	/** Devices as they actually report: one supports 4 sample rates, one only 48k, neither pullup. */
+	function withRealisticOptions() {
+		const self = mockInstance()
+		// as the real devices report: differing sample rates, and neither supporting pullup
+		Object.assign(self.devicesData['10.0.0.5'], {
+			srOptions: ['44100', '48000', '88200', '96000'],
+			encodingOptions: ['16', '24', '32'],
+			pullupOptions: undefined,
+		})
+		Object.assign(self.devicesData['10.0.0.6'], {
+			srOptions: ['48000'],
+			encodingOptions: ['32', '16', '24'],
+			pullupOptions: undefined,
+		})
+		return self
+	}
+
+	function deviceIds(definitions: Record<string, DefinitionLike>, actionId: string) {
+		const options = definitions[actionId]?.options ?? []
+		const picker = options.find((option) => option.id === 'device' || option.id === 'destinationDevice')
+		return picker?.choices?.map((choice) => choice.id) ?? []
+	}
+
+	function build(self: DanteInstance) {
+		UpdateActions(self)
+		return (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, DefinitionLike>
+	}
+
+	it('offers both devices for sample rate and encoding, which they report options for', () => {
+		const definitions = build(withRealisticOptions())
+		expect(deviceIds(definitions, 'setSampleRate').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
+		expect(deviceIds(definitions, 'setEncoding').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
+	})
+
+	it('offers no device for pullup when none supports it, rather than an empty picker per device', () => {
+		const definitions = build(withRealisticOptions())
+		expect(deviceIds(definitions, 'setPullup')).toEqual([])
+	})
+
+	it('offers only the device that does support pullup', () => {
+		const self = withRealisticOptions()
+		Object.assign(self.devicesData['10.0.0.6'], { pullupOptions: ['0', '1'] })
+		const definitions = build(self)
+		expect(deviceIds(definitions, 'setPullup')).toEqual(['10.0.0.6'])
+	})
+
+	it('still offers audio devices for latency, which has no reported option list', () => {
+		const definitions = build(withRealisticOptions())
+		expect(deviceIds(definitions, 'setLatency').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
+	})
+
+	it('offers nothing before any settings reply has arrived', () => {
+		// the state during startup, and the state when no settings replies arrive at all
+		const self = mockInstance()
+		for (const device of Object.values(self.devicesData)) {
+			Object.assign(device, { srOptions: undefined, encodingOptions: undefined, pullupOptions: undefined })
+		}
+		const definitions = build(self)
+		expect(deviceIds(definitions, 'setSampleRate')).toEqual([])
+		expect(deviceIds(definitions, 'setEncoding')).toEqual([])
+	})
+})
 
 describe('dropdown defaults', () => {
 	it('every action dropdown defaults to one of its own choices', () => {

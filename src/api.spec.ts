@@ -33,6 +33,8 @@ import {
 	makeCrosspoint,
 	clearCrosspoint,
 	clearAllCrosspoints,
+	firstChoiceId,
+	currentChoiceId,
 	parseHeartbeatReply,
 	parseCmcReply,
 	parseReply,
@@ -84,6 +86,7 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		debug: false,
 		timeout: 3000,
 		activeConnections: {},
+		configError: null,
 		CONNECTED: false,
 		INTERVAL: null,
 		mdns: { query: vi.fn(), on: vi.fn(), removeAllListeners: vi.fn(), destroy: vi.fn() },
@@ -277,6 +280,27 @@ describe('checkConnections', () => {
 		expect(checkConnections(self)).toBe(false)
 		expect(self.CONNECTED).toBe(false)
 		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Disconnected)
+	})
+
+	it('reports BadConfig instead of Ok when the configured interface is unusable', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: false,
+			configError: 'No network interface selected',
+		})
+		expect(checkConnections(self)).toBe(true)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.BadConfig, 'No network interface selected')
+		expect(self.updateStatus).not.toHaveBeenCalledWith(InstanceStatus.Ok)
+	})
+
+	it('reports Ok once the interface problem is cleared', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: false,
+			configError: null,
+		})
+		checkConnections(self)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Ok)
 	})
 
 	it('returns false without updating status when already disconnected', () => {
@@ -685,6 +709,57 @@ describe('scheduleCheckFeedbacks', () => {
 		cancelCheckFeedbacks(self)
 		vi.advanceTimersByTime(1000)
 		expect(byId(self)).toHaveLength(before)
+	})
+})
+
+describe('firstChoiceId / currentChoiceId', () => {
+	// Sample rates as the module stores them: choice ids are strings, device.sr is a number.
+	const rates = [
+		{ id: '44100', label: '44.1 kHz' },
+		{ id: '48000', label: '48 kHz' },
+		{ id: '96000', label: '96 kHz' },
+	]
+	// Encodings: the device's current value is the decoded label, the choice id is the code.
+	const encodings = [
+		{ id: '16', label: 'PCM16' },
+		{ id: '24', label: 'PCM24' },
+		{ id: '32', label: 'PCM32' },
+	]
+
+	it('firstChoiceId takes the first entry of the list actually offered', () => {
+		expect(firstChoiceId(rates, 0)).toBe('44100')
+	})
+
+	it('firstChoiceId falls back when there is nothing to offer', () => {
+		expect(firstChoiceId([], 0)).toBe(0)
+		expect(firstChoiceId([], '')).toBe('')
+	})
+
+	it('currentChoiceId matches a numeric current value against string ids', () => {
+		// TAV-MINEOLA22XLR runs at 48k while supporting 44.1/48/88.2/96
+		expect(currentChoiceId(rates, 48000, 0)).toBe('48000')
+	})
+
+	it('currentChoiceId matches a decoded label against its code', () => {
+		// device.encoding is stored as 'PCM24', the choice id is '24'
+		expect(currentChoiceId(encodings, 'PCM24', 0)).toBe('24')
+	})
+
+	it('currentChoiceId falls back to the first choice when the current value is unknown', () => {
+		expect(currentChoiceId(rates, 192000, 0)).toBe('44100')
+		expect(currentChoiceId(rates, undefined, 0)).toBe('44100')
+	})
+
+	it('currentChoiceId falls back to the fallback when there are no choices', () => {
+		expect(currentChoiceId([], 48000, 0)).toBe(0)
+	})
+
+	it('prefers an id match over a label match', () => {
+		const ambiguous = [
+			{ id: 'a', label: 'b' },
+			{ id: 'b', label: 'c' },
+		]
+		expect(currentChoiceId(ambiguous, 'b', '')).toBe('b')
 	})
 })
 

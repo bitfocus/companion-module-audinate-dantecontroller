@@ -44,6 +44,8 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	debug = false
 	timeout = 0
 	activeConnections: Partial<Record<ConnectionName, boolean>> = {}
+	/** Why the configured network interface is unusable, or null when it is fine. */
+	configError: string | null = null
 	CONNECTED = false
 	INTERVAL: NodeJS.Timeout | null = null
 	mdns!: multidns.MulticastDNS
