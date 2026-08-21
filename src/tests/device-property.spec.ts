@@ -28,6 +28,21 @@ function devicesData(): DevicesData {
 			output_levels: ['+4dBu'],
 			modelName: 'Model One',
 			productVersionString: '1.2.3',
+			manufacturer: 'T&M Media Pty Ltd',
+			manfShortName: 'TMMedia',
+			softwareVersionMajor: 4,
+			softwareVersionMinor: 3,
+			softwareVersionPatch: 67,
+			softwareVersionBuild: 0,
+			danteSoftwareVersionBuild: 8,
+			hardwareVersionBuild: 0,
+			danteModel: 'Brooklyn-3',
+			danteSoftwareVersionMajor: 4,
+			danteSoftwareVersionMinor: 3,
+			danteSoftwareVersionPatch: 1,
+			hardwareVersionMajor: 4,
+			hardwareVersionMinor: 2,
+			hardwareVersionPatch: 3,
 			rx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
 			tx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
 		},
@@ -85,6 +100,24 @@ describe('Device Property feedback', () => {
 		expect(picker.choices.every((choice: { label: string }) => choice.label.length > 0)).toBe(true)
 	})
 
+	it('offers the properties in alphabetical order', () => {
+		const picker = definition().options.find((option: { id: string }) => option.id === 'property')
+		const ids = picker.choices.map((choice: { id: string }) => choice.id)
+		expect(ids).toEqual([...ids].sort())
+	})
+
+	it('defaults to a useful property rather than whichever sorts first', () => {
+		const picker = definition().options.find((option: { id: string }) => option.id === 'property')
+		expect(picker.default).toBe('ip')
+		expect(picker.choices.map((choice: { id: string }) => choice.id)).toContain(picker.default)
+	})
+
+	it('lists the accepted values in the same order the picker offers them', () => {
+		const picker = definition().options.find((option: { id: string }) => option.id === 'property')
+		const fromDescription = picker.expressionDescription.replace(/^[^:]*:\s*/, '').split(', ')
+		expect(fromDescription).toEqual(picker.choices.map((choice: { id: string }) => choice.id))
+	})
+
 	it('lists every accepted value in the expression description', () => {
 		// in expression mode there is no picker, so the accepted values have to be written out
 		const picker = definition().options.find((option: { id: string }) => option.id === 'property')
@@ -113,6 +146,47 @@ describe('Device Property feedback', () => {
 		['locked', false],
 	])('reports %s', (property, expected) => {
 		expect(read(property)).toEqual(expected)
+	})
+
+	it.each([
+		['dante_model', 'Brooklyn-3'],
+		['dante_software_version', '4.3.1'],
+		['hardware_version', '4.2.3'],
+	])('reports %s from the versions reply', (property, expected) => {
+		expect(read(property)).toBe(expected)
+	})
+
+	it.each([
+		['manufacturer', 'T&M Media Pty Ltd'],
+		['manufacturer_short', 'TMMedia'],
+		['software_version', '4.3.67'],
+		['software_build', 0],
+		['dante_software_build', 8],
+		['hardware_build', 0],
+	])('reports %s', (property, expected) => {
+		expect(read(property)).toBe(expected)
+	})
+
+	it('reports a zero build as 0, not as absent', () => {
+		// a real device reports build 0, which must not be confused with "not reported"
+		expect(read('software_build')).toBe(0)
+		expect(read('software_build', 'AController')).toBe('')
+	})
+
+	it('falls back to the numeric product version when the string one is empty', () => {
+		// devices report an empty string here as readily as nothing, and an empty version is absence
+		const data = devicesData()
+		Object.assign(data[A], {
+			productVersionString: '',
+			productVersionMajor: 4,
+			productVersionMinor: 3,
+			productVersionPatch: 67,
+		})
+		expect(read('product_version', 'DeviceA', instance(data))).toBe('4.3.67')
+	})
+
+	it('reports nothing rather than "undefined.undefined.undefined" for an unreported version', () => {
+		expect(read('hardware_version', 'AController')).toBe('')
 	})
 
 	it('reports channel names as the variables hold them', () => {

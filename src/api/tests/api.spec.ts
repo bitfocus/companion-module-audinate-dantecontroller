@@ -1363,6 +1363,37 @@ describe('parseReply (ARC) - malformed packet handling', () => {
 		expect(() => parseReply(self, reply2, makeRinfo(IP, reply2.length))).not.toThrow()
 	})
 
+	it('survives a device-settings reply whose value pointer runs past the end', () => {
+		// the settings parser dereferences a device-supplied offset, the same trap the channel
+		// parsers had
+		const record = Buffer.alloc(4)
+		record.writeUInt16BE(0x8020, 0) // sample rate
+		record.writeUInt16BE(0xfff0, 2) // pointer far outside the packet
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+		expect(self.devicesData[IP]?.sr).toBeUndefined()
+	})
+
+	it('survives a device-settings reply claiming more records than it carries', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 8, Buffer.alloc(4))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('still reads a well-formed device-settings reply', () => {
+		// one record: sample rate, pointing at a u32 appended after it
+		const record = Buffer.alloc(4)
+		record.writeUInt16BE(0x8020, 0)
+		record.writeUInt16BE(16, 2)
+		const value = Buffer.alloc(4)
+		value.writeUInt32BE(48000, 0)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 1, Buffer.concat([record, value]))
+		const self = registered()
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.sr).toBe(48000)
+	})
+
 	it('survives a friendly-names reply claiming more records than it carries', () => {
 		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY, 32, Buffer.alloc(6))
 		const self = registered()

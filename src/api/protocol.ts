@@ -297,19 +297,24 @@ function parseDeviceSettings(reply: Buffer): Partial<DeviceData> {
 		// get info chunk
 		const infoIndex = startIndex + infoBufferSize * i
 		const infoBuffer = reply.subarray(infoIndex, infoIndex + infoBufferSize)
+		// The record count comes off the wire, so a truncated packet can promise more records than it
+		// carries - stop at what is actually there rather than reading past the end.
+		if (infoBuffer.length < infoBufferSize) break
 
 		const infoCode = infoBuffer.readUInt16BE(0)
-		const valueIndex = infoBuffer.readUInt16BE(2)
+		// The value offset is device-supplied too, so dereference it defensively
+		const value = readU32At(reply, infoBuffer.readUInt16BE(2))
+		if (value === undefined) continue
 
 		switch (infoCode) {
 			case 0x8020:
 				// Sample rate
-				deviceInfo.sr = reply.readUInt32BE(valueIndex)
+				deviceInfo.sr = value
 				break
 
 			case 0x8301:
 				// Latency
-				deviceInfo.latency = reply.readUInt32BE(valueIndex) / 1000000
+				deviceInfo.latency = value / 1000000
 				break
 		}
 	}
@@ -641,6 +646,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 				currDevice.hardwareVersionPatch = bufferToInt(payload, 14, 2)
 				currDevice.hardwareVersionBuild = bufferToInt(payload, 6, 1)
 				currDevice.danteModel = parseString(payload, 64)
+				updateFlags.push('versions')
 				break
 			}
 

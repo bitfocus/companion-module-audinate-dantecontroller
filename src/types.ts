@@ -34,6 +34,21 @@ export interface DanteDeviceVariables {
 	output_levels: (string | number)[]
 	model_name: string
 	product_version: string
+	/** Dante model identifier, as distinct from the manufacturer's model name. */
+	dante_model: string
+	/** Dante software version, as `major.minor.patch`. */
+	dante_software_version: string
+	/** Hardware version, as `major.minor.patch`. */
+	hardware_version: string
+	manufacturer: string
+	/** Short form of the manufacturer name, as the device reports it. */
+	manufacturer_short: string
+	/** Manufacturer software version, as `major.minor.patch`. */
+	software_version: string
+	/** Build numbers, exposed separately so they can be formatted however a layout needs. */
+	software_build: number
+	dante_software_build: number
+	hardware_build: number
 }
 
 /** A `<deviceName>_<suffix>` variable id for one of the {@link DanteDeviceVariables} suffixes. */

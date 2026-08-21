@@ -33,21 +33,33 @@ export function getChannelSubscriptionName(
  *
  * One list so the two cannot drift: every entry here is both a `<device>_<property>` variable and a
  * selectable property on the feedback.
+ *
+ * Kept in alphabetical order, which is the order the picker and its expression description present
+ * them in - both derive from this array, so they cannot disagree.
  */
 export const DEVICE_PROPERTIES = [
-	'ip',
-	'locked',
-	'rx',
-	'tx',
-	'rx_names',
-	'tx_names',
-	'sr',
-	'latency',
-	'pullup',
+	'dante_model',
+	'dante_software_build',
+	'dante_software_version',
 	'encoding',
-	'output_levels',
+	'hardware_build',
+	'hardware_version',
+	'ip',
+	'latency',
+	'locked',
+	'manufacturer',
+	'manufacturer_short',
 	'model_name',
+	'output_levels',
 	'product_version',
+	'pullup',
+	'rx',
+	'rx_names',
+	'software_build',
+	'software_version',
+	'sr',
+	'tx',
+	'tx_names',
 ] as const satisfies readonly (keyof DanteDeviceVariables)[]
 
 export type DeviceProperty = (typeof DEVICE_PROPERTIES)[number]
@@ -67,6 +79,15 @@ export const DEVICE_PROPERTY_LABELS: Record<DeviceProperty, string> = {
 	output_levels: 'Output levels',
 	model_name: 'Model name',
 	product_version: 'Product version',
+	dante_model: 'Dante model',
+	dante_software_version: 'Dante software version',
+	hardware_version: 'Hardware version',
+	manufacturer: 'Manufacturer',
+	manufacturer_short: 'Manufacturer (short)',
+	software_version: 'Software version',
+	software_build: 'Software build',
+	dante_software_build: 'Dante software build',
+	hardware_build: 'Hardware build',
 }
 
 /** Channel names of one direction, indexed from 0, as the `_rx_names`/`_tx_names` variables hold them. */
@@ -78,6 +99,17 @@ function channelNames(device: DeviceData, channelType: 'rx' | 'tx'): string[] {
 		names[i] = (channelType === 'tx' ? getChannelSubscriptionName(channel) : channel?.name) ?? ''
 	}
 	return names
+}
+
+/**
+ * Formats a version triple, or undefined when the device has not reported one.
+ *
+ * Without the undefined check an unreported version renders as the string
+ * 'undefined.undefined.undefined', which reads as data rather than as absence.
+ */
+function formatVersion(major?: number, minor?: number, patch?: number): string | undefined {
+	if (major === undefined && minor === undefined && patch === undefined) return undefined
+	return `${major ?? 0}.${minor ?? 0}.${patch ?? 0}`
 }
 
 function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceProperty): unknown {
@@ -96,9 +128,34 @@ function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceP
 		case 'model_name':
 			return device.modelName
 		case 'product_version':
-			return device.productVersionString
-				? device.productVersionString
-				: '' + device.productVersionMajor + '.' + device.productVersionMinor + '.' + device.productVersionPatch
+			// `||` not `??`: devices report an empty string here as often as nothing at all, and an
+			// empty version is absence, not a value
+			return (
+				device.productVersionString ||
+				formatVersion(device.productVersionMajor, device.productVersionMinor, device.productVersionPatch)
+			)
+		case 'dante_model':
+			return device.danteModel
+		case 'dante_software_version':
+			return formatVersion(
+				device.danteSoftwareVersionMajor,
+				device.danteSoftwareVersionMinor,
+				device.danteSoftwareVersionPatch,
+			)
+		case 'hardware_version':
+			return formatVersion(device.hardwareVersionMajor, device.hardwareVersionMinor, device.hardwareVersionPatch)
+		case 'manufacturer':
+			return device.manufacturer
+		case 'manufacturer_short':
+			return device.manfShortName
+		case 'software_version':
+			return formatVersion(device.softwareVersionMajor, device.softwareVersionMinor, device.softwareVersionPatch)
+		case 'software_build':
+			return device.softwareVersionBuild
+		case 'dante_software_build':
+			return device.danteSoftwareVersionBuild
+		case 'hardware_build':
+			return device.hardwareVersionBuild
 		default:
 			return device[property]
 	}

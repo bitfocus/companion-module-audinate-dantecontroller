@@ -292,7 +292,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				label: 'Property',
 				id: 'property',
 				choices: DEVICE_PROPERTIES.map((property) => ({ id: property, label: DEVICE_PROPERTY_LABELS[property] })),
-				default: DEVICE_PROPERTIES[0],
+				// named rather than taken from the list, which is ordered alphabetically for the picker -
+				// its first entry is not a sensible default
+				default: 'ip',
 				// In expression mode the picker is gone, so the accepted values have to be written out.
 				// Generated from the same list the choices are, so it cannot fall out of step.
 				expressionDescription: `Must evaluate to one of: ${DEVICE_PROPERTIES.join(', ')}`,

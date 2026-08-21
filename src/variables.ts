@@ -34,6 +34,15 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 		variables[`${device.name}_output_levels`] = { name: 'Output levels of ' + device.name }
 		variables[`${device.name}_model_name`] = { name: 'Model name of ' + device.name }
 		variables[`${device.name}_product_version`] = { name: 'Product version of ' + device.name }
+		variables[`${device.name}_dante_model`] = { name: 'Dante model of ' + device.name }
+		variables[`${device.name}_dante_software_version`] = { name: 'Dante software version of ' + device.name }
+		variables[`${device.name}_hardware_version`] = { name: 'Hardware version of ' + device.name }
+		variables[`${device.name}_manufacturer`] = { name: 'Manufacturer of ' + device.name }
+		variables[`${device.name}_manufacturer_short`] = { name: 'Manufacturer (short) of ' + device.name }
+		variables[`${device.name}_software_version`] = { name: 'Software version of ' + device.name }
+		variables[`${device.name}_software_build`] = { name: 'Software build of ' + device.name }
+		variables[`${device.name}_dante_software_build`] = { name: 'Dante software build of ' + device.name }
+		variables[`${device.name}_hardware_build`] = { name: 'Hardware build of ' + device.name }
 	}
 
 	self.setVariableDefinitions(variables)
@@ -59,6 +68,7 @@ export const ALL_VARIABLE_TYPES = [
 	'pullup',
 	'output_levels',
 	'manf',
+	'versions',
 ] as const
 
 /**
@@ -136,6 +146,23 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 						case 'manf':
 							variableValues[`${deviceName}_model_name`] = deviceProperty(device, ip, 'model_name')
 							variableValues[`${deviceName}_product_version`] = deviceProperty(device, ip, 'product_version')
+							variableValues[`${deviceName}_manufacturer`] = deviceProperty(device, ip, 'manufacturer')
+							variableValues[`${deviceName}_manufacturer_short`] = deviceProperty(device, ip, 'manufacturer_short')
+							variableValues[`${deviceName}_software_version`] = deviceProperty(device, ip, 'software_version')
+							variableValues[`${deviceName}_software_build`] = deviceProperty(device, ip, 'software_build')
+							break
+
+						// the versions reply, likewise
+						case 'versions':
+							variableValues[`${deviceName}_dante_model`] = deviceProperty(device, ip, 'dante_model')
+							variableValues[`${deviceName}_dante_software_version`] = deviceProperty(
+								device,
+								ip,
+								'dante_software_version',
+							)
+							variableValues[`${deviceName}_hardware_version`] = deviceProperty(device, ip, 'hardware_version')
+							variableValues[`${deviceName}_dante_software_build`] = deviceProperty(device, ip, 'dante_software_build')
+							variableValues[`${deviceName}_hardware_build`] = deviceProperty(device, ip, 'hardware_build')
 							break
 					}
 				}

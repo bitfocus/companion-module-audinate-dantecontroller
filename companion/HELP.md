@@ -34,20 +34,33 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 - Device Names
 
-### Per device :
+### Per device
 
-- Ip address
-- Rx Channel count
-- Tx Channel count
-- Rx Channel names
-- Tx Channel names
-- Sample Rate
-- Sample Rate Pullup
-- Latency
-- Encoding
-- Model Name
-- Product version
-- Output Level (for AVIO 2out)
+Named `<device name>_<suffix>`, so a device called `Amp-1` has `$(dante:Amp-1_sr)`.
+The same values are available through the Device Property feedback.
+
+- Dante model (`_dante_model`)
+- Dante software build (`_dante_software_build`)
+- Dante software version (`_dante_software_version`)
+- Encoding (`_encoding`)
+- Hardware build (`_hardware_build`)
+- Hardware version (`_hardware_version`)
+- IP address (`_ip`)
+- Latency in ms (`_latency`)
+- Locked (`_locked`)
+- Manufacturer (`_manufacturer`)
+- Manufacturer, short form (`_manufacturer_short`)
+- Model name (`_model_name`)
+- Output levels (`_output_levels`) - currently only for AVIO 2out
+- Product version (`_product_version`)
+- Receive channel count (`_rx`)
+- Receive channel names (`_rx_names`)
+- Sample rate (`_sr`)
+- Sample rate pullup (`_pullup`)
+- Software build (`_software_build`)
+- Software version (`_software_version`)
+- Transmit channel count (`_tx`)
+- Transmit channel names (`_tx_names`)
 
 ## Feedbacks
 
