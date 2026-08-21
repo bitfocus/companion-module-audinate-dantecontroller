@@ -5,6 +5,7 @@ import {
 	type CompanionFeedbackDefinitions,
 	type SomeCompanionFeedbackInputField,
 } from '@companion-module/base'
+import { isSubscriptionConnected } from './const.js'
 import {
 	findTxChannelByName,
 	findRxChannelByName,
@@ -128,9 +129,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				const sourceDeviceMatches =
 					destinationSourceDeviceName == selectedSourceDeviceName ||
 					(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice)
-				const subscriptionOk =
-					destinationChannel?.subscriptionStatus !== undefined &&
-					[9, 10, 14].includes(destinationChannel.subscriptionStatus)
+				const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
 				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk
 			}
 			return false
@@ -227,9 +226,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				const sourceDeviceMatches =
 					destinationSourceDeviceName == selectedSourceDeviceName ||
 					(destinationSourceDeviceName == '.' && self.devicesData[destinationDeviceIp].name == sourceDeviceName)
-				const subscriptionOk =
-					destinationChannel?.subscriptionStatus !== undefined &&
-					[9, 10, 14].includes(destinationChannel.subscriptionStatus)
+				const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
 				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk
 			}
 			return false

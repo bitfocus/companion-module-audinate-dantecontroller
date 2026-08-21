@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { object2choices, object2PartialChoices, array2choices } from './const.js'
+import { object2choices, object2PartialChoices, array2choices, isSubscriptionConnected, DANTE_CONST } from './const.js'
 
 describe('object2choices', () => {
 	it('converts an id-to-label map into a choices array', () => {
@@ -46,5 +46,42 @@ describe('array2choices', () => {
 
 	it('returns undefined when array is undefined', () => {
 		expect(array2choices(undefined)).toBeUndefined()
+	})
+})
+
+describe('isSubscriptionConnected', () => {
+	// Codes below are as observed from real devices via an rx-channel query, with the corresponding
+	// routes live and healthy in Dante Controller.
+
+	it('treats a self-route as connected', () => {
+		// NAM-262de4 ch1: source device '.', source channel 'AMP Mon 1'
+		expect(isSubscriptionConnected(0x0004)).toBe(true)
+	})
+
+	it('treats a cross-device unicast route as connected', () => {
+		// NAM-262de4 ch2 <- TAV-MINEOLA22XLR CH1
+		expect(isSubscriptionConnected(0x0009)).toBe(true)
+	})
+
+	it('treats a cross-device multicast route as connected', () => {
+		// NAM-262de4 ch3 <- TAV-MINEOLA22XLR CH2
+		expect(isSubscriptionConnected(0x000a)).toBe(true)
+	})
+
+	it('treats an unrouted channel as not connected', () => {
+		expect(isSubscriptionConnected(DANTE_CONST.SUBSCRIPTION_STATUS.NONE)).toBe(false)
+	})
+
+	it('treats an unknown status as not connected', () => {
+		expect(isSubscriptionConnected(0x0001)).toBe(false) // reference: unresolved, source unavailable
+		expect(isSubscriptionConnected(0xffff)).toBe(false)
+	})
+
+	it('treats a missing status as not connected', () => {
+		expect(isSubscriptionConnected(undefined)).toBe(false)
+	})
+
+	it('keeps the unverified legacy code accepted', () => {
+		expect(isSubscriptionConnected(DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED)).toBe(true)
 	})
 })

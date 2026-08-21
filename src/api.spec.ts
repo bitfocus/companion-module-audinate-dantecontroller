@@ -845,6 +845,79 @@ describe('parseReply (ARC)', () => {
 	})
 })
 
+describe('parseReply (ARC) - malformed packet handling', () => {
+	const IP = '10.0.0.5'
+
+	/**
+	 * Builds an ARC channel-query reply: 0x2729 header, declared length, then a body claiming
+	 * `recCount` records while actually carrying `records`.
+	 */
+	function arcReply(opcode: number, recCount: number, records: Buffer): Buffer {
+		const head = Buffer.alloc(12)
+		head.writeUInt16BE(0x2729, 0) // protocol
+		head.writeUInt16BE(12 + records.length, 2) // length, must equal rinfo.size
+		head.writeUInt16BE(0, 4) // counter
+		head.writeUInt16BE(opcode, 6)
+		head.writeUInt8(recCount, 11)
+		return Buffer.concat([head, records])
+	}
+
+	function registered() {
+		return createMockInstance({ devicesData: { [IP]: { name: 'Dev', ports: { ARC: 4440 } } } })
+	}
+
+	it('survives an rx reply claiming more records than the packet contains', () => {
+		// one 20-byte record present, but the count byte claims 16
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 16, Buffer.alloc(20))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('survives an rx reply truncated mid-record', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 8, Buffer.alloc(30))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('survives a tx reply whose sample-rate pointer runs past the end of the packet', () => {
+		// record 0: channel 1, group pointer 0xFFF0 (far outside the buffer), name pointer 0
+		const record = Buffer.alloc(8)
+		record.writeUInt16BE(1, 0)
+		record.writeUInt16BE(0xfff0, 4)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+		expect(self.devicesData[IP]?.tx?.[1]?.sampleRate).toBeUndefined()
+	})
+
+	it('survives a tx reply whose sample-rate pointer lands within 4 bytes of the end', () => {
+		const record = Buffer.alloc(8)
+		record.writeUInt16BE(1, 0)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		// point at the last two bytes, so a 4-byte read would overrun
+		record.writeUInt16BE(reply.length - 2, 4)
+		const reply2 = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply2, makeRinfo(IP, reply2.length))).not.toThrow()
+	})
+
+	it('survives a friendly-names reply claiming more records than it carries', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY, 32, Buffer.alloc(6))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('still parses a well-formed rx record', () => {
+		const record = Buffer.alloc(20)
+		record.writeUInt16BE(1, 0) // channel number
+		record.writeUInt16BE(10, 14) // subscription status
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.rx?.[1]?.subscriptionStatus).toBe(10)
+	})
+})
+
 describe('parseSettingsReply', () => {
 	it('marks the connection Ok on a valid packet regardless of registration (real capture)', () => {
 		const self = createMockInstance({ CONNECTED: false, devicesData: {} })

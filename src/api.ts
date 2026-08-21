@@ -185,6 +185,21 @@ function parseChannelCount(reply: Buffer): Partial<DeviceData> {
 	return { tx: { count: reply[13] }, rx: { count: reply[15] } }
 }
 
+/**
+ * Reads a big-endian u32 at a pointer supplied by the device, returning undefined rather than
+ * throwing when the pointer falls outside the packet.
+ *
+ * Channel records carry byte offsets into the reply. Those come off the wire, so a truncated or
+ * malformed packet can point anywhere - and `readUInt32BE` throws ERR_OUT_OF_RANGE from inside a
+ * socket 'message' handler, which would take the module process down.
+ */
+function readU32At(buffer: Buffer, pointer: number): number | undefined {
+	if (pointer < 0 || pointer + 4 > buffer.length) {
+		return undefined
+	}
+	return buffer.readUInt32BE(pointer)
+}
+
 /** Parses a tx-channel-friendly-names-query reply. */
 function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
 	const tx: TxChannels = {}
@@ -199,10 +214,15 @@ function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
 	const friendlyNameIndexOffset = 4
 
 	// for each channel
-	for (let i = 0; i < Math.min(recCount, 32); i++) {
+	// A reply carries at most CHANNELS_PER_PAGE records whatever the record-count byte claims, and a
+	// truncated packet may hold fewer still - bound the loop by both rather than trusting the wire.
+	for (let i = 0; i < Math.min(recCount, DANTE_CONST.CHANNELS_PER_PAGE.TX); i++) {
 		// get info chunk of channel
 		const infoIndex = startIndex + infoBufferSize * i
 		const infoBuffer = reply.subarray(infoIndex, infoIndex + infoBufferSize)
+		if (infoBuffer.length < infoBufferSize) {
+			break
+		}
 		// get channel number and byte index of name
 		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset)
 		const nameIndex = bufferToInt(infoBuffer, friendlyNameIndexOffset)
@@ -238,10 +258,16 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
 	const nameIndexOffset = 6
 
 	// for each channel
-	for (let i = 0; i < Math.min(recCount, 32); i++) {
+	// A reply carries at most CHANNELS_PER_PAGE records whatever the record-count byte claims, and a
+	// truncated packet may hold fewer still - bound the loop by both rather than trusting the wire.
+	for (let i = 0; i < Math.min(recCount, DANTE_CONST.CHANNELS_PER_PAGE.TX); i++) {
 		// get info chunk of channel
 		const infoIndex = startIndex + infoBufferSize * i
 		const infoBuffer = reply.subarray(infoIndex, infoIndex + infoBufferSize)
+		if (infoBuffer.length < infoBufferSize) {
+			tx.count = i
+			break
+		}
 		// get channel number and byte index of name
 		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset)
 		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset)
@@ -263,7 +289,7 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
 			tx.count = i
 			break
 		}
-		returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex)
+		returnChannel.sampleRate = readU32At(reply, sampleRateIndex)
 	}
 	return { tx }
 }
@@ -291,10 +317,16 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 	const subscriptionStatusOffset = 14
 
 	// for each channel
-	for (let i = 0; i < Math.min(recCount, 32); i++) {
+	// A reply carries at most CHANNELS_PER_PAGE records whatever the record-count byte claims, and a
+	// truncated packet may hold fewer still - bound the loop by both rather than trusting the wire.
+	for (let i = 0; i < Math.min(recCount, DANTE_CONST.CHANNELS_PER_PAGE.RX); i++) {
 		// get info chunk of channel
 		const infoIndex = startIndex + infoBufferSize * i
 		const infoBuffer = reply.subarray(infoIndex, infoIndex + infoBufferSize)
+		if (infoBuffer.length < infoBufferSize) {
+			rx.count = i
+			break
+		}
 		// get channel number and byte index of name
 		const nameNumber = bufferToInt(infoBuffer, nameNumberOffset)
 		const nameIndex = bufferToInt(infoBuffer, nameIndexOffset)
@@ -322,7 +354,7 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 		returnChannel.sourceDevice = parseString(reply, sourceDeviceIndex)
 		returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset)
 		returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset)
-		returnChannel.sampleRate = reply.readUInt32BE(sampleRateIndex)
+		returnChannel.sampleRate = readU32At(reply, sampleRateIndex)
 	}
 	return { rx }
 }
@@ -1615,8 +1647,9 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 		}
 	}
 	const commandArguments = Buffer.from('0001000100', 'hex')
-	for (let page = 0; page <= Math.ceil((device.tx?.count ?? 0) / 32); page++) {
-		commandArguments.writeUInt8(page * 32 + 1, 3)
+	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.TX
+	for (let page = 0; page < Math.max(1, Math.ceil((device.tx?.count ?? 0) / perPage)); page++) {
+		commandArguments.writeUInt8(page * perPage + 1, 3)
 		const commandBuffer = makeCommand(
 			self,
 			DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
@@ -1629,8 +1662,10 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 /** Queries a device's tx channel details (names, sample rates), paginating the request 32 channels at a time. */
 export function getTxChannels(self: DanteInstance, ipaddress: string): void {
 	const commandArguments = Buffer.from('0001000100', 'hex')
-	for (let page = 0; page <= Math.ceil((self.devicesData[ipaddress]?.tx?.count ?? 0) / 32); page++) {
-		commandArguments.writeUInt8(page * 32 + 1, 3)
+	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.TX
+	const txCount = self.devicesData[ipaddress]?.tx?.count ?? 0
+	for (let page = 0; page < Math.max(1, Math.ceil(txCount / perPage)); page++) {
+		commandArguments.writeUInt8(page * perPage + 1, 3)
 		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, commandArguments)
 		sendCommand(self, commandBuffer, ipaddress)
 	}
@@ -1639,8 +1674,13 @@ export function getTxChannels(self: DanteInstance, ipaddress: string): void {
 /** Queries a device's rx channel details (names, routing, subscription status), paginating the request 16 channels at a time. */
 export function getRxChannels(self: DanteInstance, ipaddress: string): void {
 	const commandArguments = Buffer.from('0001000100', 'hex')
-	for (let page = 0; page <= (self.devicesData[ipaddress]?.tx?.count ?? 0) / 16; page++) {
-		commandArguments.writeUInt8(page * 16 + 1, 3)
+	// rx.count, not tx.count - paging the receive query by the transmit count silently truncates
+	// discovery on any device with more inputs than outputs (a 32x8 DSP would only ever report its
+	// first 16 receive channels)
+	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.RX
+	const rxCount = self.devicesData[ipaddress]?.rx?.count ?? 0
+	for (let page = 0; page < Math.max(1, Math.ceil(rxCount / perPage)); page++) {
+		commandArguments.writeUInt8(page * perPage + 1, 3)
 		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, commandArguments)
 		sendCommand(self, commandBuffer, ipaddress)
 	}

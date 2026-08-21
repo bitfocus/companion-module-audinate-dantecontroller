@@ -17,6 +17,16 @@ export const DANTE_CONST = {
 		HEARTBEAT: '224.0.0.233',
 	},
 
+	/**
+	 * How many channel records a device returns per query page, per direction. These differ, and the
+	 * value is a property of the protocol rather than of the device - a reply never carries more
+	 * records than this, whatever its record-count byte claims.
+	 */
+	CHANNELS_PER_PAGE: {
+		RX: 16,
+		TX: 32,
+	},
+
 	PORTS: {
 		ARC: 4440,
 		SETTINGS: 8700,
@@ -140,6 +150,31 @@ export const DANTE_CONST = {
 		MESSAGE_TYPE_VERSIONS_STATUS: 96,
 	},
 
+	/**
+	 * Rx channel subscription status, from offset 14 of an rx channel record.
+	 *
+	 * Verified against hardware (NAM-262de4, TAV-MINEOLA22XLR) with routes live in Dante Controller:
+	 * an unrouted channel reports 0, a cross-device unicast route 9, a cross-device multicast route
+	 * 10, and a channel routed back to its own device 4 - in both the forms a self-route can take,
+	 * where the reported source device is either the '.' shorthand or the device's own name.
+	 *
+	 * Note that the separate status at offset 12 is 0x0301 for the working cross-device route but
+	 * 0x0000 for the working self-routes, so it is not a usable "is connected" signal.
+	 */
+	SUBSCRIPTION_STATUS: {
+		NONE: 0x0000,
+		/** Routed to a transmit channel on the same device; no network flow is involved. */
+		CONNECTED_SELF: 0x0004,
+		CONNECTED_UNICAST: 0x0009,
+		CONNECTED_MULTICAST: 0x000a,
+		/**
+		 * Carried over from the original module. Never observed on the hardware tested here, and
+		 * absent from the netaudio reference catalogue, but kept so whatever prompted its inclusion
+		 * does not regress.
+		 */
+		CONNECTED_UNVERIFIED: 0x000e,
+	},
+
 	ENCODINGS: {
 		16: 'PCM16',
 		24: 'PCM24',
@@ -196,4 +231,21 @@ export function array2choices<T extends string | number>(
 	return array?.map((e) => {
 		return { id: e, label: mapping ? mapping(e) : String(e) }
 	})
+}
+
+/**
+ * Subscription status codes that mean audio is actually reaching the receive channel.
+ *
+ * See {@link DANTE_CONST.SUBSCRIPTION_STATUS} for how these were established.
+ */
+export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
+	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF,
+	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST,
+	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST,
+	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED,
+]
+
+/** True if `status` (rx record offset 14) indicates a live subscription. */
+export function isSubscriptionConnected(status: number | undefined): boolean {
+	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
 }
