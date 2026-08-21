@@ -1067,6 +1067,36 @@ export function deviceByIdentifier(self: DanteInstance, identifier: string): Dev
 	return ip !== undefined ? self.devicesData[ip] : undefined
 }
 
+/**
+ * A visibility expression matching a device picker against one device.
+ *
+ * Matches the device name, which is what pickers store, *and* its current address, which is what
+ * actions saved before devices were keyed by name still hold. Without the address arm those actions
+ * show no per-device field at all: the option ids are keyed by name, so nothing matches and the
+ * channel picker simply never appears.
+ */
+export function deviceSelectedExpression(pickerId: string, deviceName: string, deviceIp: string): string {
+	return `$(options:${pickerId}) == '${deviceName}' || $(options:${pickerId}) == '${deviceIp}'`
+}
+
+/**
+ * Reads a per-device option, accepting either key form.
+ *
+ * Fields are declared keyed by device name; an action saved earlier holds its value under the
+ * device's address instead. The name is preferred so a re-saved action uses the current key.
+ */
+export function deviceOptionValue<T>(
+	self: DanteInstance,
+	options: Record<string, unknown>,
+	prefix: string,
+	identifier: string,
+	fallback: T,
+): T {
+	const name = deviceByIdentifier(self, identifier)?.name
+	const byName = name !== undefined ? options[`${prefix}_${name}`] : undefined
+	return ((byName ?? options[`${prefix}_${identifier}`]) as T | undefined) ?? fallback
+}
+
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */
 export function insertDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
 	logger.info(`INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)

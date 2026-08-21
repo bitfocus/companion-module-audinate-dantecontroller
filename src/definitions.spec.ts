@@ -381,6 +381,53 @@ describe('the "None" channel choice', () => {
 	)
 })
 
+describe('per-device fields work for a device stored by address', () => {
+	/**
+	 * An action saved before devices were keyed by name holds an address in its device picker.
+	 * `allowCustom` keeps that parseable, but the per-device fields are declared keyed by name - so
+	 * without an address arm in their visibility expressions, no channel picker would ever appear.
+	 */
+	function build() {
+		const self = mockInstance()
+		UpdateActions(self)
+		return (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, DefinitionLike>
+	}
+
+	function expressionsFor(actionId: string, prefix: string) {
+		return (build()[actionId]?.options ?? [])
+			.filter((option) => option.id.startsWith(prefix))
+			.map((option) => option.isVisibleExpression ?? '')
+	}
+
+	const cases: [string, string, string][] = [
+		['setRxChannelName', 'channel_', 'device'],
+		['setTxChannelName', 'channel_', 'device'],
+		['clearCrosspointDropDown', 'destinationChannel_', 'destinationDevice'],
+		['makeCrosspointDropDown', 'destinationChannel_', 'destinationDevice'],
+		['makeCrosspointDropDown', 'sourceChannel_', 'sourceDevice'],
+		['setSampleRate', 'sr_', 'device'],
+		['setPullup', 'pullup_', 'device'],
+		['setEncoding', 'encoding_', 'device'],
+	]
+
+	it.each(cases)('%s %s matches the device by name', (actionId, prefix, picker) => {
+		const expressions = expressionsFor(actionId, prefix)
+		expect(expressions.length).toBeGreaterThan(0)
+		expect(expressions.some((e) => e.includes(`$(options:${picker}) == 'DeviceA'`))).toBe(true)
+	})
+
+	it.each(cases)('%s %s also matches the device by address', (actionId, prefix) => {
+		const expressions = expressionsFor(actionId, prefix)
+		expect(expressions.some((e) => e.includes(`== '10.0.0.5'`))).toBe(true)
+	})
+
+	it('keeps the clearAll condition alongside the two device arms', () => {
+		const [expression] = expressionsFor('clearCrosspointDropDown', 'destinationChannel_')
+		// the device arms must be bracketed, or `||` would swallow the `&&`
+		expect(expression).toMatch(/^\(.*\) && !\$\(options:clearAll\)$/)
+	})
+})
+
 describe('dropdown defaults', () => {
 	it('every action dropdown defaults to one of its own choices', () => {
 		const self = mockInstance()

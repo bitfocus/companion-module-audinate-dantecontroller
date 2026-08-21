@@ -9,6 +9,8 @@ import { isSubscriptionConnected } from './const.js'
 import {
 	findTxChannelByName,
 	deviceByIdentifier,
+	deviceSelectedExpression,
+	deviceOptionValue,
 	resolveDeviceIp,
 	firstChoiceId,
 	rxDeviceChoices,
@@ -75,7 +77,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			},
 			...Object.entries(self.devicesData)
 				.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-				.map(([, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Destination channel',
 					id: `destinationChannel_${device.name}`,
@@ -84,7 +86,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 					// allowCustom keeps actions still holding it parseable rather than failing outright
 					allowCustom: true,
-					isVisibleExpression: `$(options:destinationDevice) == '${device.name}'`,
+					isVisibleExpression: deviceSelectedExpression('destinationDevice', device.name ?? '', ip),
 				})),
 			{
 				type: 'dropdown',
@@ -98,7 +100,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			},
 			...Object.entries(self.devicesData)
 				.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-				.map(([, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Source channel',
 					id: `sourceChannel_${device.name}`,
@@ -107,7 +109,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 					// allowCustom keeps actions still holding it parseable rather than failing outright
 					allowCustom: true,
-					isVisibleExpression: `$(options:sourceDevice) == '${device.name}'`,
+					isVisibleExpression: deviceSelectedExpression('sourceDevice', device.name ?? '', ip),
 				})),
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
@@ -122,8 +124,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			const destinationDevice = deviceByIdentifier(self, opt.destinationDevice)
 			const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
 			if (opt.destinationDevice && destinationDevice?.rx && opt.sourceDevice) {
-				const destinationChannel = destinationDevice.rx?.[opt[`destinationChannel_${opt.destinationDevice}`]]
-				const selectedSourceChannel = opt[`sourceChannel_${opt.sourceDevice}`]
+				const destinationChannel =
+					destinationDevice.rx?.[deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0)]
+				const selectedSourceChannel = deviceOptionValue<number>(self, opt, 'sourceChannel', opt.sourceDevice, 0)
 				const sourceChannel =
 					sourceDevice?.tx?.[selectedSourceChannel] ??
 					findTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))

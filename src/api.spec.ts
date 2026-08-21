@@ -37,6 +37,8 @@ import {
 	macForDevice,
 	resolveDeviceIp,
 	deviceByIdentifier,
+	deviceOptionValue,
+	deviceSelectedExpression,
 	updateChannelChoices,
 	getRxChannels,
 	getTxChannels,
@@ -1036,6 +1038,43 @@ describe('updateChannelChoices', () => {
 		const self = withChannels('rx', 0)
 		updateChannelChoices(self, '10.0.0.5', 'rx')
 		expect(self.rxChannelsChoices.Dev).toEqual([])
+	})
+})
+
+describe('deviceOptionValue / deviceSelectedExpression', () => {
+	function self() {
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: {} } },
+		})
+	}
+
+	it('reads a value stored under the device name', () => {
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', 'DeviceA', 0)).toBe(3)
+	})
+
+	it('reads a value stored under the device address, as older actions hold it', () => {
+		expect(deviceOptionValue(self(), { 'channel_10.0.0.5': 7 }, 'channel', '10.0.0.5', 0)).toBe(7)
+	})
+
+	it('finds the name-keyed value even when the picker still holds an address', () => {
+		// the state right after a device is re-picked: picker updated, old key not yet cleared
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', '10.0.0.5', 0)).toBe(3)
+	})
+
+	it('prefers the name-keyed value over a stale address-keyed one', () => {
+		const options = { channel_DeviceA: 3, 'channel_10.0.0.5': 7 }
+		expect(deviceOptionValue(self(), options, 'channel', '10.0.0.5', 0)).toBe(3)
+	})
+
+	it('falls back when neither key is present', () => {
+		expect(deviceOptionValue(self(), {}, 'channel', 'DeviceA', 0)).toBe(0)
+		expect(deviceOptionValue(self(), {}, 'sr', 'DeviceA', '')).toBe('')
+	})
+
+	it('builds an expression matching either the name or the address', () => {
+		expect(deviceSelectedExpression('device', 'DeviceA', '10.0.0.5')).toBe(
+			"$(options:device) == 'DeviceA' || $(options:device) == '10.0.0.5'",
+		)
 	})
 })
 

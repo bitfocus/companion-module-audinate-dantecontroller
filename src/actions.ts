@@ -22,6 +22,8 @@ import {
 	orPlaceholder,
 	currentChoiceId,
 	deviceByIdentifier,
+	deviceSelectedExpression,
+	deviceOptionValue,
 	getRxChannelSource,
 	findRxChannelByName,
 	findDeviceIpByName,
@@ -210,7 +212,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${device.name}`,
@@ -219,7 +221,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:destinationDevice) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('destinationDevice', device.name ?? '', ip),
 					})),
 				{
 					type: 'dropdown',
@@ -234,7 +236,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Source channel',
 						id: `sourceChannel_${device.name}`,
@@ -244,7 +246,7 @@ export function UpdateActions(self: DanteInstance): void {
 						choices: [{ id: 0, label: 'None (clear the crosspoint)' }, ...channelChoices(self, device, 'tx')],
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
 						allowCustom: true,
-						isVisibleExpression: `$(options:sourceDevice) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('sourceDevice', device.name ?? '', ip),
 					})),
 			],
 			// Learn the source device and channel from the destination's current subscription. The
@@ -254,7 +256,7 @@ export function UpdateActions(self: DanteInstance): void {
 				const source = getRxChannelSource(
 					self,
 					opt.destinationDevice,
-					opt[`destinationChannel_${opt.destinationDevice}`],
+					deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0),
 				)
 				if (!source) return undefined
 
@@ -273,8 +275,8 @@ export function UpdateActions(self: DanteInstance): void {
 			},
 			callback: async (action) => {
 				const opt = action.options
-				const sourceChannelNumber = opt[`sourceChannel_${opt.sourceDevice}`]
-				const destinationChannel = opt[`destinationChannel_${opt.destinationDevice}`]
+				const sourceChannelNumber = deviceOptionValue<number>(self, opt, 'sourceChannel', opt.sourceDevice, 0)
+				const destinationChannel = deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0)
 
 				// No source means no route: clear the destination rather than subscribing it to nothing.
 				if (!sourceChannelNumber) {
@@ -359,7 +361,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${device.name}`,
@@ -368,7 +370,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:destinationDevice) == '${device.name}' && !$(options:clearAll)`,
+						isVisibleExpression: `(${deviceSelectedExpression('destinationDevice', device.name ?? '', ip)}) && !$(options:clearAll)`,
 					})),
 			],
 			callback: async (action) => {
@@ -377,7 +379,11 @@ export function UpdateActions(self: DanteInstance): void {
 					clearAllCrosspoints(self, opt.destinationDevice)
 					return
 				}
-				clearCrosspoint(self, opt.destinationDevice, opt[`destinationChannel_${opt.destinationDevice}`])
+				clearCrosspoint(
+					self,
+					opt.destinationDevice,
+					deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0),
+				)
 			},
 		},
 
@@ -462,7 +468,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
@@ -471,7 +477,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 				{
 					type: 'textinput',
@@ -484,12 +490,14 @@ export function UpdateActions(self: DanteInstance): void {
 			// Learn the new-name field from the channel's current name, as a starting point for an edit.
 			learn: (action) => {
 				const opt = action.options
-				const name = deviceByIdentifier(self, opt.device)?.rx?.[opt[`channel_${opt.device}`]]?.name
+				const name = deviceByIdentifier(self, opt.device)?.rx?.[
+					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
+				]?.name
 				return name ? { newName: name } : undefined
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setRxChannelName(self, opt.device, opt[`channel_${opt.device}`], opt.newName)
+				setRxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0), opt.newName)
 			},
 		},
 
@@ -509,7 +517,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
@@ -518,12 +526,12 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
-				resetRxChannelName(self, opt.device, opt[`channel_${opt.device}`])
+				resetRxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0))
 			},
 		},
 
@@ -543,7 +551,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
@@ -552,7 +560,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 				{
 					type: 'textinput',
@@ -565,13 +573,15 @@ export function UpdateActions(self: DanteInstance): void {
 			// Learn from the channel label the device reports, falling back to its canonical name.
 			learn: (action) => {
 				const opt = action.options
-				const channel = deviceByIdentifier(self, opt.device)?.tx?.[opt[`channel_${opt.device}`]]
+				const channel = deviceByIdentifier(self, opt.device)?.tx?.[
+					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
+				]
 				const name = getChannelSubscriptionName(channel)
 				return name ? { newName: name } : undefined
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setTxChannelName(self, opt.device, opt[`channel_${opt.device}`], opt.newName)
+				setTxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0), opt.newName)
 			},
 		},
 
@@ -591,7 +601,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
@@ -600,12 +610,12 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
-				resetTxChannelName(self, opt.device, opt[`channel_${opt.device}`])
+				resetTxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0))
 			},
 		},
 
@@ -682,7 +692,7 @@ export function UpdateActions(self: DanteInstance): void {
 				// the whole action when one is present - so only emit these for devices that report options.
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => (device.srOptions?.length ?? 0) > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetSampleRateOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetSampleRateOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate',
 						id: `sr_${device.name}`,
@@ -693,7 +703,7 @@ export function UpdateActions(self: DanteInstance): void {
 							device.sr,
 							'',
 						),
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 			],
 			learn: (action) => {
@@ -714,7 +724,7 @@ export function UpdateActions(self: DanteInstance): void {
 				// address for older actions - it suffixes the option key either way, and sendCommand
 				// resolves it to an address
 				const device = opt.device
-				setSampleRate(self, device, Number(opt[`sr_${device}`]))
+				setSampleRate(self, device, Number(deviceOptionValue<string>(self, opt, 'sr', device, '')))
 			},
 		},
 
@@ -736,7 +746,7 @@ export function UpdateActions(self: DanteInstance): void {
 				// the whole action when one is present - so only emit these for devices that report options.
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => (device.pullupOptions?.length ?? 0) > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetPullupOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetPullupOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate pullup',
 						id: `pullup_${device.name}`,
@@ -746,7 +756,7 @@ export function UpdateActions(self: DanteInstance): void {
 							device.pullup,
 							'',
 						),
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 			],
 			learn: (action) => {
@@ -768,7 +778,7 @@ export function UpdateActions(self: DanteInstance): void {
 				// address for older actions - it suffixes the option key either way, and sendCommand
 				// resolves it to an address
 				const device = opt.device
-				setPullup(self, device, Number(opt[`pullup_${device}`]))
+				setPullup(self, device, Number(deviceOptionValue<string>(self, opt, 'pullup', device, '')))
 			},
 		},
 
@@ -790,7 +800,7 @@ export function UpdateActions(self: DanteInstance): void {
 				// the whole action when one is present - so only emit these for devices that report options.
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => (device.encodingOptions?.length ?? 0) > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetEncodingOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetEncodingOptions> => ({
 						type: 'dropdown',
 						label: 'Encoding',
 						id: `encoding_${device.name}`,
@@ -800,13 +810,13 @@ export function UpdateActions(self: DanteInstance): void {
 							device.encoding,
 							'',
 						),
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
 				const device = opt.device
-				setEncoding(self, device, Number(opt[`encoding_${device}`]))
+				setEncoding(self, device, Number(deviceOptionValue<string>(self, opt, 'encoding', device, '')))
 			},
 		},
 
@@ -826,7 +836,7 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
+					.map(([ip, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
@@ -835,7 +845,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: `$(options:device) == '${device.name}'`,
+						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 					})),
 				{
 					type: 'dropdown',
@@ -852,7 +862,7 @@ export function UpdateActions(self: DanteInstance): void {
 			// declines rather than guessing.
 			learn: (action) => {
 				const opt = action.options
-				const channelNumber = opt[`channel_${opt.device}`]
+				const channelNumber = deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
 				const levels = deviceByIdentifier(self, opt.device)?.output_levels
 				const current = levels?.[channelNumber - 1]
 				if (current === undefined) return undefined
@@ -865,7 +875,13 @@ export function UpdateActions(self: DanteInstance): void {
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setLevel(self, opt.device, 'out', opt[`channel_${opt.device}`], Number(opt.level))
+				setLevel(
+					self,
+					opt.device,
+					'out',
+					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0),
+					Number(opt.level),
+				)
 			},
 		},
 
