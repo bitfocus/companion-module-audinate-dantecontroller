@@ -34,6 +34,27 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 }
 
 /**
+ * Every variable category `CheckVariables` knows how to refresh, used when no explicit set is given.
+ *
+ * `pullup` was missing here despite having both a definition and a case below, so a full sweep
+ * never refreshed `<device>_pullup` - it only ever updated when a settings reply happened to pass
+ * 'pullup' explicitly.
+ */
+export const ALL_VARIABLE_TYPES = [
+	'ip',
+	'rx',
+	'tx',
+	'rx_names',
+	'tx_names',
+	'sr',
+	'latency',
+	'encoding',
+	'pullup',
+	'output_levels',
+	'manf',
+] as const
+
+/**
  * Recomputes and pushes current variable values to Companion.
  * @param ipAddress If given, restricts the update to the device at this IP; otherwise all known devices are updated.
  * @param variableTypes Which variable categories to refresh; defaults to all categories if none are given.
@@ -42,7 +63,7 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 	const variableValues: CompanionVariableValues = { devices: [] }
 
 	if (!(variableTypes.length > 0)) {
-		variableTypes = ['ip', 'rx', 'tx', 'rx_names', 'tx_names', 'sr', 'latency', 'encoding', 'output_levels', 'manf']
+		variableTypes = [...ALL_VARIABLE_TYPES]
 	}
 
 	const devices: string[] = []
