@@ -231,3 +231,39 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 		scheduleUpdateData(self)
 	}
 }
+
+/** Converts a plain `{ id: label }` map into a Companion dropdown `choices` array. */
+export function object2choices<Key extends string | number>(obj: Record<Key, string>): DropdownChoice<`${Key}`>[] {
+	const choices: DropdownChoice<`${Key}`>[] = []
+	// Object.entries stringifies numeric keys, so the ids are the string form of the code
+	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
+		choices.push({ id, label })
+	}
+	return choices
+}
+
+/** Like {@link object2choices}, but only includes entries whose id is present in `optionsArray`. */
+export function object2PartialChoices<Key extends string | number>(
+	obj: Record<Key, string>,
+	optionsArray: (string | number)[] | undefined,
+): DropdownChoice<`${Key}`>[] {
+	const choices: DropdownChoice<`${Key}`>[] = []
+	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
+		if (optionsArray?.includes(id)) {
+			choices.push({ id, label })
+		}
+	}
+	return choices
+}
+
+/**
+ * Converts an array of raw values into a Companion dropdown `choices` array, or `undefined` if `array` is nullish.
+ */
+export function array2choices<T extends string | number>(
+	array: T[] | undefined,
+	mapping?: (value: T) => string,
+): DropdownChoice<T>[] | undefined {
+	return array?.map((e) => {
+		return { id: e, label: mapping ? mapping(e) : String(e) }
+	})
+}

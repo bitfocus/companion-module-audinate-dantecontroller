@@ -2,7 +2,8 @@
  * Commands that change something on a device.
  */
 
-import { DANTE_CONST, validateDanteName } from '../const.js'
+import { DANTE_CONST } from './const.js'
+import { validateDanteName } from './protocol-rules.js'
 import { Regex, createModuleLogger } from '@companion-module/base'
 import type DanteInstance from '../main.js'
 import { intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'

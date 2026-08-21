@@ -1,9 +1,16 @@
-import type { DropdownChoice } from '@companion-module/base'
+/**
+ * Dante protocol constants: service names, ports, opcodes, and the code maps devices report.
+ *
+ * Facts about the wire only. How those facts are interpreted - which subscription status counts as
+ * connected, what makes a name acceptable - lives in `protocol-rules.ts`.
+ */
 
 /** Encoding codes this module knows how to label. */
 export type EncodingCode = 16 | 24 | 32
+
 /** Output level codes this module knows how to label. */
 export type LevelCode = 1 | 2 | 3 | 4 | 5
+
 /** Sample rate pullup codes this module knows how to label. */
 export type PullupCode = 0 | 1 | 2 | 3 | 4
 
@@ -209,106 +216,3 @@ export const DANTE_CONST = {
 		4: '-4%',
 	} as Record<PullupCode, string>,
 } as const
-
-/**
- * The label for a code a device reported, or undefined when it is not one this module knows.
- *
- * The code maps are keyed by literal unions so their choice ids are precise, which means a raw
- * number off the wire cannot index them directly - a device is free to report a code we have no
- * label for.
- */
-export function codeLabel<Key extends string | number>(map: Record<Key, string>, code: number): string | undefined {
-	return Object.prototype.hasOwnProperty.call(map, code) ? map[code as Key] : undefined
-}
-
-/** Converts a plain `{ id: label }` map into a Companion dropdown `choices` array. */
-export function object2choices<Key extends string | number>(obj: Record<Key, string>): DropdownChoice<`${Key}`>[] {
-	const choices: DropdownChoice<`${Key}`>[] = []
-	// Object.entries stringifies numeric keys, so the ids are the string form of the code
-	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
-		choices.push({ id, label })
-	}
-	return choices
-}
-
-/** Like {@link object2choices}, but only includes entries whose id is present in `optionsArray`. */
-export function object2PartialChoices<Key extends string | number>(
-	obj: Record<Key, string>,
-	optionsArray: (string | number)[] | undefined,
-): DropdownChoice<`${Key}`>[] {
-	const choices: DropdownChoice<`${Key}`>[] = []
-	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
-		if (optionsArray?.includes(id)) {
-			choices.push({ id, label })
-		}
-	}
-	return choices
-}
-
-/**
- * Converts an array of raw values into a Companion dropdown `choices` array, or `undefined` if `array` is nullish.
- */
-export function array2choices<T extends string | number>(
-	array: T[] | undefined,
-	mapping?: (value: T) => string,
-): DropdownChoice<T>[] | undefined {
-	return array?.map((e) => {
-		return { id: e, label: mapping ? mapping(e) : String(e) }
-	})
-}
-
-/**
- * Subscription status codes that mean audio is actually reaching the receive channel.
- *
- * See {@link DANTE_CONST.SUBSCRIPTION_STATUS} for how these were established.
- */
-export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
-	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF,
-	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST,
-	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST,
-	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED,
-]
-
-/** True if `status` (rx record offset 14) indicates a live subscription. */
-export function isSubscriptionConnected(status: number | undefined): boolean {
-	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
-}
-
-/** Longest name a Dante device accepts, for both device and channel names. */
-export const DANTE_NAME_MAX_LENGTH = 31
-
-/**
- * Checks a name against the rules Dante devices enforce, returning why it is invalid or
- * `undefined` if it is acceptable.
- *
- * Devices silently reject a malformed name, so without this a user just sees nothing happen.
- * Rules mirror the netaudio reference implementation: at most 31 characters, ASCII letters,
- * digits and hyphens only, and no leading or trailing hyphen. Channel names may additionally
- * contain a colon, which separates a channel from its device in subscription strings.
- *
- * An empty name is accepted here because the module uses it to mean "reset to default".
- */
-export function validateDanteName(name: string, options: { allowColon?: boolean } = {}): string | undefined {
-	if (name === '') {
-		return undefined
-	}
-	if (name.length > DANTE_NAME_MAX_LENGTH) {
-		return `must be ${DANTE_NAME_MAX_LENGTH} characters or fewer (got ${name.length})`
-	}
-
-	const allowed = options.allowColon ? /^[A-Za-z0-9:-]+$/ : /^[A-Za-z0-9-]+$/
-	if (!allowed.test(name)) {
-		return options.allowColon
-			? 'may only contain letters, digits, hyphens and colons'
-			: 'may only contain letters, digits and hyphens'
-	}
-
-	const edges = options.allowColon ? ['-', ':'] : ['-']
-	for (const edge of edges) {
-		if (name.startsWith(edge) || name.endsWith(edge)) {
-			return `may not start or end with '${edge}'`
-		}
-	}
-
-	return undefined
-}

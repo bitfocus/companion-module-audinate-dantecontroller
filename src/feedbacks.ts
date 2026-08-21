@@ -5,21 +5,21 @@ import {
 	type CompanionFeedbackDefinitions,
 	type SomeCompanionFeedbackInputField,
 } from '@companion-module/base'
-import { isSubscriptionConnected } from './const.js'
 import {
-	findTxChannelByName,
-	deviceByIdentifier,
-	deviceSelectedExpression,
-	deviceOptionValue,
-	resolveDeviceIp,
-	firstChoiceId,
-	rxDeviceChoices,
-	txDeviceChoices,
 	channelChoices,
-	findRxChannelByName,
+	deviceByIdentifier,
+	deviceOptionValue,
+	deviceSelectedExpression,
 	findDeviceIpByName,
+	findRxChannelByName,
+	findTxChannelByName,
+	firstChoiceId,
 	getChannelSubscriptionName,
+	isSubscriptionConnected,
+	resolveDeviceIp,
+	rxDeviceChoices,
 	trackFeedbackDevices,
+	txDeviceChoices,
 	untrackFeedback,
 } from './api/index.js'
 import type DanteInstance from './main.js'

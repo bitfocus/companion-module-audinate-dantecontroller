@@ -2,7 +2,7 @@
  * Commands that ask a device for information.
  */
 
-import { DANTE_CONST } from '../const.js'
+import { DANTE_CONST } from './const.js'
 import type DanteInstance from '../main.js'
 import { incrementBE, intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'

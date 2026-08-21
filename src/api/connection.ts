@@ -5,7 +5,7 @@
 import multidns from 'multicast-dns'
 import dgram from 'node:dgram'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
-import { DANTE_CONST } from '../const.js'
+import { DANTE_CONST } from './const.js'
 import { listNetworkInterfaces, resolveConfiguredInterface, encodeInterfaceId } from '../config.js'
 import type DanteInstance from '../main.js'
 import type { ConnectionName, ServiceName, DanteSockets, MdnsResponsePacket } from './types.js'

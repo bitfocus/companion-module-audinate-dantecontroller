@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import {
-	object2choices,
-	object2PartialChoices,
-	array2choices,
-	isSubscriptionConnected,
-	validateDanteName,
-	DANTE_CONST,
-} from './const.js'
+import { object2choices, object2PartialChoices, array2choices } from '../choices.js'
+import { DANTE_CONST } from '../const.js'
+import { isSubscriptionConnected, validateDanteName } from '../protocol-rules.js'
 
 describe('object2choices', () => {
 	it('converts an id-to-label map into a choices array', () => {

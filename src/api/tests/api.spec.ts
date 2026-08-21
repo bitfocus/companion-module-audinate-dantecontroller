@@ -49,9 +49,9 @@ import {
 	parseReply,
 	parseSettingsReply,
 	type DevicesData,
-} from './api/index.js'
-import { DANTE_CONST } from './const.js'
-import type DanteInstance from './main.js'
+} from '../index.js'
+import { DANTE_CONST } from '../const.js'
+import type DanteInstance from '../../main.js'
 
 // Real packets captured from a live Dante network during development, used to exercise
 // the protocol/size/magic-string checks and byte-offset parsing against genuine data
@@ -1106,7 +1106,7 @@ describe('sendCommand', () => {
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
 		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api', 'error', expect.stringContaining('Undefined port'))
+		expect(loggerSink).toHaveBeenCalledWith('api:connection', 'error', expect.stringContaining('Undefined port'))
 	})
 })
 
@@ -1165,7 +1165,7 @@ describe('makeCrosspoint / clearCrosspoint', () => {
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
 		makeCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api', 'error', expect.stringContaining("Can't find"))
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
 	})
 
 	it('makeCrosspoint resolves an IP-address destination directly, without a name lookup', () => {
@@ -1181,7 +1181,7 @@ describe('makeCrosspoint / clearCrosspoint', () => {
 	it('clearCrosspoint logs an error when the destination device cannot be resolved', () => {
 		const self = createMockInstance()
 		clearCrosspoint(self, 'UnknownDevice', '1')
-		expect(loggerSink).toHaveBeenCalledWith('api', 'error', expect.stringContaining("Can't find"))
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
 	})
 })
 
@@ -1252,7 +1252,7 @@ describe('clearAllCrosspoints', () => {
 		const { self, send } = withRx(4)
 		clearAllCrosspoints(self, 'NoSuchDevice')
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api', 'error', expect.stringContaining('NoSuchDevice'))
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining('NoSuchDevice'))
 	})
 })
 

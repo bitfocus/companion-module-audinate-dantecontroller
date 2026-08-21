@@ -6,6 +6,8 @@
  * from one place.
  */
 export * from './types.js'
+export * from './const.js'
+export * from './protocol-rules.js'
 export * from './protocol.js'
 export * from './devices.js'
 export * from './choices.js'

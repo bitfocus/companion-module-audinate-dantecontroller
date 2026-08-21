@@ -2,7 +2,7 @@
  * mDNS discovery: finding Dante devices and the ports their services listen on.
  */
 
-import { DANTE_CONST } from '../const.js'
+import { DANTE_CONST } from './const.js'
 import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'

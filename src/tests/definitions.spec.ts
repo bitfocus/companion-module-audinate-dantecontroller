@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { UpdateActions } from './actions.js'
-import { UpdateFeedbacks } from './feedbacks.js'
-import type { DevicesData } from './api/index.js'
-import type DanteInstance from './main.js'
+import { UpdateActions } from '../actions.js'
+import { UpdateFeedbacks } from '../feedbacks.js'
+import type { DevicesData } from '../api/index.js'
+import type DanteInstance from '../main.js'
 
 /**
  * Companion requires that any option referenced from another option's `isVisibleExpression` has

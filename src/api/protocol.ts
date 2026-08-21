@@ -2,7 +2,8 @@
  * Reading and writing Dante wire format: byte helpers, command framing, and reply parsers.
  */
 
-import { DANTE_CONST, codeLabel } from '../const.js'
+import { DANTE_CONST } from './const.js'
+import { codeLabel } from './protocol-rules.js'
 import merge from '../utils/merge.js'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import { UpdateActions } from '../actions.js'

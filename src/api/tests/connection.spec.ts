@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type dgram from 'node:dgram'
-import { DanteConnection } from './connection.js'
-import type DanteInstance from '../main.js'
+import { DanteConnection } from '../connection.js'
+import type DanteInstance from '../../main.js'
 
 /**
  * The connection owns the state the module's teardown bugs lived in: sockets closed twice,

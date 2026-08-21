@@ -145,6 +145,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			default: 1000,
 			min: 0,
 			max: 3600000,
+			asInteger: true,
 		},
 
 		{
@@ -156,6 +157,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			default: 3000,
 			min: 0,
 			max: 3600000,
+			asInteger: true,
 		},
 
 		{

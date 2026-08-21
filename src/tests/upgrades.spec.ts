@@ -4,8 +4,8 @@ import type {
 	CompanionStaticUpgradeProps,
 	CompanionUpgradeContext,
 } from '@companion-module/base'
-import { UpgradeScripts } from './upgrades.js'
-import type { ModuleConfig } from './config.js'
+import { UpgradeScripts } from '../upgrades.js'
+import type { ModuleConfig } from '../config.js'
 
 /**
  * Upgrade scripts by index. They are order-sensitive: a stored `upgradeIndex` records how far a

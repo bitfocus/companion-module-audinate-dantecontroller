@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import merge from './merge.js'
+import merge from '../merge.js'
 
 describe('merge', () => {
 	it('returns the target unchanged when no sources are given', () => {

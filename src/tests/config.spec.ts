@@ -4,7 +4,7 @@ import {
 	resolveConfiguredInterface,
 	findInterfaceForAddress,
 	type NetworkInterfaceInfo,
-} from './config.js'
+} from '../config.js'
 
 const dante: NetworkInterfaceInfo = {
 	name: 'en8',
