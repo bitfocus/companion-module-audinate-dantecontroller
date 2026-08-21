@@ -3,6 +3,7 @@ import { DANTE_CONST, object2choices, object2PartialChoices, array2choices } fro
 import {
 	makeCrosspoint,
 	clearCrosspoint,
+	clearAllCrosspoints,
 	setDeviceName,
 	resetDeviceName,
 	setRxChannelName,
@@ -39,10 +40,12 @@ type MakeCrosspointDropDownOptions = {
 type ClearCrosspointOptions = {
 	destinationChannelNumber: string
 	destinationDeviceAdddress: string
+	clearAll: boolean
 }
 
 type ClearCrosspointDropDownOptions = {
 	destinationDevice: string
+	clearAll: boolean
 } & Record<`destinationChannel_${string}`, number>
 
 type SetDeviceNameOptions = {
@@ -225,23 +228,36 @@ export function UpdateActions(self: DanteInstance): void {
 			options: [
 				{
 					type: 'textinput',
-					label: 'Destination Channel',
-					tooltip: 'Enter either channer name or channel number',
-					id: 'destinationChannelNumber',
-					default: '1',
-					useVariables: true,
-				},
-				{
-					type: 'textinput',
 					label: 'Destination Device',
 					tooltip: 'Enter either device name or device IP',
 					id: 'destinationDeviceAdddress',
 					default: 'MyDanteDeviceName',
 					useVariables: true,
 				},
+				{
+					type: 'checkbox',
+					label: 'Clear every channel on the device',
+					id: 'clearAll',
+					default: false,
+					// required: this option is referenced by an isVisibleExpression below
+					disableAutoExpression: true,
+				},
+				{
+					type: 'textinput',
+					label: 'Destination Channel',
+					tooltip: 'Enter either channer name or channel number',
+					id: 'destinationChannelNumber',
+					default: '1',
+					useVariables: true,
+					isVisibleExpression: `!$(options:clearAll)`,
+				},
 			],
 			callback: async (action) => {
 				const opt = action.options
+				if (opt.clearAll) {
+					clearAllCrosspoints(self, opt.destinationDeviceAdddress)
+					return
+				}
 				clearCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			},
 		},
@@ -257,6 +273,14 @@ export function UpdateActions(self: DanteInstance): void {
 					default: self.devicesChoices[0]?.id ?? '',
 					disableAutoExpression: true,
 				},
+				{
+					type: 'checkbox',
+					label: 'Clear every channel on the device',
+					id: 'clearAll',
+					default: false,
+					// required: this option is referenced by an isVisibleExpression below
+					disableAutoExpression: true,
+				},
 				...Object.entries(self.devicesData)
 					.filter(([, device]) => hasRxChannels(device))
 					.map(([ip, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
@@ -265,11 +289,15 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `destinationChannel_${ip}`,
 						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
 						default: 0,
-						isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
+						isVisibleExpression: `$(options:destinationDevice) == '${ip}' && !$(options:clearAll)`,
 					})),
 			],
 			callback: async (action) => {
 				const opt = action.options
+				if (opt.clearAll) {
+					clearAllCrosspoints(self, opt.destinationDevice)
+					return
+				}
 				clearCrosspoint(self, opt.destinationDevice, opt[`destinationChannel_${opt.destinationDevice}`])
 			},
 		},

@@ -51,6 +51,8 @@ export const DANTE_CONST = {
 		deviceInfo: 0x1003,
 		deviceName: 0x1002,
 		subscription: 0x3010,
+		/** Removes subscriptions from a list of rx channels, in one command. */
+		subscriptionRemove: 0x3014,
 		rxChannelNames: 0x3000,
 		txChannelNames: 0x2010,
 		txChannelInfo: 0x2000,
@@ -248,4 +250,43 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 /** True if `status` (rx record offset 14) indicates a live subscription. */
 export function isSubscriptionConnected(status: number | undefined): boolean {
 	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
+}
+
+/** Longest name a Dante device accepts, for both device and channel names. */
+export const DANTE_NAME_MAX_LENGTH = 31
+
+/**
+ * Checks a name against the rules Dante devices enforce, returning why it is invalid or
+ * `undefined` if it is acceptable.
+ *
+ * Devices silently reject a malformed name, so without this a user just sees nothing happen.
+ * Rules mirror the netaudio reference implementation: at most 31 characters, ASCII letters,
+ * digits and hyphens only, and no leading or trailing hyphen. Channel names may additionally
+ * contain a colon, which separates a channel from its device in subscription strings.
+ *
+ * An empty name is accepted here because the module uses it to mean "reset to default".
+ */
+export function validateDanteName(name: string, options: { allowColon?: boolean } = {}): string | undefined {
+	if (name === '') {
+		return undefined
+	}
+	if (name.length > DANTE_NAME_MAX_LENGTH) {
+		return `must be ${DANTE_NAME_MAX_LENGTH} characters or fewer (got ${name.length})`
+	}
+
+	const allowed = options.allowColon ? /^[A-Za-z0-9:-]+$/ : /^[A-Za-z0-9-]+$/
+	if (!allowed.test(name)) {
+		return options.allowColon
+			? 'may only contain letters, digits, hyphens and colons'
+			: 'may only contain letters, digits and hyphens'
+	}
+
+	const edges = options.allowColon ? ['-', ':'] : ['-']
+	for (const edge of edges) {
+		if (name.startsWith(edge) || name.endsWith(edge)) {
+			return `may not start or end with '${edge}'`
+		}
+	}
+
+	return undefined
 }

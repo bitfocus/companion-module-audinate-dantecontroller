@@ -14,6 +14,7 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 	for (const device of Object.values(self.devicesData)) {
 		if (!device.name) continue
 		variables[`${device.name}_ip`] = { name: 'Ip address of ' + device.name }
+		variables[`${device.name}_locked`] = { name: 'Device lock state of ' + device.name }
 		variables[`${device.name}_tx`] = { name: 'Number of outputs for ' + device.name }
 		variables[`${device.name}_tx_names`] = { name: 'Output names for ' + device.name }
 		variables[`${device.name}_rx`] = { name: 'Number of inputs for ' + device.name }
@@ -39,6 +40,7 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
  */
 export const ALL_VARIABLE_TYPES = [
 	'ip',
+	'locked',
 	'rx',
 	'tx',
 	'rx_names',
@@ -78,6 +80,10 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 
 						case 'ip':
 							variableValues[`${deviceName}_ip`] = ip
+							break
+
+						case 'locked':
+							variableValues[`${deviceName}_locked`] = device.locked
 							break
 
 						case 'rx':

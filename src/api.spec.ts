@@ -32,6 +32,7 @@ import {
 	setChannelName,
 	makeCrosspoint,
 	clearCrosspoint,
+	clearAllCrosspoints,
 	parseHeartbeatReply,
 	parseCmcReply,
 	parseReply,
@@ -794,6 +795,77 @@ describe('makeCrosspoint / clearCrosspoint', () => {
 	})
 })
 
+describe('clearAllCrosspoints', () => {
+	function withRx(count: number) {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, rx: { count } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('4242', 'hex'),
+		})
+		return { self, send }
+	}
+
+	it('clears a whole device in a single packet', () => {
+		const { self, send } = withRx(8)
+		clearAllCrosspoints(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(1)
+	})
+
+	it('emits the byte layout the device accepts', () => {
+		const { self, send } = withRx(2)
+		clearAllCrosspoints(self, '10.0.0.5')
+
+		// protocol, length, counter, opcode 0x3014, then [count u32][channel u32...] and a trailing 0.
+		// The count's high half comes from makeCommand's two zero request-flag bytes.
+		expect((send.mock.calls[0][0] as Buffer).toString('hex')).toBe('272900154242301400000002000000010000000200')
+	})
+
+	it('splits a high channel count across packets rather than one huge datagram', () => {
+		const { self, send } = withRx(40)
+		clearAllCrosspoints(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(3) // 16 + 16 + 8
+
+		const channelsIn = (call: number) => {
+			const packet = send.mock.calls[call][0] as Buffer
+			// count is a u32 spanning offsets 8-11; its low half sits at 10
+			return packet.readUInt16BE(10)
+		}
+		expect([channelsIn(0), channelsIn(1), channelsIn(2)]).toEqual([16, 16, 8])
+	})
+
+	it('covers every channel exactly once across the batches', () => {
+		const { self, send } = withRx(40)
+		clearAllCrosspoints(self, '10.0.0.5')
+
+		const seen: number[] = []
+		for (const [packet] of send.mock.calls as [Buffer][]) {
+			const count = packet.readUInt16BE(10)
+			for (let i = 0; i < count; i++) seen.push(packet.readUInt32BE(12 + 4 * i))
+		}
+		expect(seen).toEqual(Array.from({ length: 40 }, (_, i) => i + 1))
+	})
+
+	it('sends nothing when the device has no known receive channels', () => {
+		const { self, send } = withRx(0)
+		clearAllCrosspoints(self, '10.0.0.5')
+		expect(send).not.toHaveBeenCalled()
+	})
+
+	it('resolves a device name as well as an IP', () => {
+		const { self, send } = withRx(4)
+		clearAllCrosspoints(self, 'Dev')
+		expect(send).toHaveBeenCalledTimes(1)
+	})
+
+	it('logs an error for an unknown device', () => {
+		const { self, send } = withRx(4)
+		clearAllCrosspoints(self, 'NoSuchDevice')
+		expect(send).not.toHaveBeenCalled()
+		expect(loggerSink).toHaveBeenCalledWith('api', 'error', expect.stringContaining('NoSuchDevice'))
+	})
+})
+
 describe('parseHeartbeatReply', () => {
 	it('marks the connection Ok on a valid packet (real capture)', () => {
 		const self = createMockInstance({ CONNECTED: false })
@@ -915,6 +987,49 @@ describe('parseReply (ARC) - malformed packet handling', () => {
 		const self = registered()
 		parseReply(self, reply, makeRinfo(IP, reply.length))
 		expect(self.devicesData[IP]?.rx?.[1]?.subscriptionStatus).toBe(10)
+	})
+})
+
+describe('parseReply (ARC) - channel count', () => {
+	const IP = '10.0.0.5'
+
+	/** A real 56-byte channel-count reply captured from NAM-262de4 (8 tx, 8 rx, unlocked). */
+	const REAL_COUNT_HEX =
+		'272900380001100000010ff90008000800000040004000200020000800010002000000000000000000000000000000000000000100000001'
+
+	function registered() {
+		return createMockInstance({ devicesData: { [IP]: { name: 'Dev', ports: { ARC: 4440 } } } })
+	}
+
+	it('reads tx and rx counts from a real reply', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.tx?.count).toBe(8)
+		expect(self.devicesData[IP]?.rx?.count).toBe(8)
+	})
+
+	it('reports an unlocked device as unlocked', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.locked).toBe(false)
+	})
+
+	it('reports a locked device as locked', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		reply.writeUInt16BE(1, 34) // flip the lock flag
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.locked).toBe(true)
+	})
+
+	it('leaves lock state undefined on a reply too short to carry the field', () => {
+		const self = registered()
+		const short = Buffer.from(REAL_COUNT_HEX, 'hex').subarray(0, 30)
+		short.writeUInt16BE(30, 2) // keep the declared length consistent with rinfo.size
+		expect(() => parseReply(self, short, makeRinfo(IP, short.length))).not.toThrow()
+		expect(self.devicesData[IP]?.locked).toBeUndefined()
 	})
 })
 

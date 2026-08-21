@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { object2choices, object2PartialChoices, array2choices, isSubscriptionConnected, DANTE_CONST } from './const.js'
+import {
+	object2choices,
+	object2PartialChoices,
+	array2choices,
+	isSubscriptionConnected,
+	validateDanteName,
+	DANTE_CONST,
+} from './const.js'
 
 describe('object2choices', () => {
 	it('converts an id-to-label map into a choices array', () => {
@@ -83,5 +90,43 @@ describe('isSubscriptionConnected', () => {
 
 	it('keeps the unverified legacy code accepted', () => {
 		expect(isSubscriptionConnected(DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED)).toBe(true)
+	})
+})
+
+describe('validateDanteName', () => {
+	it('accepts ordinary device names', () => {
+		expect(validateDanteName('NAM-262de4')).toBeUndefined()
+		expect(validateDanteName('Amp1')).toBeUndefined()
+	})
+
+	it('accepts an empty name, which the reset actions use to mean "factory default"', () => {
+		expect(validateDanteName('')).toBeUndefined()
+	})
+
+	it('rejects a name longer than 31 characters', () => {
+		expect(validateDanteName('a'.repeat(31))).toBeUndefined()
+		expect(validateDanteName('a'.repeat(32))).toMatch(/31 characters or fewer/)
+	})
+
+	it('rejects characters a device will not accept', () => {
+		expect(validateDanteName('My Device')).toMatch(/letters, digits and hyphens/)
+		expect(validateDanteName('amp!')).toBeDefined()
+		expect(validateDanteName('caf\u00e9')).toBeDefined() // non-ASCII would be mangled by Buffer.from(.., 'ascii')
+	})
+
+	it('rejects a leading or trailing hyphen', () => {
+		expect(validateDanteName('-amp')).toMatch(/start or end/)
+		expect(validateDanteName('amp-')).toMatch(/start or end/)
+		expect(validateDanteName('a-b')).toBeUndefined()
+	})
+
+	it('allows a colon only in channel names', () => {
+		expect(validateDanteName('CH1:Amp')).toBeDefined()
+		expect(validateDanteName('CH1:Amp', { allowColon: true })).toBeUndefined()
+	})
+
+	it('rejects a leading or trailing colon in channel names', () => {
+		expect(validateDanteName(':CH1', { allowColon: true })).toMatch(/start or end/)
+		expect(validateDanteName('CH1:', { allowColon: true })).toMatch(/start or end/)
 	})
 })

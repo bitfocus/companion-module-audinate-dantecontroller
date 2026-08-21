@@ -4,7 +4,7 @@ import dgram from 'node:dgram'
 import merge from './utils/merge.js'
 import { networkInterfaces } from 'node:os'
 import { InstanceStatus, Regex, createModuleLogger, type DropdownChoice } from '@companion-module/base'
-import { DANTE_CONST } from './const.js'
+import { DANTE_CONST, validateDanteName } from './const.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from './variables.js'
@@ -71,6 +71,8 @@ export interface MdnsResponsePacket {
 
 export interface DeviceData {
 	name?: string
+	/** True when the device is locked and will refuse configuration changes. */
+	locked?: boolean
 	ports?: Partial<Record<ServiceName, number>>
 	tx?: TxChannels
 	rx?: RxChannels
@@ -182,7 +184,11 @@ export function parseString(buffer: Buffer, startIndex: number): string | undefi
 
 /** Parses a channel-count-query reply into tx/rx channel counts. */
 function parseChannelCount(reply: Buffer): Partial<DeviceData> {
-	return { tx: { count: reply[13] }, rx: { count: reply[15] } }
+	// Offset 34 carries the device lock flag. A locked device silently ignores writes, so surfacing
+	// it turns "my button does nothing" into something the user can actually see. Guard the read:
+	// only longer replies carry the field.
+	const locked = reply.length >= 36 ? reply.readUInt16BE(34) !== 0 : undefined
+	return { tx: { count: reply[13] }, rx: { count: reply[15] }, locked }
 }
 
 /**
@@ -1445,6 +1451,11 @@ export function resetDeviceName(self: DanteInstance, ipaddress: string): void {
 
 /** Sets a device's name. */
 export function setDeviceName(self: DanteInstance, ipaddress: string, name: string): void {
+	const invalid = validateDanteName(name)
+	if (invalid) {
+		logger.error(`Device name '${name}' ${invalid}`)
+		return
+	}
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.setDeviceName, Buffer.from(name, 'ascii'))
 	sendCommand(self, commandBuffer, ipaddress)
 }
@@ -1457,6 +1468,12 @@ export function setChannelName(
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
 ): void {
+	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
+	const invalid = validateDanteName(channelName, { allowColon: true })
+	if (invalid) {
+		logger.error(`Channel name '${channelName}' ${invalid}`)
+		return
+	}
 	const channelNameBuffer = Buffer.from(channelName, 'ascii')
 	const channelNumberBuffer = intToBuffer(channelNumber)
 
@@ -1472,7 +1489,8 @@ export function setChannelName(
 		commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_CONTROL, commandArguments)
 	} else if (channelType === 'tx') {
 		const commandArguments = Buffer.concat([
-			Buffer.from('040100000', 'hex'),
+			// see the note in setTxChannelName - 4 bytes, matching the 0x0024 pointer below
+			Buffer.from('04010000', 'hex'),
 			channelNumberBuffer,
 			Buffer.from('0024', 'hex'),
 			Buffer.alloc(18),
@@ -1492,6 +1510,12 @@ export function setRxChannelName(
 	channelNumber: number,
 	channelName = '',
 ): void {
+	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
+	const invalid = validateDanteName(channelName, { allowColon: true })
+	if (invalid) {
+		logger.error(`Channel name '${channelName}' ${invalid}`)
+		return
+	}
 	const channelNameBuffer = Buffer.from(channelName, 'ascii')
 	const channelNumberBuffer = intToBuffer(channelNumber)
 
@@ -1513,11 +1537,20 @@ export function setTxChannelName(
 	channelNumber: number,
 	channelName = '',
 ): void {
+	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
+	const invalid = validateDanteName(channelName, { allowColon: true })
+	if (invalid) {
+		logger.error(`Channel name '${channelName}' ${invalid}`)
+		return
+	}
 	const channelNameBuffer = Buffer.from(channelName, 'ascii')
 	const channelNumberBuffer = intToBuffer(channelNumber)
 
 	const commandArguments = Buffer.concat([
-		Buffer.from('040100000', 'hex'),
+		// 4 bytes, and the width matters: it sets where the name string lands, which the 0x0024
+		// pointer below has to match (10 header + 4 + 2 + 2 + 18 = 36 = 0x24). This was written as
+		// the 9-character '040100000', which Node silently truncated to these same 4 bytes.
+		Buffer.from('04010000', 'hex'),
 		channelNumberBuffer,
 		Buffer.from('0024', 'hex'),
 		Buffer.alloc(18),
@@ -1546,6 +1579,53 @@ export function resetRxChannelName(self: DanteInstance, ipaddress: string, chann
 /** Clears the name of a tx channel on a device back to its default. */
 export function resetTxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
 	setTxChannelName(self, ipaddress, channelNumber)
+}
+
+/**
+ * Largest number of channels to unsubscribe in one command, so the packet stays comfortably inside
+ * a single datagram on a device with a high channel count.
+ */
+const MAX_UNSUBSCRIBE_PER_COMMAND = 16
+
+/**
+ * Clears every rx channel subscription on a device.
+ *
+ * Uses the subscription-remove opcode, whose payload is simply a channel count followed by the
+ * channel numbers - so a whole device clears in one packet rather than one per channel. Verified
+ * against hardware, including removing several channels in a single command.
+ *
+ * Note the framing: the payload is `[count u32][channel u32]...` with no leading pad, and
+ * `makeCommand`'s two zero request-flag bytes supply the high half of that first u32. Passing the
+ * count as a u16 here is what makes the bytes line up; widening it would shift the whole payload.
+ */
+export function clearAllCrosspoints(self: DanteInstance, destinationDevice: string): void {
+	// Check if destinationDevice is an IP or a name
+	const IP = RegExp(Regex.IP.slice(1, -1))
+	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
+
+	if (!ipaddress) {
+		logger.error("Can't find " + destinationDevice + ' IP address')
+		return
+	}
+
+	const rxCount = self.devicesData[ipaddress]?.rx?.count ?? 0
+	if (rxCount < 1) {
+		logger.warn(`${destinationDevice} has no known receive channels to clear`)
+		return
+	}
+
+	const channels = Array.from({ length: rxCount }, (_, index) => index + 1)
+	for (let offset = 0; offset < channels.length; offset += MAX_UNSUBSCRIBE_PER_COMMAND) {
+		const batch = channels.slice(offset, offset + MAX_UNSUBSCRIBE_PER_COMMAND)
+		const commandArguments = Buffer.concat([
+			intToBuffer(batch.length),
+			...batch.map((channel) => intToBuffer(channel, 4)),
+		])
+		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.subscriptionRemove, commandArguments)
+		sendCommand(self, commandBuffer, ipaddress)
+	}
+
+	logger.info(`Cleared all ${rxCount} receive channels on ${destinationDevice}`)
 }
 
 /** Subscribes a destination rx channel to a source tx channel, creating a Dante crosspoint. */

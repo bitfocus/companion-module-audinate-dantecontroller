@@ -20,6 +20,8 @@ export interface DanteDeviceVariables {
 	rx_names: string[]
 	/** Transmit channel names, indexed by channel number - 1. */
 	tx_names: string[]
+	/** True when the device is locked and refusing configuration changes. */
+	locked: boolean
 	/** Sample rate in Hz. */
 	sr: number
 	/** Latency in milliseconds. */
