@@ -60,8 +60,13 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		}
 
 		for (const socket of Object.values(this.sockets)) {
-			socket?.close()
+			try {
+				socket?.close()
+			} catch {
+				// already closed - nothing to do on teardown
+			}
 		}
+		this.sockets = {}
 
 		if (this.mdns) {
 			this.mdns.removeAllListeners()
