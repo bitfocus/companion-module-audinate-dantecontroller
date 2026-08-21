@@ -13,6 +13,13 @@ export type ModuleConfig = {
 	mac: string
 	interval: number
 	timeoutInterval: number
+	/**
+	 * Whether to publish a Companion variable per device property.
+	 *
+	 * When false the module still tracks every device property - the Device Property feedback reads
+	 * the same values - it simply does not create variables for them.
+	 */
+	variables: boolean
 	verbose: boolean
 }
 
@@ -161,6 +168,17 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		},
 
 		{
+			type: 'checkbox',
+			id: 'variables',
+			label: 'Create Module Variables',
+			tooltip:
+				'Publish a variable for every device property. Turn this off to keep the connection light ' +
+				'and read device properties through the Device Property feedback instead.',
+			width: 12,
+			default: true,
+		},
+
+		{
 			type: 'static-text',
 			id: 'info2',
 			label: 'Verbose Logging',
@@ -171,7 +189,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'checkbox',
 			id: 'verbose',
-			label: 'Enable Verbose Logging',
+			label: 'Verbose Logging',
 			width: 12,
 			default: false,
 		},

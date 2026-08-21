@@ -374,6 +374,10 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 				if ((currDevice.tx?.count ?? 0) > 0 && currDevice.tx?.count != self.devicesData[deviceIp]?.tx?.count) {
 					updateFlags.push('txCount')
 				}
+				// This reply also carries the channel counts and the lock flag, which are device
+				// properties in their own right - the rxCount/txCount flags above only fire on a change
+				// and only trigger follow-up queries, so without this `locked` never reached a variable.
+				updateFlags.push('counts')
 				break
 			}
 
@@ -416,6 +420,8 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 					break
 				case 'info':
 					scheduleCheckVariables(self, deviceIp, 'sr', 'latency')
+					// sample rate and latency are device properties a feedback can be reading
+					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'rx':
 					scheduleCheckVariables(self, deviceIp, 'rx', 'rx_names')
@@ -428,6 +434,10 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 					updateChannelChoices(self, deviceIp, 'tx')
 					// this device's transmit channel names changed - feedbacks using it as a source match on
 					// those names, so they need re-checking too
+					scheduleCheckFeedbacks(self, deviceIp)
+					break
+				case 'counts':
+					scheduleCheckVariables(self, deviceIp, 'rx', 'tx', 'locked')
 					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'rxCount':
@@ -659,6 +669,9 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		self.devicesData = merge(self.devicesData, deviceData)
 
 		scheduleCheckVariables(self, deviceIp)
+		// settings replies carry sample rate, pullup, encoding, output levels and model information -
+		// all of them device properties a feedback can be reading
+		scheduleCheckFeedbacks(self, deviceIp)
 
 		for (const flag of updateFlags) {
 			if (flag.slice(-7) == 'Options') {
@@ -705,6 +718,7 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 
 				self.devicesData = merge(self.devicesData, deviceData)
 				scheduleCheckVariables(self, deviceIp)
+				scheduleCheckFeedbacks(self, deviceIp)
 				refreshSettings(self, deviceIp)
 				break
 			}

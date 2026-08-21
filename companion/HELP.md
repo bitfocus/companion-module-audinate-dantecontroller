@@ -51,4 +51,5 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Feedbacks
 
-- Crosspoint Connected
+- Crosspoint Connected (_Boolean_)
+- Device Property (_Value_)

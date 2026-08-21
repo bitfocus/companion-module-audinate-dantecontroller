@@ -140,4 +140,22 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedFeedbacks: [],
 		}
 	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// Variables became optional. Existing connections were created when they were unconditional,
+		// so default them to on: turning it off is a deliberate choice, never something an upgrade
+		// should decide on a user's behalf.
+		const config = props.config
+		if (!config || config.variables !== undefined) {
+			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
+		}
+
+		return {
+			updatedConfig: { ...config, variables: true },
+			updatedActions: [],
+			updatedFeedbacks: [],
+		}
+	},
 ]

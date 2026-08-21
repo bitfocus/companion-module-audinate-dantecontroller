@@ -11,6 +11,7 @@ import { UpdateVariableDefinitions, CheckVariables } from '../variables.js'
 import { listNetworkInterfaces, findInterfaceForAddress } from '../config.js'
 import type DanteInstance from '../main.js'
 import type { DeviceData, RxChannelSource, TxChannel, RxChannel } from './types.js'
+import type { DanteDeviceVariables } from '../types.js'
 import { insertDeviceChoice } from './choices.js'
 
 const logger = createModuleLogger('api:devices')
@@ -27,6 +28,99 @@ export function getChannelSubscriptionName(
 }
 
 /** @returns True if the device has at least one rx (destination) channel. */
+/**
+ * The device properties exposed as module variables, and offered by the Device Property feedback.
+ *
+ * One list so the two cannot drift: every entry here is both a `<device>_<property>` variable and a
+ * selectable property on the feedback.
+ */
+export const DEVICE_PROPERTIES = [
+	'ip',
+	'locked',
+	'rx',
+	'tx',
+	'rx_names',
+	'tx_names',
+	'sr',
+	'latency',
+	'pullup',
+	'encoding',
+	'output_levels',
+	'model_name',
+	'product_version',
+] as const satisfies readonly (keyof DanteDeviceVariables)[]
+
+export type DeviceProperty = (typeof DEVICE_PROPERTIES)[number]
+
+/** Human-readable labels for the property picker. */
+export const DEVICE_PROPERTY_LABELS: Record<DeviceProperty, string> = {
+	ip: 'IP address',
+	locked: 'Locked',
+	rx: 'Receive channel count',
+	tx: 'Transmit channel count',
+	rx_names: 'Receive channel names',
+	tx_names: 'Transmit channel names',
+	sr: 'Sample rate',
+	latency: 'Latency (ms)',
+	pullup: 'Sample rate pullup',
+	encoding: 'Encoding',
+	output_levels: 'Output levels',
+	model_name: 'Model name',
+	product_version: 'Product version',
+}
+
+/** Channel names of one direction, indexed from 0, as the `_rx_names`/`_tx_names` variables hold them. */
+function channelNames(device: DeviceData, channelType: 'rx' | 'tx'): string[] {
+	const io = device[channelType]
+	const names: string[] = []
+	for (let i = 0; i < (io?.count ?? 0); i++) {
+		const channel = io?.[i + 1]
+		names[i] = (channelType === 'tx' ? getChannelSubscriptionName(channel) : channel?.name) ?? ''
+	}
+	return names
+}
+
+function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceProperty): unknown {
+	switch (property) {
+		case 'ip':
+			return ip
+		case 'locked':
+			return device.locked
+		case 'rx':
+		case 'tx':
+			return device[property]?.count
+		case 'rx_names':
+			return channelNames(device, 'rx')
+		case 'tx_names':
+			return channelNames(device, 'tx')
+		case 'model_name':
+			return device.modelName
+		case 'product_version':
+			return device.productVersionString
+				? device.productVersionString
+				: '' + device.productVersionMajor + '.' + device.productVersionMinor + '.' + device.productVersionPatch
+		default:
+			return device[property]
+	}
+}
+
+/**
+ * Reads one property of one device, in the form the corresponding module variable holds it.
+ *
+ * Shared by `CheckVariables` and the Device Property feedback, so a value can never be reported one
+ * way as a variable and another way as a feedback.
+ *
+ * The single cast is the boundary between a switch returning a union and a signature naming the
+ * exact type per property; every branch above is checked against `DanteDeviceVariables`.
+ */
+export function deviceProperty<Property extends DeviceProperty>(
+	device: DeviceData,
+	ip: string,
+	property: Property,
+): DanteDeviceVariables[Property] | undefined {
+	return computeDeviceProperty(device, ip, property) as DanteDeviceVariables[Property] | undefined
+}
+
 export function hasRxChannels(device: DeviceData | undefined): boolean {
 	return (device?.rx?.count ?? 0) > 0
 }

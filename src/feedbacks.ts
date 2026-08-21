@@ -3,6 +3,7 @@ import {
 	Regex,
 	type CompanionBooleanFeedbackDefinition,
 	type CompanionFeedbackDefinitions,
+	type CompanionValueFeedbackDefinition,
 	type SomeCompanionFeedbackInputField,
 } from '@companion-module/base'
 import {
@@ -16,6 +17,11 @@ import {
 	firstChoiceId,
 	getChannelSubscriptionName,
 	isSubscriptionConnected,
+	DEVICE_PROPERTIES,
+	DEVICE_PROPERTY_LABELS,
+	deviceProperty,
+	orPlaceholder,
+	type DeviceProperty,
 	resolveDeviceIp,
 	rxDeviceChoices,
 	trackFeedbackDevices,
@@ -37,9 +43,20 @@ type RoutingBgManualOptions = {
 	destinationDeviceId: string
 }
 
+type DevicePropertyOptions = {
+	device: string
+	property: string
+}
+
 export type FeedbackSchema = {
 	routing_bg: { type: 'boolean'; options: RoutingBgOptions }
 	routing_bg_manual: { type: 'boolean'; options: RoutingBgManualOptions }
+	device_property: { type: 'value'; options: DevicePropertyOptions }
+}
+
+/** True if a stored option value names a property this module knows. */
+function isDeviceProperty(value: string): value is DeviceProperty {
+	return (DEVICE_PROPERTIES as readonly string[]).includes(value)
 }
 
 function normalizeName(name: string | number | undefined | null): string {
@@ -255,9 +272,55 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 		},
 	}
 
+	const deviceProperties = orPlaceholder(self.devicesChoices, 'No devices found')
+	const devicePropertyFeedback: CompanionValueFeedbackDefinition<DevicePropertyOptions> = {
+		type: 'value',
+		name: 'Device Property',
+		description: 'The current value of one device property, the same value its module variable holds.',
+		options: [
+			{
+				type: 'dropdown',
+				label: 'Device',
+				id: 'device',
+				choices: deviceProperties,
+				default: firstChoiceId(deviceProperties, ''),
+				// as elsewhere: a device saved by address rather than by name must stay selectable
+				allowCustom: true,
+			},
+			{
+				type: 'dropdown',
+				label: 'Property',
+				id: 'property',
+				choices: DEVICE_PROPERTIES.map((property) => ({ id: property, label: DEVICE_PROPERTY_LABELS[property] })),
+				default: DEVICE_PROPERTIES[0],
+				// In expression mode the picker is gone, so the accepted values have to be written out.
+				// Generated from the same list the choices are, so it cannot fall out of step.
+				expressionDescription: `Must evaluate to one of: ${DEVICE_PROPERTIES.join(', ')}`,
+			},
+		],
+		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
+		callback: (feedback) => {
+			const opt = feedback.options
+			// Record which device this reads, so a change to it re-checks this feedback by id rather
+			// than re-evaluating every feedback of this type.
+			const ip = resolveDeviceIp(self, opt.device)
+			trackFeedbackDevices(self, feedback.id, [ip])
+
+			const device = ip !== undefined ? self.devicesData[ip] : undefined
+			if (ip === undefined || !device || !isDeviceProperty(opt.property)) {
+				// unknown device or a property this build does not have - report nothing rather than
+				// something misleading
+				return ''
+			}
+
+			return deviceProperty(device, ip, opt.property) ?? ''
+		},
+	}
+
 	const feedbacks: CompanionFeedbackDefinitions<FeedbackSchema> = {
 		routing_bg: routingBg,
 		routing_bg_manual: routingBgManual,
+		device_property: devicePropertyFeedback,
 	}
 
 	self.setFeedbackDefinitions(feedbacks)

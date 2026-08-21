@@ -1,5 +1,5 @@
 import { createModuleLogger, type CompanionVariableDefinitions } from '@companion-module/base'
-import { getChannelSubscriptionName } from './api/index.js'
+import { deviceProperty } from './api/index.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 
@@ -7,6 +7,14 @@ const logger = createModuleLogger('variables')
 
 /** Builds and registers the set of variable definitions for all known devices. */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
+	if (!self.config.variables) {
+		// Publish an empty set rather than simply returning, so turning the option off actually
+		// removes variables a previous run created. The schema makes `devices` a required key, which
+		// is why expressing "no variables at all" needs the cast.
+		self.setVariableDefinitions({} as CompanionVariableDefinitions<DanteVariableValues>)
+		return
+	}
+
 	const variables: CompanionVariableDefinitions<DanteVariableValues> = {
 		devices: { name: 'Dante Devices' },
 	}
@@ -59,6 +67,10 @@ export const ALL_VARIABLE_TYPES = [
  * @param variableTypes Which variable categories to refresh; defaults to all categories if none are given.
  */
 export function CheckVariables(self: DanteInstance, ipAddress?: string, ...variableTypes: string[]): void {
+	// Device properties are still tracked; they are just not published as variables. The Device
+	// Property feedback reads them through the same accessor either way.
+	if (!self.config.variables) return
+
 	const variableValues: Partial<DanteVariableValues> = { devices: [] }
 
 	if (!(variableTypes.length > 0)) {
@@ -78,62 +90,53 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 						case 'devices':
 							break
 
+						// Values come from `deviceProperty`, the same accessor the Device Property feedback
+						// reads, so a variable and a feedback can never disagree about a device.
 						case 'ip':
-							variableValues[`${deviceName}_ip`] = ip
+							variableValues[`${deviceName}_ip`] = deviceProperty(device, ip, 'ip')
 							break
 
 						case 'locked':
-							variableValues[`${deviceName}_locked`] = device.locked
+							variableValues[`${deviceName}_locked`] = deviceProperty(device, ip, 'locked')
 							break
 
 						case 'rx':
 						case 'tx':
-							variableValues[`${deviceName}_${variableType}`] = device[variableType]?.count
+							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 
 						case 'rx_names':
-						case 'tx_names': {
-							const channelType = variableType.slice(0, 2) as 'rx' | 'tx'
-							const channelArray: string[] = []
-							const ioObject = device[channelType]
-							for (let i = 0; i < (ioObject?.count ?? 0); i++) {
-								const channel = ioObject?.[i + 1]
-								channelArray[i] = (channelType == 'tx' ? getChannelSubscriptionName(channel) : channel?.name) ?? ''
-							}
-							variableValues[`${deviceName}_${variableType}`] = channelArray
+						case 'tx_names':
+							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
-						}
 
 						// Split rather than grouped: each of these has its own value type in the schema, so a
 						// single indexed write would be checked against the union of them all.
 						case 'sr':
-							variableValues[`${deviceName}_sr`] = device.sr
+							variableValues[`${deviceName}_sr`] = deviceProperty(device, ip, 'sr')
 							break
 
 						case 'latency':
-							variableValues[`${deviceName}_latency`] = device.latency
+							variableValues[`${deviceName}_latency`] = deviceProperty(device, ip, 'latency')
 							break
 
 						case 'encoding':
-							variableValues[`${deviceName}_encoding`] = device.encoding
+							variableValues[`${deviceName}_encoding`] = deviceProperty(device, ip, 'encoding')
 							break
 
 						case 'pullup':
-							variableValues[`${deviceName}_pullup`] = device.pullup
+							variableValues[`${deviceName}_pullup`] = deviceProperty(device, ip, 'pullup')
 							break
 
 						case 'output_levels':
-							variableValues[`${deviceName}_output_levels`] = device.output_levels
+							variableValues[`${deviceName}_output_levels`] = deviceProperty(device, ip, 'output_levels')
 							break
 
-						case 'manf': {
-							variableValues[`${deviceName}_model_name`] = device.modelName
-							const versionString = device.productVersionString
-								? device.productVersionString
-								: '' + device.productVersionMajor + '.' + device.productVersionMinor + '.' + device.productVersionPatch
-							variableValues[`${deviceName}_product_version`] = versionString
+						// one update category, two variables
+						case 'manf':
+							variableValues[`${deviceName}_model_name`] = deviceProperty(device, ip, 'model_name')
+							variableValues[`${deviceName}_product_version`] = deviceProperty(device, ip, 'product_version')
 							break
-						}
 					}
 				}
 			}

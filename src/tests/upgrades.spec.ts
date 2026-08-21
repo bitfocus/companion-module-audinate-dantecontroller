@@ -15,10 +15,12 @@ import type { ModuleConfig } from '../config.js'
  */
 const CLEAR_ALL_SCRIPT_INDEX = 2
 const CONFIG_RENAME_SCRIPT_INDEX = 3
-const EXPECTED_SCRIPT_COUNT = 4
+const VARIABLES_OPTION_SCRIPT_INDEX = 4
+const EXPECTED_SCRIPT_COUNT = 5
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
+const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -240,6 +242,52 @@ describe('ip to mac config rename', () => {
 
 	it('does not touch actions or feedbacks', () => {
 		const result = runConfig({ ip: '10.1.1.40' })
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
+	})
+})
+
+describe('create-variables option default', () => {
+	function runConfig(config: Record<string, unknown> | null) {
+		return defaultVariablesOption(
+			{} as CompanionUpgradeContext<ModuleConfig>,
+			{
+				config,
+				secrets: null,
+				actions: [],
+				feedbacks: [],
+			} as unknown as CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+		)
+	}
+
+	it('turns variables on for a connection created before the option existed', () => {
+		// they were unconditional then, so anything else would silently remove a user's variables
+		const result = runConfig({ mac: '', interval: 1000, timeoutInterval: 3000, verbose: false })
+		expect(result.updatedConfig).toMatchObject({ variables: true })
+	})
+
+	it('carries the other settings through untouched', () => {
+		const result = runConfig({ mac: 'aa|1.2.3.4', interval: 250, timeoutInterval: 9000, verbose: true })
+		expect(result.updatedConfig).toEqual({
+			mac: 'aa|1.2.3.4',
+			interval: 250,
+			timeoutInterval: 9000,
+			verbose: true,
+			variables: true,
+		})
+	})
+
+	it('leaves a connection that has already chosen alone', () => {
+		expect(runConfig({ variables: false })?.updatedConfig).toBeNull()
+		expect(runConfig({ variables: true })?.updatedConfig).toBeNull()
+	})
+
+	it('handles a connection with no config at all', () => {
+		expect(runConfig(null)?.updatedConfig).toBeNull()
+	})
+
+	it('does not touch actions or feedbacks', () => {
+		const result = runConfig({ mac: '' })
 		expect(result.updatedActions).toEqual([])
 		expect(result.updatedFeedbacks).toEqual([])
 	})

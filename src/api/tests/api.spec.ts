@@ -99,7 +99,7 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		CONNECTED: false,
 		INTERVAL: null,
 		mdns: { query: vi.fn(), on: vi.fn(), removeAllListeners: vi.fn(), destroy: vi.fn() },
-		config: { ip: '', interval: 1000, timeoutInterval: 3000, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		log: vi.fn(),
 		updateStatus: vi.fn(),
 		checkFeedbacks: vi.fn(),
