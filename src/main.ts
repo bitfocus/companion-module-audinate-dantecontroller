@@ -34,9 +34,10 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 
 	devicesData: DevicesData = {}
 	sockets: DanteSockets = {}
-	devicesChoices: DropdownChoice[] = []
-	txChannelsChoices: Record<string, DropdownChoice[]> = {}
-	rxChannelsChoices: Record<string, DropdownChoice[]> = {}
+	/** Discovered devices, keyed by name - see `resolveDeviceIp`. */
+	devicesChoices: DropdownChoice<string>[] = []
+	txChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
+	rxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	txFriendlyNameRefreshCounter = 0
 
 	counter: Buffer = Buffer.alloc(2)

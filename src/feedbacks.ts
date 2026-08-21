@@ -81,6 +81,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					id: `destinationChannel_${device.name}`,
 					choices: channelChoices(self, device, 'rx'),
 					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+					// allowCustom keeps actions still holding it parseable rather than failing outright
+					allowCustom: true,
 					isVisibleExpression: `$(options:destinationDevice) == '${device.name}'`,
 				})),
 			{
@@ -101,6 +104,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					id: `sourceChannel_${device.name}`,
 					choices: channelChoices(self, device, 'tx'),
 					default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+					// allowCustom keeps actions still holding it parseable rather than failing outright
+					allowCustom: true,
 					isVisibleExpression: `$(options:sourceDevice) == '${device.name}'`,
 				})),
 		],

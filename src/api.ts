@@ -3,7 +3,7 @@ import { debounce, throttle, type DebouncedFunc } from 'es-toolkit/compat'
 import dgram from 'node:dgram'
 import merge from './utils/merge.js'
 import { InstanceStatus, Regex, createModuleLogger, type DropdownChoice } from '@companion-module/base'
-import { DANTE_CONST, validateDanteName } from './const.js'
+import { DANTE_CONST, validateDanteName, codeLabel } from './const.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from './variables.js'
@@ -902,7 +902,10 @@ export function initConnection(self: DanteInstance): void {
  * to the first device overall can select one the filter removed, leaving the control showing a
  * value that is not selectable and an action pointed at a device that cannot perform it.
  */
-export function firstChoiceId<T extends string | number>(choices: DropdownChoice[], fallback: T): string | number {
+export function firstChoiceId<Id extends string | number, Fallback extends string | number>(
+	choices: DropdownChoice<Id>[],
+	fallback: Fallback,
+): Id | Fallback {
 	return choices[0]?.id ?? fallback
 }
 
@@ -914,11 +917,11 @@ export function firstChoiceId<T extends string | number>(choices: DropdownChoice
  * raw number (`48000`, matching the choice id) while encoding and pullup are kept as their decoded
  * label (`PCM24`, `NONE`), the choice ids for those being the underlying codes.
  */
-export function currentChoiceId<T extends string | number>(
-	choices: DropdownChoice[],
+export function currentChoiceId<Id extends string | number, Fallback extends string | number>(
+	choices: DropdownChoice<Id>[],
 	current: string | number | undefined,
-	fallback: T,
-): string | number {
+	fallback: Fallback,
+): Id | Fallback {
 	if (current !== undefined) {
 		const wanted = String(current)
 		// Two passes, so an exact id match always wins over a label match on an earlier entry - the
@@ -939,12 +942,12 @@ export function currentChoiceId<T extends string | number>(
  * list can therefore never be shipped, so an explanatory placeholder stands in until real choices
  * exist. Running an action left on the placeholder fails the usual way, with an unknown-device log.
  */
-export function orPlaceholder(choices: DropdownChoice[], label: string): DropdownChoice[] {
+export function orPlaceholder(choices: DropdownChoice<string>[], label: string): DropdownChoice<string>[] {
 	return choices.length > 0 ? choices : [{ id: '', label }]
 }
 
 /** Devices that have receive channels, as dropdown choices. */
-export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
+export function rxDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
 	return orPlaceholder(
 		self.devicesChoices.filter((choice) => hasRxChannels(deviceByIdentifier(self, String(choice.id)))),
 		'No devices with receive channels found',
@@ -952,7 +955,7 @@ export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
 }
 
 /** Devices that have transmit channels, as dropdown choices. */
-export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
+export function txDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
 	return orPlaceholder(
 		self.devicesChoices.filter((choice) => hasTxChannels(deviceByIdentifier(self, String(choice.id)))),
 		'No devices with transmit channels found',
@@ -967,7 +970,7 @@ export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
  * list below the picker is empty, which looks like the module failed rather than like a device that
  * has nothing to configure.
  */
-export function audioDeviceChoices(self: DanteInstance): DropdownChoice[] {
+export function audioDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
 	return orPlaceholder(
 		self.devicesChoices.filter((choice) => {
 			const device = deviceByIdentifier(self, String(choice.id))
@@ -992,7 +995,7 @@ export function audioDeviceChoices(self: DanteInstance): DropdownChoice[] {
 export function devicesWithOptions(
 	self: DanteInstance,
 	options: 'srOptions' | 'pullupOptions' | 'encodingOptions',
-): DropdownChoice[] {
+): DropdownChoice<string>[] {
 	return orPlaceholder(
 		self.devicesChoices.filter((choice) => (deviceByIdentifier(self, String(choice.id))?.[options]?.length ?? 0) > 0),
 		'No devices report this setting',
@@ -1000,7 +1003,11 @@ export function devicesWithOptions(
 }
 
 /** A device's rx or tx channel choices, or an empty list if it has none yet. */
-export function channelChoices(self: DanteInstance, device: DeviceData, channelType: 'rx' | 'tx'): DropdownChoice[] {
+export function channelChoices(
+	self: DanteInstance,
+	device: DeviceData,
+	channelType: 'rx' | 'tx',
+): DropdownChoice<number>[] {
 	if (!device.name) return []
 	const byDevice = channelType === 'rx' ? self.rxChannelsChoices : self.txChannelsChoices
 	return byDevice[device.name] ?? []
@@ -1107,30 +1114,25 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 	const ioObject = self.devicesData[deviceIp][channelType]
 	if (ioObject === undefined) return
 
-	const channelChoice: DropdownChoice[] = [{ id: 0, label: 'None' }]
+	// No "None" entry: every action taking a channel acts on that one channel, so a "none" selection
+	// only means "do nothing". It also sorted first, which made it the default - so a freshly added
+	// action silently did nothing until a channel was picked.
+	const channelChoice: DropdownChoice<number>[] = []
 	const choicesByDevice = channelType === 'tx' ? self.txChannelsChoices : self.rxChannelsChoices
-	if (channelType == 'tx') {
-		for (let i = 1; i <= (ioObject.count ?? 0); i++) {
-			const channelName = getChannelSubscriptionName(ioObject[i]) ?? ''
-			channelChoice[i] = { id: i, label: channelName }
-		}
-	} else {
-		for (let i = 1; i <= (ioObject.count ?? 0); i++) {
-			const channelName = ioObject[i]?.name ?? ''
-			channelChoice.push({ id: i, label: channelName })
-		}
+	for (let i = 1; i <= (ioObject.count ?? 0); i++) {
+		const channelName =
+			channelType === 'tx' ? (getChannelSubscriptionName(ioObject[i]) ?? '') : (ioObject[i]?.name ?? '')
+		channelChoice.push({ id: i, label: channelName })
 	}
-	if (!choicesByDevice[deviceName]) {
+
+	const existing = choicesByDevice[deviceName]
+	const changed =
+		!existing ||
+		existing.length !== channelChoice.length ||
+		channelChoice.some((choice, index) => choice.label !== existing[index]?.label)
+	if (changed) {
 		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
-	} else {
-		for (let i = 1; i < channelChoice.length; i++) {
-			if (!choicesByDevice[deviceName][i] || channelChoice[i].label != choicesByDevice[deviceName][i].label) {
-				choicesByDevice[deviceName] = channelChoice
-				scheduleUpdateData(self)
-				break
-			}
-		}
 	}
 }
 
@@ -1416,7 +1418,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_STATUS: {
 				// get encoding setting
 				const enc = bufferToInt(payload, 12, 4)
-				const encValue = DANTE_CONST.ENCODINGS[enc] ?? enc
+				const encValue = codeLabel(DANTE_CONST.ENCODINGS, enc) ?? enc
 				currDevice.encoding = encValue
 				// mark flag to update variables
 				if (self.devicesData[deviceIp]?.encoding != encValue) {
@@ -1473,7 +1475,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS: {
 				// get pullup setting
 				const pullup = bufferToInt(payload, 12, 4)
-				currDevice.pullup = DANTE_CONST.PULLUPS[pullup]
+				currDevice.pullup = codeLabel(DANTE_CONST.PULLUPS, pullup)
 				currDevice.pullup_string = parseString(payload, 32)
 				// mark flag to update variables
 				if (self.devicesData[deviceIp]?.pullup != currDevice.pullup) {
@@ -1505,7 +1507,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 				currDevice.output_levels = []
 				for (let i = 0; i < channelCount; i++) {
 					const level = bufferToInt(payload, 24 + i * 4, 4)
-					currDevice.output_levels.push(DANTE_CONST.LEVELS[level] ?? level)
+					currDevice.output_levels.push(codeLabel(DANTE_CONST.LEVELS, level) ?? level)
 					// mark flag to update variables
 					if (
 						!updateFlags.includes('output_levels') &&
@@ -1729,6 +1731,19 @@ export function setDeviceName(self: DanteInstance, ipaddress: string, name: stri
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
+/**
+ * Rejects a channel number that identifies no channel.
+ *
+ * Channel dropdowns used to offer a "None" entry with the id 0, and it was the default - so an
+ * action saved without picking a channel still carries it. Nothing can be done with channel 0, and
+ * failing loudly beats the silent no-op it used to be.
+ */
+function hasChannel(channelNumber: number, what: string): boolean {
+	if (channelNumber > 0) return true
+	logger.error(`No channel selected for ${what} - pick one in the action's Channel dropdown`)
+	return false
+}
+
 /** Sets the name of an rx or tx channel on a device. */
 export function setChannelName(
 	self: DanteInstance,
@@ -1737,6 +1752,8 @@ export function setChannelName(
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
 ): void {
+	if (!hasChannel(channelNumber, 'channel rename')) return
+
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
 	const invalid = validateDanteName(channelName, { allowColon: true })
 	if (invalid) {
@@ -1779,6 +1796,8 @@ export function setRxChannelName(
 	channelNumber: number,
 	channelName = '',
 ): void {
+	if (!hasChannel(channelNumber, 'channel rename')) return
+
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
 	const invalid = validateDanteName(channelName, { allowColon: true })
 	if (invalid) {
@@ -1806,6 +1825,8 @@ export function setTxChannelName(
 	channelNumber: number,
 	channelName = '',
 ): void {
+	if (!hasChannel(channelNumber, 'channel rename')) return
+
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
 	const invalid = validateDanteName(channelName, { allowColon: true })
 	if (invalid) {
@@ -1949,6 +1970,8 @@ export function clearCrosspoint(
 ): void {
 	const destinationChannelNumber =
 		findRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel
+
+	if (!hasChannel(Number(destinationChannelNumber), 'clear crosspoint')) return
 
 	// Check if destinationDevice is an IP or a name
 	const IP = RegExp(Regex.IP.slice(1, -1))
@@ -2156,6 +2179,8 @@ export function setLevel(
 	channelNumber: number,
 	levelSetting: number,
 ): void {
+	if (!hasChannel(channelNumber, 'output level')) return
+
 	const commandArguments = Buffer.concat([
 		Buffer.from('00000000', 'hex'),
 		Buffer.from('00010001', 'hex'),

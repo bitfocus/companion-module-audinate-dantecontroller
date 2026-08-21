@@ -37,6 +37,7 @@ import {
 	macForDevice,
 	resolveDeviceIp,
 	deviceByIdentifier,
+	updateChannelChoices,
 	getRxChannels,
 	getTxChannels,
 	firstChoiceId,
@@ -972,6 +973,69 @@ describe('resolveDeviceIp / deviceByIdentifier', () => {
 		send.mockClear()
 		sendCommand(self, buf, '10.0.0.5')
 		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
+	})
+})
+
+describe('updateChannelChoices', () => {
+	function withChannels(channelType: 'rx' | 'tx', count: number) {
+		const io: Record<string | number, unknown> = { count }
+		for (let i = 1; i <= count; i++) io[i] = { number: i, name: `Ch ${i}` }
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: {}, [channelType]: io } },
+		})
+	}
+
+	it('offers one entry per channel, numbered from 1', () => {
+		const self = withChannels('rx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toEqual([
+			{ id: 1, label: 'Ch 1' },
+			{ id: 2, label: 'Ch 2' },
+			{ id: 3, label: 'Ch 3' },
+		])
+	})
+
+	it('offers no "None" entry, which would only mean "do nothing"', () => {
+		const self = withChannels('rx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev.map((choice) => choice.id)).not.toContain(0)
+	})
+
+	it('so the first choice is a real channel rather than a no-op default', () => {
+		const self = withChannels('tx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'tx')
+		expect(self.txChannelsChoices.Dev[0].id).toBe(1)
+	})
+
+	it('builds tx choices without leaving a gap where "None" used to sit', () => {
+		// the tx branch assigned by index, which relied on the None entry occupying index 0
+		const self = withChannels('tx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'tx')
+		expect(self.txChannelsChoices.Dev).toHaveLength(3)
+		expect(self.txChannelsChoices.Dev.every((choice) => choice !== undefined)).toBe(true)
+	})
+
+	it('rebuilds when a channel is renamed', () => {
+		const self = withChannels('rx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		;(self.devicesData['10.0.0.5'].rx as Record<number, { name: string }>)[2].name = 'Renamed'
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev[1].label).toBe('Renamed')
+	})
+
+	it('rebuilds when the channel count shrinks', () => {
+		const self = withChannels('rx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		const io = self.devicesData['10.0.0.5'].rx as { count: number }
+		io.count = 1
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toHaveLength(1)
+	})
+
+	it('produces an empty list for a device with no channels', () => {
+		const self = withChannels('rx', 0)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toEqual([])
 	})
 })
 

@@ -335,6 +335,52 @@ describe('no dropdown is emitted without choices', () => {
 	})
 })
 
+describe('the "None" channel choice', () => {
+	function options(actionId: string) {
+		const self = mockInstance()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		return (definitions[actionId]?.options ?? []) as OptionLike[]
+	}
+
+	function channelOptions(actionId: string, prefix: string) {
+		return options(actionId).filter((option) => option.id.startsWith(prefix))
+	}
+
+	it('is offered on the source channel, where it means "clear the crosspoint"', () => {
+		const sources = channelOptions('makeCrosspointDropDown', 'sourceChannel_')
+		expect(sources.length).toBeGreaterThan(0)
+		for (const option of sources) {
+			expect(option.choices?.[0]).toEqual({ id: 0, label: 'None (clear the crosspoint)' })
+		}
+	})
+
+	it('still defaults to a real channel rather than to None', () => {
+		for (const option of channelOptions('makeCrosspointDropDown', 'sourceChannel_')) {
+			expect(option.default).toBe(1)
+		}
+	})
+
+	it('is not offered on the destination channel, where it would only mean "do nothing"', () => {
+		for (const option of channelOptions('makeCrosspointDropDown', 'destinationChannel_')) {
+			expect(option.choices?.map((choice) => choice.id)).not.toContain(0)
+		}
+	})
+
+	it.each(['setRxChannelName', 'setTxChannelName', 'clearCrosspointDropDown', 'setOutputLevel'])(
+		'is not offered by %s',
+		(actionId) => {
+			const channels = options(actionId).filter(
+				(option) => option.type === 'dropdown' && /^(channel|destinationChannel)_/.test(option.id),
+			)
+			expect(channels.length).toBeGreaterThan(0)
+			for (const option of channels) {
+				expect(option.choices?.map((choice) => choice.id)).not.toContain(0)
+			}
+		},
+	)
+})
+
 describe('dropdown defaults', () => {
 	it('every action dropdown defaults to one of its own choices', () => {
 		const self = mockInstance()

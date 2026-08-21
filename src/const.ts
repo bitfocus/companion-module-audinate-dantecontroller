@@ -1,5 +1,12 @@
 import type { DropdownChoice } from '@companion-module/base'
 
+/** Encoding codes this module knows how to label. */
+export type EncodingCode = 16 | 24 | 32
+/** Output level codes this module knows how to label. */
+export type LevelCode = 1 | 2 | 3 | 4 | 5
+/** Sample rate pullup codes this module knows how to label. */
+export type PullupCode = 0 | 1 | 2 | 3 | 4
+
 export const DANTE_CONST = {
 	SERVICES: {
 		ARC: '_netaudio-arc._udp.local',
@@ -177,47 +184,62 @@ export const DANTE_CONST = {
 		CONNECTED_UNVERIFIED: 0x000e,
 	},
 
+	/** Encoding codes, as reported by the device. Keys are the codes themselves. */
 	ENCODINGS: {
 		16: 'PCM16',
 		24: 'PCM24',
 		32: 'PCM32',
-	} as Record<number, string>,
+	} as Record<EncodingCode, string>,
 
+	/** Output level codes. */
 	LEVELS: {
 		1: '+18dBu',
 		2: '+4dBu',
 		3: '+0dBu',
 		4: '0dBV',
 		5: '-10dBV',
-	} as Record<number, string>,
+	} as Record<LevelCode, string>,
 
+	/** Sample rate pullup codes. */
 	PULLUPS: {
 		0: 'NONE',
 		1: '+4,1667%',
 		2: '+0.1%',
 		3: '-0.1%',
 		4: '-4%',
-	} as Record<number, string>,
+	} as Record<PullupCode, string>,
 } as const
 
+/**
+ * The label for a code a device reported, or undefined when it is not one this module knows.
+ *
+ * The code maps are keyed by literal unions so their choice ids are precise, which means a raw
+ * number off the wire cannot index them directly - a device is free to report a code we have no
+ * label for.
+ */
+export function codeLabel<Key extends string | number>(map: Record<Key, string>, code: number): string | undefined {
+	return Object.prototype.hasOwnProperty.call(map, code) ? map[code as Key] : undefined
+}
+
 /** Converts a plain `{ id: label }` map into a Companion dropdown `choices` array. */
-export function object2choices(obj: Record<string | number, string>): DropdownChoice[] {
-	const choices: DropdownChoice[] = []
-	for (const [id, label] of Object.entries(obj)) {
-		choices.push({ id: id, label: label })
+export function object2choices<Key extends string | number>(obj: Record<Key, string>): DropdownChoice<`${Key}`>[] {
+	const choices: DropdownChoice<`${Key}`>[] = []
+	// Object.entries stringifies numeric keys, so the ids are the string form of the code
+	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
+		choices.push({ id, label })
 	}
 	return choices
 }
 
 /** Like {@link object2choices}, but only includes entries whose id is present in `optionsArray`. */
-export function object2PartialChoices(
-	obj: Record<string | number, string>,
+export function object2PartialChoices<Key extends string | number>(
+	obj: Record<Key, string>,
 	optionsArray: (string | number)[] | undefined,
-): DropdownChoice[] {
-	const choices: DropdownChoice[] = []
-	for (const [id, label] of Object.entries(obj)) {
+): DropdownChoice<`${Key}`>[] {
+	const choices: DropdownChoice<`${Key}`>[] = []
+	for (const [id, label] of Object.entries(obj) as [`${Key}`, string][]) {
 		if (optionsArray?.includes(id)) {
-			choices.push({ id: id, label: label })
+			choices.push({ id, label })
 		}
 	}
 	return choices
@@ -229,7 +251,7 @@ export function object2PartialChoices(
 export function array2choices<T extends string | number>(
 	array: T[] | undefined,
 	mapping?: (value: T) => string,
-): DropdownChoice[] | undefined {
+): DropdownChoice<T>[] | undefined {
 	return array?.map((e) => {
 		return { id: e, label: mapping ? mapping(e) : String(e) }
 	})

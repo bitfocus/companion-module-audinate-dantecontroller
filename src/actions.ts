@@ -216,6 +216,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `destinationChannel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:destinationDevice) == '${device.name}'`,
 					})),
 				{
@@ -235,8 +238,12 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Source channel',
 						id: `sourceChannel_${device.name}`,
-						choices: channelChoices(self, device, 'tx'),
+						// The one channel dropdown where "None" means something: routing a destination to
+						// no source is how a crosspoint is cleared, so this action can both make and break
+						// a route. The default is still the first real channel, not None.
+						choices: [{ id: 0, label: 'None (clear the crosspoint)' }, ...channelChoices(self, device, 'tx')],
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						allowCustom: true,
 						isVisibleExpression: `$(options:sourceDevice) == '${device.name}'`,
 					})),
 			],
@@ -267,6 +274,14 @@ export function UpdateActions(self: DanteInstance): void {
 			callback: async (action) => {
 				const opt = action.options
 				const sourceChannelNumber = opt[`sourceChannel_${opt.sourceDevice}`]
+				const destinationChannel = opt[`destinationChannel_${opt.destinationDevice}`]
+
+				// No source means no route: clear the destination rather than subscribing it to nothing.
+				if (!sourceChannelNumber) {
+					clearCrosspoint(self, opt.destinationDevice, destinationChannel)
+					return
+				}
+
 				const sourceChannel =
 					deviceByIdentifier(self, opt.sourceDevice)?.tx?.[sourceChannelNumber] ??
 					findTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
@@ -276,7 +291,7 @@ export function UpdateActions(self: DanteInstance): void {
 					opt.destinationDevice,
 					sourceChannelName,
 					deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
-					opt[`destinationChannel_${opt.destinationDevice}`],
+					destinationChannel,
 				)
 			},
 		},
@@ -350,6 +365,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `destinationChannel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:destinationDevice) == '${device.name}' && !$(options:clearAll)`,
 					})),
 			],
@@ -450,6 +468,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:device) == '${device.name}'`,
 					})),
 				{
@@ -494,6 +515,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:device) == '${device.name}'`,
 					})),
 			],
@@ -525,6 +549,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'tx'),
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:device) == '${device.name}'`,
 					})),
 				{
@@ -570,6 +597,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'tx'),
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:device) == '${device.name}'`,
 					})),
 			],
@@ -802,6 +832,9 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
+						// allowCustom keeps actions still holding it parseable rather than failing outright
+						allowCustom: true,
 						isVisibleExpression: `$(options:device) == '${device.name}'`,
 					})),
 				{
