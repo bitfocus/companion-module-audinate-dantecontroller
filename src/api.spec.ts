@@ -34,6 +34,9 @@ import {
 	makeCrosspoint,
 	clearCrosspoint,
 	clearAllCrosspoints,
+	macForDevice,
+	resolveDeviceIp,
+	deviceByIdentifier,
 	getRxChannels,
 	getTxChannels,
 	firstChoiceId,
@@ -353,7 +356,8 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		const self = createMockInstance()
 		registerDevice(self, '10.0.0.5', 'MyDevice')
 		expect(self.devicesData['10.0.0.5']?.name).toBe('MyDevice')
-		expect(self.devicesChoices).toContainEqual({ id: '10.0.0.5', label: 'MyDevice' })
+		// choices are keyed by device name, which survives an address change
+		expect(self.devicesChoices).toContainEqual({ id: 'MyDevice', label: 'MyDevice' })
 	})
 
 	it('arms an offline-destroy timeout when self.timeout > 0', () => {
@@ -428,7 +432,8 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		// the timer armed before the re-init must not reach across and delete the live entry
 		vi.advanceTimersByTime(2999)
 		expect(self.devicesData['10.0.0.5']).toBeDefined()
-		expect(self.devicesChoices).toContainEqual({ id: '10.0.0.5', label: 'MyDevice' })
+		// choices are keyed by device name, which survives an address change
+		expect(self.devicesChoices).toContainEqual({ id: 'MyDevice', label: 'MyDevice' })
 	})
 })
 
@@ -854,6 +859,119 @@ describe('channel query paging', () => {
 		getRxChannels(self, '10.0.0.5')
 		const starts = send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))
 		expect(starts).toEqual(Array.from({ length: 32 }, (_, i) => i * 16 + 1))
+	})
+})
+
+describe('macForDevice', () => {
+	const CHOSEN = Buffer.from('aaaaaaaaaaaa', 'hex')
+
+	it('uses the card recorded for that device', () => {
+		const self = createMockInstance({
+			mac: CHOSEN,
+			devicesData: { '10.0.0.5': { name: 'A', interfaceMac: 'bbbbbbbbbbbb' } },
+		})
+		expect(macForDevice(self, '10.0.0.5').toString('hex')).toBe('bbbbbbbbbbbb')
+	})
+
+	it('falls back to the instance card when the device has none recorded', () => {
+		const self = createMockInstance({ mac: CHOSEN, devicesData: { '10.0.0.5': { name: 'A' } } })
+		expect(macForDevice(self, '10.0.0.5')).toBe(CHOSEN)
+	})
+
+	it('falls back for a device that is not registered', () => {
+		const self = createMockInstance({ mac: CHOSEN, devicesData: {} })
+		expect(macForDevice(self, '10.0.0.9')).toBe(CHOSEN)
+	})
+
+	it('gives each device its own card when they are on different networks', () => {
+		// the case a single instance-wide address could not express: two Dante networks, where one
+		// address is wrong for whichever device did not happen to answer mDNS first
+		const self = createMockInstance({
+			mac: Buffer.alloc(6),
+			devicesData: {
+				'10.0.0.5': { name: 'A', interfaceMac: 'aaaaaaaaaaaa' },
+				'192.168.7.9': { name: 'B', interfaceMac: 'cccccccccccc' },
+			},
+		})
+		expect(macForDevice(self, '10.0.0.5').toString('hex')).toBe('aaaaaaaaaaaa')
+		expect(macForDevice(self, '192.168.7.9').toString('hex')).toBe('cccccccccccc')
+	})
+
+	it('embeds the per-device card in the settings command itself', () => {
+		const self = createMockInstance({
+			mac: Buffer.alloc(6),
+			counter: Buffer.from('0001', 'hex'),
+			devicesData: {
+				'10.0.0.5': { name: 'A', interfaceMac: 'aaaaaaaaaaaa' },
+				'192.168.7.9': { name: 'B', interfaceMac: 'cccccccccccc' },
+			},
+		})
+		const a = makeSettingCommand(self, 0x0081, Buffer.alloc(4), '10.0.0.5')
+		const b = makeSettingCommand(self, 0x0081, Buffer.alloc(4), '192.168.7.9')
+
+		// the hardware address sits at offset 8, after protocol, length, counter and the start block
+		expect(a.subarray(8, 14).toString('hex')).toBe('aaaaaaaaaaaa')
+		expect(b.subarray(8, 14).toString('hex')).toBe('cccccccccccc')
+	})
+
+	it('uses the instance card when no device is named', () => {
+		const self = createMockInstance({ mac: CHOSEN, counter: Buffer.from('0001', 'hex'), devicesData: {} })
+		expect(makeSettingCommand(self, 0x0081, Buffer.alloc(4)).subarray(8, 14)).toEqual(CHOSEN)
+	})
+})
+
+describe('resolveDeviceIp / deviceByIdentifier', () => {
+	function twoDevices() {
+		return createMockInstance({
+			devicesData: {
+				'10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } },
+				'10.0.0.6': { name: 'DeviceB', ports: { ARC: 4440 } },
+			},
+		})
+	}
+
+	it('resolves a device name, which is what dropdowns now store', () => {
+		expect(resolveDeviceIp(twoDevices(), 'DeviceB')).toBe('10.0.0.6')
+	})
+
+	it('resolves an address, which is what actions saved earlier store', () => {
+		expect(resolveDeviceIp(twoDevices(), '10.0.0.5')).toBe('10.0.0.5')
+	})
+
+	it('returns undefined for an unknown device and for an empty identifier', () => {
+		expect(resolveDeviceIp(twoDevices(), 'Nope')).toBeUndefined()
+		expect(resolveDeviceIp(twoDevices(), '')).toBeUndefined()
+	})
+
+	it('follows a device to its new address after renumbering', () => {
+		// the point of keying by name: link-local and DHCP reassign addresses, names persist
+		const renumbered = createMockInstance({
+			devicesData: { '169.254.99.1': { name: 'DeviceA', ports: { ARC: 4440 } } },
+		})
+		expect(resolveDeviceIp(renumbered, 'DeviceA')).toBe('169.254.99.1')
+	})
+
+	it('deviceByIdentifier returns the same record either way', () => {
+		const self = twoDevices()
+		expect(deviceByIdentifier(self, 'DeviceA')).toBe(self.devicesData['10.0.0.5'])
+		expect(deviceByIdentifier(self, '10.0.0.5')).toBe(self.devicesData['10.0.0.5'])
+		expect(deviceByIdentifier(self, 'Nope')).toBeUndefined()
+	})
+
+	it('sendCommand accepts a name as well as an address', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		const buf = Buffer.from('aabb', 'hex')
+
+		sendCommand(self, buf, 'DeviceA')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
+
+		send.mockClear()
+		sendCommand(self, buf, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
 	})
 })
 

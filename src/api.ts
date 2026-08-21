@@ -2,12 +2,17 @@ import multidns from 'multicast-dns'
 import { debounce, throttle, type DebouncedFunc } from 'es-toolkit/compat'
 import dgram from 'node:dgram'
 import merge from './utils/merge.js'
-import { networkInterfaces } from 'node:os'
 import { InstanceStatus, Regex, createModuleLogger, type DropdownChoice } from '@companion-module/base'
 import { DANTE_CONST, validateDanteName } from './const.js'
 import { UpdateActions } from './actions.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from './variables.js'
+import {
+	listNetworkInterfaces,
+	resolveConfiguredInterface,
+	findInterfaceForAddress,
+	encodeInterfaceId,
+} from './config.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('api')
@@ -73,6 +78,11 @@ export interface DeviceData {
 	name?: string
 	/** True when the device is locked and will refuse configuration changes. */
 	locked?: boolean
+	/**
+	 * Hex MAC of the local card that reaches this device, when the card is chosen automatically.
+	 * Undefined when a card was configured explicitly, in which case that one is used throughout.
+	 */
+	interfaceMac?: string
 	ports?: Partial<Record<ServiceName, number>>
 	tx?: TxChannels
 	rx?: RxChannels
@@ -510,23 +520,32 @@ function joinMulticastGroup(
 	socket: dgram.Socket,
 	group: string,
 	service: ServiceName,
-	interfaceIp: string | undefined,
+	interfaceIps: string[],
 ): boolean {
-	try {
-		if (interfaceIp) {
+	// Joining without naming an interface leaves the choice to the routing table, which picks the
+	// default route - not necessarily the card the Dante devices are on. When the card is chosen
+	// automatically we therefore join on every interface explicitly rather than letting one be
+	// chosen for us.
+	let joined = 0
+	for (const interfaceIp of interfaceIps) {
+		try {
 			socket.addMembership(group, interfaceIp)
-		} else {
-			socket.addMembership(group)
+			joined++
+		} catch (error) {
+			// Not every interface can carry multicast, and with several of them one failing is
+			// expected rather than fatal - only report if none of them worked.
+			logger.debug(
+				`${service} socket : could not join ${group} on ${interfaceIp} : ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
 		}
-		return true
-	} catch (error) {
-		logger.error(
-			`${service} socket : failed to join multicast group ${group} : ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		)
-		return false
 	}
+
+	if (joined === 0) {
+		logger.error(`${service} socket : failed to join multicast group ${group} on any interface`)
+	}
+	return joined > 0
 }
 
 /**
@@ -629,21 +648,28 @@ export function initConnection(self: DanteInstance): void {
 	self.rxChannelsChoices = {}
 	self.txFriendlyNameRefreshCounter = 0
 
-	// get available Ips
-	const nets = networkInterfaces()
-	const availableIps: string[] = []
-	const availableMacs: Record<string, string> = {}
-	for (const name of Object.keys(nets)) {
-		for (const net of nets[name] ?? []) {
-			// Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses.
-			// @types/node still types `family` as the literal 'IPv4'/'IPv6', but on Node 18+ it is
-			// actually reported as the number 4 or 6 at runtime - check against whichever this Node returns.
-			const familyV4Value: string | number = typeof net.family === 'string' ? 'IPv4' : 4
-			if ((net.family as unknown as string | number) === familyV4Value && !net.internal) {
-				availableIps.push(net.address)
-				availableMacs[net.address] = net.mac
-			}
-		}
+	// Resolve the configured network card. Matching by MAC as well as by address means a link-local
+	// or DHCP card whose address changed since the config was saved is still found.
+	const available = listNetworkInterfaces()
+	const resolved = resolveConfiguredInterface(self.config.mac, available)
+	const boundAddress = resolved?.nic.address
+	// Which interfaces to join multicast groups on: the chosen one, or all of them when automatic.
+	const multicastInterfaces = boundAddress !== undefined ? [boundAddress] : available.map((nic) => nic.address)
+	if (resolved?.matchedBy === 'mac') {
+		logger.info(
+			`Configured interface has a new address: ${resolved.nic.name} is now ${resolved.nic.address}. ` +
+				`Matched it by hardware address instead.`,
+		)
+	}
+
+	// An address alone cannot be upgraded to a hardware address statically - the card that held it
+	// is only knowable while the address is still assigned. So rewrite the stored value here, the
+	// first time a legacy configuration connects successfully, and keep it current afterwards.
+	if (resolved && self.config.mac !== encodeInterfaceId(resolved.nic)) {
+		const canonical = encodeInterfaceId(resolved.nic)
+		logger.info(`Recording network card ${resolved.nic.name} as '${canonical}' so it survives address changes`)
+		self.config = { ...self.config, mac: canonical }
+		self.saveConfig(self.config)
 	}
 
 	// create communication sockets
@@ -678,25 +704,30 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	// bind socket to random port of configured ip address if available
-	if (availableIps.includes(self.config.ip)) {
+	if (boundAddress !== undefined) {
 		self.configError = null
-		arcSocket.bind(0, self.config.ip)
-		self.mac = Buffer.from((availableMacs[self.config.ip] ?? '').replaceAll(':', ''), 'hex')
+		arcSocket.bind(0, boundAddress)
+		self.mac = Buffer.from((resolved?.nic.mac ?? '').replaceAll(':', ''), 'hex')
+	} else if (!self.config.mac) {
+		// Automatic is a deliberate choice, not a misconfiguration. Bind the wildcard address; the
+		// hardware address each command carries is resolved per device as devices are discovered.
+		self.configError = null
+		self.mac = Buffer.alloc(6)
+		arcSocket.bind()
 	} else {
 		// Every settings command embeds this MAC, and devices ignore commands carrying a zero one.
 		// Discovery and routing still work, but sample rate, encoding, pullup, output level and the
 		// model/manufacturer variables all stay empty - which looks like the module is broken rather
 		// than misconfigured. Say so explicitly, here and in the instance status.
-		self.configError = self.config.ip
-			? `Configured interface ${self.config.ip} is not available on this machine`
-			: 'No network interface selected'
+		self.configError = 'Configured network card is not available on this machine'
+		const availableLabels = available.map((nic) => `${nic.name} (${nic.address})`).join(', ')
 		logger.error(
 			`${self.configError}. Device settings (sample rate, encoding, pullup, output level, model info) ` +
-				`will not be readable until this is fixed. Available: ${availableIps.join(', ') || 'none'}`,
+				`will not be readable until this is fixed. Available: ${availableLabels || 'none'}`,
 		)
 		self.log(
 			'error',
-			`${self.configError} - device settings will be unavailable. Set 'IP and network card' in the connection config.`,
+			`${self.configError} - device settings will be unavailable. Set 'Network card' in the connection config.`,
 		)
 		arcSocket.bind()
 		self.mac = Buffer.from('000000000000', 'hex')
@@ -726,12 +757,7 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	settingSocket.on('listening', () => {
-		const joined = joinMulticastGroup(
-			settingSocket,
-			DANTE_CONST.MULTICAST_IP.INFO,
-			'SETTINGS',
-			availableIps.includes(self.config.ip) ? self.config.ip : undefined,
-		)
+		const joined = joinMulticastGroup(settingSocket, DANTE_CONST.MULTICAST_IP.INFO, 'SETTINGS', multicastInterfaces)
 		// without the group membership the socket is bound but deaf, so don't report it as active
 		self.activeConnections.SETTINGS = joined
 		checkConnections(self)
@@ -772,8 +798,8 @@ export function initConnection(self: DanteInstance): void {
 		checkConnections(self)
 	})
 
-	if (availableIps.includes(self.config.ip)) {
-		cmcSocket.bind({ address: self.config.ip })
+	if (boundAddress !== undefined) {
+		cmcSocket.bind({ address: boundAddress })
 	} else {
 		cmcSocket.bind()
 	}
@@ -806,7 +832,7 @@ export function initConnection(self: DanteInstance): void {
 			heartbeatSocket,
 			DANTE_CONST.MULTICAST_IP.HEARTBEAT,
 			'HEARTBEAT',
-			availableIps.includes(self.config.ip) ? self.config.ip : undefined,
+			multicastInterfaces,
 		)
 		// see the SETTINGS socket above - no membership means no traffic
 		self.activeConnections.HEARTBEAT = joined
@@ -818,12 +844,12 @@ export function initConnection(self: DanteInstance): void {
 
 	setupInterval(self)
 
-	if (availableIps.includes(self.config.ip)) {
+	if (boundAddress !== undefined) {
 		// `multicast-dns` binds its socket to `bind ?? interface` - passing only `interface` binds
 		// to that specific unicast address, which (like our own sockets above) can silently drop
 		// incoming multicast-addressed replies on macOS/BSD. Bind the socket to the wildcard address
 		// explicitly, while still scoping multicast group membership to the chosen interface.
-		self.mdns = multidns({ interface: self.config.ip, bind: '0.0.0.0' })
+		self.mdns = multidns({ interface: boundAddress, bind: '0.0.0.0' })
 	} else {
 		self.mdns = multidns()
 	}
@@ -905,14 +931,32 @@ export function currentChoiceId<T extends string | number>(
 	return firstChoiceId(choices, fallback)
 }
 
+/**
+ * Guarantees a dropdown has something to offer.
+ *
+ * Companion validates a dropdown's value against its choices and refuses to parse the entire
+ * action when no choice matches - which breaks the action outright, its learn included. An empty
+ * list can therefore never be shipped, so an explanatory placeholder stands in until real choices
+ * exist. Running an action left on the placeholder fails the usual way, with an unknown-device log.
+ */
+export function orPlaceholder(choices: DropdownChoice[], label: string): DropdownChoice[] {
+	return choices.length > 0 ? choices : [{ id: '', label }]
+}
+
 /** Devices that have receive channels, as dropdown choices. */
 export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
-	return self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id]))
+	return orPlaceholder(
+		self.devicesChoices.filter((choice) => hasRxChannels(deviceByIdentifier(self, String(choice.id)))),
+		'No devices with receive channels found',
+	)
 }
 
 /** Devices that have transmit channels, as dropdown choices. */
 export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
-	return self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id]))
+	return orPlaceholder(
+		self.devicesChoices.filter((choice) => hasTxChannels(deviceByIdentifier(self, String(choice.id)))),
+		'No devices with transmit channels found',
+	)
 }
 
 /**
@@ -924,10 +968,13 @@ export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
  * has nothing to configure.
  */
 export function audioDeviceChoices(self: DanteInstance): DropdownChoice[] {
-	return self.devicesChoices.filter((choice) => {
-		const device = self.devicesData[choice.id]
-		return hasRxChannels(device) || hasTxChannels(device)
-	})
+	return orPlaceholder(
+		self.devicesChoices.filter((choice) => {
+			const device = deviceByIdentifier(self, String(choice.id))
+			return hasRxChannels(device) || hasTxChannels(device)
+		}),
+		'No devices with audio channels found',
+	)
 }
 
 /**
@@ -946,7 +993,10 @@ export function devicesWithOptions(
 	self: DanteInstance,
 	options: 'srOptions' | 'pullupOptions' | 'encodingOptions',
 ): DropdownChoice[] {
-	return self.devicesChoices.filter((choice) => (self.devicesData[choice.id]?.[options]?.length ?? 0) > 0)
+	return orPlaceholder(
+		self.devicesChoices.filter((choice) => (deviceByIdentifier(self, String(choice.id))?.[options]?.length ?? 0) > 0),
+		'No devices report this setting',
+	)
 }
 
 /** A device's rx or tx channel choices, or an empty list if it has none yet. */
@@ -991,11 +1041,30 @@ export function getRxChannelSource(
 	}
 }
 
+/**
+ * Resolves a device identifier to its address.
+ *
+ * Accepts either a device name or an IP. Dropdowns store the name, because a device's address is
+ * reassigned by DHCP and link-local autoconfiguration while its name is chosen by the user and
+ * persists - but actions saved before that store an address, and those keep working through here.
+ */
+export function resolveDeviceIp(self: DanteInstance, identifier: string): string | undefined {
+	if (!identifier) return undefined
+	if (self.devicesData[identifier]) return identifier
+	return findDeviceIpByName(self, identifier)
+}
+
+/** The device record behind an identifier, which may be a name or an IP. */
+export function deviceByIdentifier(self: DanteInstance, identifier: string): DeviceData | undefined {
+	const ip = resolveDeviceIp(self, identifier)
+	return ip !== undefined ? self.devicesData[ip] : undefined
+}
+
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */
 export function insertDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
 	logger.info(`INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)
 
-	self.devicesChoices.push({ id: deviceIp, label: deviceName })
+	self.devicesChoices.push({ id: deviceName, label: deviceName })
 	self.devicesChoices.sort((deviceA, deviceB) => {
 		return deviceA.label.localeCompare(deviceB.label)
 	})
@@ -1008,17 +1077,18 @@ export function insertDeviceChoice(self: DanteInstance, deviceIp: string, device
 export function updateDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
 	logger.info('UPDATE DEVICE NAME : ' + deviceName)
 
-	for (const device of self.devicesChoices) {
-		if (device.id == deviceIp) {
-			if (device.label != deviceName) {
-				device.label = deviceName
-				self.devicesChoices.sort((deviceA, deviceB) => {
-					return deviceA.label.localeCompare(deviceB.label)
-				})
-				scheduleUpdateData(self)
-			}
-			break
-		}
+	// Choices are keyed by name, so a rename replaces the entry rather than relabelling it. Actions
+	// referring to the old name keep their stored value - `allowCustom` lets it stay selected - but
+	// will not resolve until they are pointed at the new name.
+	const previousName = self.devicesData[deviceIp]?.name
+	const existing = self.devicesChoices.findIndex((choice) => choice.id === (previousName ?? deviceIp))
+	if (existing !== -1) {
+		self.devicesChoices.splice(existing, 1)
+	}
+	if (!self.devicesChoices.some((choice) => choice.id === deviceName)) {
+		self.devicesChoices.push({ id: deviceName, label: deviceName })
+		self.devicesChoices.sort((deviceA, deviceB) => deviceA.label.localeCompare(deviceB.label))
+		scheduleUpdateData(self)
 	}
 }
 
@@ -1065,8 +1135,44 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 }
 
 /** Registers a newly-seen Dante device in `devicesData`, arming an offline timeout if configured. */
+/**
+ * Records which card reaches `deviceIp`, when the network card is being chosen automatically.
+ *
+ * Settings and CMC commands embed a hardware address and devices ignore commands carrying an
+ * all-zero one, so without this an automatic configuration would discover and route but never read
+ * a device's settings. Resolved per device rather than once for the instance: with Dante devices on
+ * more than one network a single address is wrong for all but one of them, and which one it
+ * happened to be depended on mDNS reply ordering.
+ *
+ * Stored as a hex string rather than a Buffer because device records pass through `merge()`.
+ */
+function resolveDeviceInterface(self: DanteInstance, deviceIp: string): string | undefined {
+	// An explicitly chosen card is honoured for every device.
+	if (self.config.mac) return undefined
+
+	const nic = findInterfaceForAddress(listNetworkInterfaces(), deviceIp)
+	if (!nic?.mac) return undefined
+
+	logger.info(`Reaching ${deviceIp} via ${nic.name} (${nic.address})`)
+	return nic.mac.replaceAll(':', '')
+}
+
+/**
+ * The hardware address to put in a command addressed to `deviceIp`.
+ *
+ * Falls back to the instance address, which is the explicitly configured card when there is one.
+ */
+export function macForDevice(self: DanteInstance, device: string): Buffer {
+	const deviceMac = deviceByIdentifier(self, device)?.interfaceMac
+	return deviceMac ? Buffer.from(deviceMac, 'hex') : self.mac
+}
+
 export function registerDevice(self: DanteInstance, deviceIp: string, deviceName: string): DeviceData {
-	self.devicesData[deviceIp] = { name: deviceName, ports: {} }
+	self.devicesData[deviceIp] = {
+		name: deviceName,
+		ports: {},
+		interfaceMac: resolveDeviceInterface(self, deviceIp),
+	}
 	const currDevice = self.devicesData[deviceIp]
 
 	// timeout function to destroy reference if device is offline too long
@@ -1097,11 +1203,11 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 		delete self.txChannelsChoices[deviceName]
 	}
 
-	// delete device choice
-	for (let i = 0; i < self.devicesChoices.length; i++) {
-		if (self.devicesChoices[i].id == deviceIp) {
-			self.devicesChoices.splice(i, 1)
-			break
+	// delete device choice, which is keyed by name
+	if (deviceName !== undefined) {
+		const index = self.devicesChoices.findIndex((choice) => choice.id === deviceName)
+		if (index !== -1) {
+			self.devicesChoices.splice(index, 1)
 		}
 	}
 
@@ -1537,11 +1643,14 @@ export function sendCommand(
 		logger.debug(`${service} : Tx (${command.length}): ${command.toString('hex')}`)
 	}
 
-	const port = forcePort ?? self.devicesData[host]?.ports?.[service]
+	// `host` may be a device name or an address: dropdowns store the name, older saved actions and
+	// internal callers pass the address. Resolving here covers every command path at once.
+	const ipaddress = resolveDeviceIp(self, host) ?? host
+	const port = forcePort ?? self.devicesData[ipaddress]?.ports?.[service]
 	if (port) {
-		self.sockets[service]?.send(command, 0, command.length, port, host)
+		self.sockets[service]?.send(command, 0, command.length, port, ipaddress)
 	} else {
-		const deviceId = self.devicesData[host]?.name ?? host
+		const deviceId = self.devicesData[ipaddress]?.name ?? host
 		logger.error(`Undefined port for service ${service} for device ${deviceId}`)
 		return
 	}
@@ -1576,6 +1685,8 @@ export function makeSettingCommand(
 	self: DanteInstance,
 	commandType: number,
 	commandArguments: Buffer = Buffer.alloc(2),
+	/** The device this command is addressed to, so the right local card's address is embedded. */
+	ipaddress?: string,
 ): Buffer {
 	const commandLength = intToBuffer(commandArguments.length + 28)
 	const startBlock = Buffer.from('2a84', 'hex')
@@ -1585,7 +1696,7 @@ export function makeSettingCommand(
 		commandLength,
 		self.counter,
 		startBlock,
-		self.mac,
+		ipaddress === undefined ? self.mac : macForDevice(self, ipaddress),
 		Buffer.from('0000', 'hex'),
 		DANTE_CONST.AUDINATE_BUFFER,
 		intToBuffer(commandType),
@@ -1974,6 +2085,7 @@ export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_CONTROL,
 		commandArguments,
+		ipaddress,
 	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
@@ -1996,6 +2108,7 @@ export function setPullup(self: DanteInstance, ipaddress: string, pullup: number
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL,
 		commandArguments,
+		ipaddress,
 	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
@@ -2008,6 +2121,7 @@ export function getPullup(self: DanteInstance, ipaddress: string): void {
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_SAMPLE_RATE_PULLUP_CONTROL,
 		commandArguments,
+		ipaddress,
 	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
@@ -2020,7 +2134,12 @@ export function setEncoding(self: DanteInstance, ipaddress: string, encoding: nu
 	const flag = intToBuffer(encoding > 0 ? 1 : 0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(encoding, 4)])
 
-	const commandBuffer = makeSettingCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL, commandArguments)
+	const commandBuffer = makeSettingCommand(
+		self,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_ENCODING_CONTROL,
+		commandArguments,
+		ipaddress,
+	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
 
@@ -2046,13 +2165,23 @@ export function setLevel(
 		intToBuffer(levelSetting, 4),
 	])
 
-	const commandBuffer = makeSettingCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, commandArguments)
+	const commandBuffer = makeSettingCommand(
+		self,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL,
+		commandArguments,
+		ipaddress,
+	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
 
 /** Queries a device's current output levels. */
 export function getLevel(self: DanteInstance, ipaddress: string): void {
-	const commandBuffer = makeSettingCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL, intToBuffer(0, 4))
+	const commandBuffer = makeSettingCommand(
+		self,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL,
+		intToBuffer(0, 4),
+		ipaddress,
+	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
 
@@ -2062,13 +2191,19 @@ export function getManfVersion(self: DanteInstance, ipaddress: string): void {
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_MANF_VERSIONS_QUERY,
 		intToBuffer(0, 4),
+		ipaddress,
 	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
 
 /** Queries a device's Dante firmware/product version info. */
 export function getVersion(self: DanteInstance, ipaddress: string): void {
-	const commandBuffer = makeSettingCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_VERSIONS_QUERY, intToBuffer(0, 4))
+	const commandBuffer = makeSettingCommand(
+		self,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_VERSIONS_QUERY,
+		intToBuffer(0, 4),
+		ipaddress,
+	)
 	sendCommand(self, commandBuffer, ipaddress, 'SETTINGS')
 }
 
@@ -2081,7 +2216,7 @@ export function getSettingsPort(self: DanteInstance, ipaddress: string): void {
 		intToBuffer(0x1001),
 		intToBuffer(0),
 		intToBuffer(0x3520),
-		self.mac,
+		macForDevice(self, ipaddress),
 		intToBuffer(0x0000),
 	])
 

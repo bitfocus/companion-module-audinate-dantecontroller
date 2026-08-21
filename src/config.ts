@@ -2,16 +2,34 @@ import { networkInterfaces } from 'node:os'
 import type { DropdownChoice, SomeCompanionConfigField } from '@companion-module/base'
 
 export type ModuleConfig = {
-	ip: string
+	/**
+	 * The chosen network card, as `mac|address`.
+	 *
+	 * Named for the hardware address because that is what identifies the card across reboots and
+	 * lease changes. Empty means automatic, resolved per device. Configurations saved before this held a bare
+	 * IPv4 address; those still resolve, and are rewritten to the `mac|address` form on first
+	 * connect - see `resolveConfiguredInterface`.
+	 */
+	mac: string
 	interval: number
 	timeoutInterval: number
 	verbose: boolean
 }
 
-export function GetConfigFields(): SomeCompanionConfigField[] {
-	// get network cards
+/** One IPv4 address on one network card. */
+export interface NetworkInterfaceInfo {
+	/** Interface name, e.g. `en8`. */
+	name: string
+	address: string
+	/** Lower-case, colon-separated. May be all zeroes on some virtual interfaces. */
+	mac: string
+	netmask: string
+}
+
+/** Every external IPv4 address on this machine, with the card it belongs to. */
+export function listNetworkInterfaces(): NetworkInterfaceInfo[] {
+	const found: NetworkInterfaceInfo[] = []
 	const nets = networkInterfaces()
-	const nics: Record<string, string[]> = {}
 	for (const name of Object.keys(nets)) {
 		for (const net of nets[name] ?? []) {
 			// Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses.
@@ -19,19 +37,80 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			// actually reported as the number 4 or 6 at runtime - check against whichever this Node returns.
 			const familyV4Value: string | number = typeof net.family === 'string' ? 'IPv4' : 4
 			if ((net.family as unknown as string | number) === familyV4Value && !net.internal) {
-				if (!nics[name]) {
-					nics[name] = []
-				}
-				nics[name].push(net.address)
+				found.push({
+					name,
+					address: net.address,
+					mac: (net.mac ?? '').toLowerCase(),
+					netmask: net.netmask ?? '',
+				})
 			}
 		}
 	}
+	return found
+}
 
-	const nicChoices: DropdownChoice[] = [{ id: '', label: 'All' }]
-	for (const [name, ips] of Object.entries(nics)) {
-		for (const ip of ips) {
-			nicChoices.push({ id: ip, label: name + ' : ' + ip })
-		}
+/** A MAC that identifies no real card, and so cannot be used to find one again. */
+function isUsableMac(mac: string): boolean {
+	return mac !== '' && mac !== '00:00:00:00:00:00'
+}
+
+/**
+ * The config value stored for a chosen network card.
+ *
+ * An address alone is not a stable identity: a link-local or DHCP card gets a different one after
+ * a reboot or lease change, and the module then cannot bind. The MAC survives that, so it is
+ * stored alongside the address and used to find the card again when the address has moved. The
+ * address is kept as well, so a card carrying several addresses still resolves to the chosen one.
+ */
+export function encodeInterfaceId(nic: NetworkInterfaceInfo): string {
+	return isUsableMac(nic.mac) ? `${nic.mac}|${nic.address}` : nic.address
+}
+
+export interface ResolvedInterface {
+	nic: NetworkInterfaceInfo
+	/**
+	 * `address` - the stored address is still present.
+	 * `mac` - the address moved and the card was found by its MAC instead.
+	 */
+	matchedBy: 'address' | 'mac'
+}
+
+/**
+ * Finds the configured network card among those currently present.
+ *
+ * Accepts both the `mac|address` form and a bare address, so configurations saved before the MAC
+ * was recorded keep working. Returns undefined for an empty value, which means "all interfaces".
+ */
+export function resolveConfiguredInterface(
+	configValue: string,
+	available: NetworkInterfaceInfo[],
+): ResolvedInterface | undefined {
+	if (!configValue) return undefined
+
+	const separator = configValue.indexOf('|')
+	const mac = separator === -1 ? '' : configValue.slice(0, separator).toLowerCase()
+	const address = separator === -1 ? configValue : configValue.slice(separator + 1)
+
+	// Prefer the exact address: on a card with several addresses it is the one that was chosen.
+	const byAddress = available.find((nic) => nic.address === address)
+	if (byAddress) return { nic: byAddress, matchedBy: 'address' }
+
+	// The address moved. Find the same card by MAC and use whatever address it holds now.
+	if (isUsableMac(mac)) {
+		const byMac = available.find((nic) => nic.mac === mac)
+		if (byMac) return { nic: byMac, matchedBy: 'mac' }
+	}
+
+	return undefined
+}
+
+export function GetConfigFields(): SomeCompanionConfigField[] {
+	// "Automatic" rather than "All": the module listens on every interface for discovery, but a
+	// command to a device is sent carrying the address of the one card that reaches it. Nothing acts
+	// on all interfaces at once, so naming it that way invited the wrong expectation.
+	const nicChoices: DropdownChoice<string>[] = [{ id: '', label: 'Automatic (detect per device)' }]
+	for (const nic of listNetworkInterfaces()) {
+		nicChoices.push({ id: encodeInterfaceId(nic), label: `${nic.name} : ${nic.address}` })
 	}
 
 	return [
@@ -45,9 +124,12 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 
 		{
 			type: 'dropdown',
-			label: 'IP and network card',
-			id: 'ip',
-			tooltip: 'Choose network card and IP address bound to Dante Controller.',
+			label: 'Network card',
+			id: 'mac',
+			tooltip:
+				'Choose the network card bound to Dante Controller, or leave on Automatic to use whichever ' +
+				'card reaches each device. A chosen card is remembered by its MAC address, so the ' +
+				'connection keeps working if its IP changes (link-local or DHCP).',
 			width: 12,
 			choices: nicChoices,
 			default: nicChoices[0]?.id ?? '',
@@ -92,4 +174,40 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			default: false,
 		},
 	]
+}
+
+/** An IPv4 dotted-quad as a 32-bit number, or undefined if it is not one. */
+function toUint32(address: string): number | undefined {
+	const parts = address.split('.')
+	if (parts.length !== 4) return undefined
+
+	let value = 0
+	for (const part of parts) {
+		const octet = Number(part)
+		if (!Number.isInteger(octet) || octet < 0 || octet > 255) return undefined
+		value = (value << 8) | octet
+	}
+	return value >>> 0
+}
+
+/**
+ * The network card whose subnet contains `address`.
+ *
+ * Used when the card is chosen automatically rather than explicitly: a command still needs one
+ * card's hardware address for its settings commands, and the card that can actually reach a
+ * discovered device is the right one. Returns undefined if no card's subnet matches.
+ */
+export function findInterfaceForAddress(
+	available: NetworkInterfaceInfo[],
+	address: string,
+): NetworkInterfaceInfo | undefined {
+	const target = toUint32(address)
+	if (target === undefined) return undefined
+
+	return available.find((nic) => {
+		const mask = toUint32(nic.netmask)
+		const own = toUint32(nic.address)
+		if (mask === undefined || own === undefined || mask === 0) return false
+		return (own & mask) >>> 0 === (target & mask) >>> 0
+	})
 }

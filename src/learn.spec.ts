@@ -144,7 +144,7 @@ describe('makeCrosspointDropDown learn', () => {
 				destinationDevice: B,
 				[`destinationChannel_${B}`]: 2,
 			}),
-		).toEqual({ sourceDevice: A, [`sourceChannel_${A}`]: 3 })
+		).toEqual({ sourceDevice: 'DeviceA', sourceChannel_DeviceA: 3 })
 	})
 
 	it('returns only the source fields', async () => {
@@ -153,7 +153,7 @@ describe('makeCrosspointDropDown learn', () => {
 			[`destinationChannel_${B}`]: 2,
 			sourceDevice: 'stale',
 		})
-		expect(Object.keys(learnt).sort()).toEqual([`sourceChannel_${A}`, 'sourceDevice'].sort())
+		expect(Object.keys(learnt).sort()).toEqual(['sourceChannel_DeviceA', 'sourceDevice'].sort())
 	})
 
 	it('declines when the destination channel is unrouted', async () => {
@@ -196,8 +196,8 @@ describe('settings learn', () => {
 	})
 
 	it('setSampleRate learns into the selected device its own option key', async () => {
-		expect(await learn('setSampleRate', { device: A })).toEqual({ [`sr_${A}`]: '48000' })
-		expect(await learn('setSampleRate', { device: B })).toEqual({ [`sr_${B}`]: '96000' })
+		expect(await learn('setSampleRate', { device: 'DeviceA' })).toEqual({ sr_DeviceA: '48000' })
+		expect(await learn('setSampleRate', { device: 'DeviceB' })).toEqual({ sr_DeviceB: '96000' })
 	})
 
 	it('setSampleRate declines when the current rate is not one of the offered options', async () => {
@@ -208,7 +208,7 @@ describe('settings learn', () => {
 
 	it('setPullup learns the code behind the reported label', async () => {
 		// device reports '+0.1%', whose code in DANTE_CONST.PULLUPS is 2
-		expect(await learn('setPullup', { device: A })).toEqual({ [`pullup_${A}`]: '2' })
+		expect(await learn('setPullup', { device: 'DeviceA' })).toEqual({ pullup_DeviceA: '2' })
 	})
 
 	it('setPullup declines for a device that does not support pullup', async () => {
@@ -233,10 +233,14 @@ describe('learnt values are selectable', () => {
 	 * strings here, while the underlying protocol values are numbers.
 	 */
 	const cases: [string, Record<string, unknown>, string][] = [
-		['setSampleRate', { device: A }, `sr_${A}`],
-		['setPullup', { device: A }, `pullup_${A}`],
-		['setOutputLevel', { device: A, [`channel_${A}`]: 1 }, 'level'],
-		['makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, `sourceChannel_${A}`],
+		['setSampleRate', { device: 'DeviceA' }, 'sr_DeviceA'],
+		['setPullup', { device: 'DeviceA' }, 'pullup_DeviceA'],
+		['setOutputLevel', { device: 'DeviceA', channel_DeviceA: 1 }, 'level'],
+		[
+			'makeCrosspointDropDown',
+			{ destinationDevice: 'DeviceB', destinationChannel_DeviceB: 2 },
+			'sourceChannel_DeviceA',
+		],
 	]
 
 	it.each(cases)('%s learns a value its dropdown can select', async (actionId, options, optionId) => {
@@ -261,8 +265,8 @@ describe('the 2.0 contract', () => {
 		['setRxChannelName', { device: A, [`channel_${A}`]: 1 }, ['newName']],
 		['setTxChannelName', { device: A, [`channel_${A}`]: 3 }, ['newName']],
 		['setLatency', { destinationDevice: A }, ['latency']],
-		['setSampleRate', { device: A }, [`sr_${A}`]],
-		['setPullup', { device: A }, [`pullup_${A}`]],
+		['setSampleRate', { device: 'DeviceA' }, ['sr_DeviceA']],
+		['setPullup', { device: 'DeviceA' }, ['pullup_DeviceA']],
 		['setOutputLevel', { device: A, [`channel_${A}`]: 1 }, ['level']],
 	]
 

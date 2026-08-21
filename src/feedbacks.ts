@@ -8,6 +8,8 @@ import {
 import { isSubscriptionConnected } from './const.js'
 import {
 	findTxChannelByName,
+	deviceByIdentifier,
+	resolveDeviceIp,
 	firstChoiceId,
 	rxDeviceChoices,
 	txDeviceChoices,
@@ -15,8 +17,6 @@ import {
 	findRxChannelByName,
 	findDeviceIpByName,
 	getChannelSubscriptionName,
-	hasRxChannels,
-	hasTxChannels,
 	trackFeedbackDevices,
 	untrackFeedback,
 } from './api.js'
@@ -70,16 +70,18 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				choices: rxDeviceChoices(self),
 				default: firstChoiceId(rxDeviceChoices(self), ''),
 				disableAutoExpression: true,
+				// see actions.ts: a legacy address must remain a selectable value
+				allowCustom: true,
 			},
 			...Object.entries(self.devicesData)
-				.filter(([, device]) => hasRxChannels(device))
-				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+				.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
+				.map(([, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Destination channel',
-					id: `destinationChannel_${ip}`,
+					id: `destinationChannel_${device.name}`,
 					choices: channelChoices(self, device, 'rx'),
 					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-					isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
+					isVisibleExpression: `$(options:destinationDevice) == '${device.name}'`,
 				})),
 			{
 				type: 'dropdown',
@@ -88,29 +90,36 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				choices: txDeviceChoices(self),
 				default: firstChoiceId(txDeviceChoices(self), ''),
 				disableAutoExpression: true,
+				// see actions.ts: a legacy address must remain a selectable value
+				allowCustom: true,
 			},
 			...Object.entries(self.devicesData)
-				.filter(([, device]) => hasTxChannels(device))
-				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
+				.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
+				.map(([, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
 					type: 'dropdown',
 					label: 'Source channel',
-					id: `sourceChannel_${ip}`,
+					id: `sourceChannel_${device.name}`,
 					choices: channelChoices(self, device, 'tx'),
 					default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
-					isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
+					isVisibleExpression: `$(options:sourceDevice) == '${device.name}'`,
 				})),
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: (feedback) => {
 			const opt = feedback.options
 			// Both dropdown ids are device IPs, so this instance's dependencies are known exactly.
-			trackFeedbackDevices(self, feedback.id, [opt.destinationDevice, opt.sourceDevice])
-			if (opt.destinationDevice && self.devicesData[opt.destinationDevice]?.rx && opt.sourceDevice) {
-				const destinationChannel =
-					self.devicesData[opt.destinationDevice].rx?.[opt[`destinationChannel_${opt.destinationDevice}`]]
+			trackFeedbackDevices(self, feedback.id, [
+				resolveDeviceIp(self, opt.destinationDevice),
+				resolveDeviceIp(self, opt.sourceDevice),
+			])
+			// Pickers store the device name; actions saved before that store an address. Both resolve.
+			const destinationDevice = deviceByIdentifier(self, opt.destinationDevice)
+			const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
+			if (opt.destinationDevice && destinationDevice?.rx && opt.sourceDevice) {
+				const destinationChannel = destinationDevice.rx?.[opt[`destinationChannel_${opt.destinationDevice}`]]
 				const selectedSourceChannel = opt[`sourceChannel_${opt.sourceDevice}`]
 				const sourceChannel =
-					self.devicesData[opt.sourceDevice]?.tx?.[selectedSourceChannel] ??
+					sourceDevice?.tx?.[selectedSourceChannel] ??
 					findTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
 				const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel)
 				const sourceChannelCandidates = [
@@ -129,7 +138,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				}
 				const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName)
 				const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice)
-				const selectedSourceDeviceName = normalizeName(self.devicesData[opt.sourceDevice]?.name)
+				const selectedSourceDeviceName = normalizeName(sourceDevice?.name)
 				const sourceDeviceMatches =
 					destinationSourceDeviceName == selectedSourceDeviceName ||
 					(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice)

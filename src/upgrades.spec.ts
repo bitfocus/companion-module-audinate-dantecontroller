@@ -8,14 +8,17 @@ import { UpgradeScripts } from './upgrades.js'
 import type { ModuleConfig } from './config.js'
 
 /**
- * The script added when the clear-crosspoint actions gained their `clearAll` checkbox.
- *
- * Pinned by index rather than taken as the last entry, so appending a future upgrade script does
- * not silently point this suite at the wrong one. Upgrade scripts are order-sensitive and must
- * never be reordered or removed, only appended.
+ * Upgrade scripts by index. They are order-sensitive: a stored `upgradeIndex` records how far a
+ * configuration has been migrated, so scripts may only ever be appended - never inserted, reordered
+ * or removed. Each suite pins the one it targets rather than taking the last entry, so appending a
+ * new script cannot silently retarget an existing suite.
  */
 const CLEAR_ALL_SCRIPT_INDEX = 2
+const CONFIG_RENAME_SCRIPT_INDEX = 3
+const EXPECTED_SCRIPT_COUNT = 4
+
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
+const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -35,9 +38,10 @@ function run(actions: CompanionMigrationAction[]) {
 
 describe('clearAll upgrade script', () => {
 	it('sits at the index this suite targets', () => {
-		// If this fails, a script was inserted or removed rather than appended - fix the ordering,
-		// do not just bump the index, or existing user configs will migrate through the wrong steps.
-		expect(UpgradeScripts).toHaveLength(CLEAR_ALL_SCRIPT_INDEX + 1)
+		// Appending a script is fine - bump EXPECTED_SCRIPT_COUNT. If an existing index now points at
+		// a different script, one was inserted or removed rather than appended: fix the ordering
+		// instead of moving the index, or existing configurations migrate through the wrong steps.
+		expect(UpgradeScripts).toHaveLength(EXPECTED_SCRIPT_COUNT)
 	})
 
 	it('adds clearAll: false to a clearCrosspoint action saved before the option existed', () => {
@@ -181,5 +185,62 @@ describe('clearAll upgrade script', () => {
 
 	it('is a no-op when there are no actions', () => {
 		expect(run([]).updatedActions).toEqual([])
+	})
+})
+
+describe('ip to mac config rename', () => {
+	function runConfig(config: Record<string, unknown> | null) {
+		return renameIpToMac(
+			{} as CompanionUpgradeContext<ModuleConfig>,
+			{
+				config,
+				secrets: null,
+				actions: [],
+				feedbacks: [],
+			} as unknown as CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+		)
+	}
+
+	it('moves the stored value from ip to mac', () => {
+		const result = runConfig({ ip: '169.254.109.120', interval: 1000, timeoutInterval: 3000, verbose: false })
+		expect(result.updatedConfig).toEqual({
+			mac: '169.254.109.120',
+			interval: 1000,
+			timeoutInterval: 3000,
+			verbose: false,
+		})
+	})
+
+	it('drops the old key rather than leaving both', () => {
+		const result = runConfig({ ip: '10.1.1.40' })
+		expect(result.updatedConfig).not.toHaveProperty('ip')
+	})
+
+	it('carries the other settings through untouched', () => {
+		const result = runConfig({ ip: '10.1.1.40', interval: 250, timeoutInterval: 9000, verbose: true })
+		expect(result.updatedConfig).toMatchObject({ interval: 250, timeoutInterval: 9000, verbose: true })
+	})
+
+	it('preserves the "all interfaces" choice', () => {
+		expect(runConfig({ ip: '' })?.updatedConfig).toEqual({ mac: '' })
+	})
+
+	it('does not overwrite a mac that is already set', () => {
+		const result = runConfig({ ip: '10.1.1.40', mac: 'dc:04:5a:06:41:44|169.254.109.120' })
+		expect(result.updatedConfig).toEqual({ mac: 'dc:04:5a:06:41:44|169.254.109.120' })
+	})
+
+	it('leaves an already-migrated config alone', () => {
+		expect(runConfig({ mac: 'dc:04:5a:06:41:44|169.254.109.120' })?.updatedConfig).toBeNull()
+	})
+
+	it('handles a connection with no config at all', () => {
+		expect(runConfig(null)?.updatedConfig).toBeNull()
+	})
+
+	it('does not touch actions or feedbacks', () => {
+		const result = runConfig({ ip: '10.1.1.40' })
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
 	})
 })

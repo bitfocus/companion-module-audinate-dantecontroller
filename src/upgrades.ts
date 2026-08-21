@@ -17,6 +17,9 @@ const numericOptionsByActionId: Record<string, string[]> = {
 	setSampleRateCustom: ['sr'],
 }
 
+/** The config shape before the network card setting was renamed from `ip` to `mac`. */
+type LegacyIpConfig = Omit<ModuleConfig, 'mac'> & { ip?: string; mac?: string }
+
 /**
  * Option ids whose stored value must be a string to match their dropdown's choice ids.
  *
@@ -113,6 +116,27 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 		return {
 			updatedConfig: null,
 			updatedActions: changedActions,
+			updatedFeedbacks: [],
+		}
+	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// The network card setting was renamed from `ip` to `mac`, because a card is now identified by
+		// its hardware address rather than by an IPv4 address that changes with DHCP or link-local
+		// assignment. Only the key is renamed here: the stored value may still be a bare address, and
+		// resolving that to a hardware address needs the address to still be assigned - so that part
+		// happens on the next successful connect, in initConnection.
+		const config: LegacyIpConfig | null = props.config
+		if (!config || config.ip === undefined) {
+			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
+		}
+
+		const { ip, ...rest } = config
+		return {
+			updatedConfig: { ...rest, mac: rest.mac ?? ip },
+			updatedActions: [],
 			updatedFeedbacks: [],
 		}
 	},

@@ -146,8 +146,6 @@ function defaultsNotInChoices(definitions: Record<string, DefinitionLike>): stri
 	for (const [definitionId, definition] of Object.entries(definitions)) {
 		for (const option of definition.options ?? []) {
 			if (option.type !== 'dropdown' || !option.choices) continue
-			// A dropdown with nothing to offer has no valid default to pick.
-			if (option.choices.length === 0) continue
 
 			if (!option.choices.some((choice) => choice.id === option.default)) {
 				bad.push(`${definitionId}.${option.id} (default ${JSON.stringify(option.default)} not in choices)`)
@@ -225,10 +223,13 @@ describe('settings actions offer only devices that support the setting', () => {
 		return self
 	}
 
-	function deviceIds(definitions: Record<string, DefinitionLike>, actionId: string) {
+	function devicePicker(definitions: Record<string, DefinitionLike>, actionId: string) {
 		const options = definitions[actionId]?.options ?? []
-		const picker = options.find((option) => option.id === 'device' || option.id === 'destinationDevice')
-		return picker?.choices?.map((choice) => choice.id) ?? []
+		return options.find((option) => option.id === 'device' || option.id === 'destinationDevice')
+	}
+
+	function deviceIds(definitions: Record<string, DefinitionLike>, actionId: string) {
+		return devicePicker(definitions, actionId)?.choices?.map((choice) => choice.id) ?? []
 	}
 
 	function build(self: DanteInstance) {
@@ -242,9 +243,14 @@ describe('settings actions offer only devices that support the setting', () => {
 		expect(deviceIds(definitions, 'setEncoding').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
 	})
 
-	it('offers no device for pullup when none supports it, rather than an empty picker per device', () => {
+	it('offers only an explanatory placeholder for pullup when no device supports it', () => {
 		const definitions = build(withRealisticOptions())
-		expect(deviceIds(definitions, 'setPullup')).toEqual([])
+		// not an empty list: Companion cannot parse a dropdown whose value matches no choice, which
+		// would break the action and its learn rather than merely showing nothing
+		const picker = devicePicker(definitions, 'setPullup')
+		expect(picker?.choices).toHaveLength(1)
+		expect(picker?.choices?.[0].id).toBe('')
+		expect(picker?.choices?.[0].label).toMatch(/no devices/i)
 	})
 
 	it('offers only the device that does support pullup', () => {
@@ -259,15 +265,73 @@ describe('settings actions offer only devices that support the setting', () => {
 		expect(deviceIds(definitions, 'setLatency').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
 	})
 
-	it('offers nothing before any settings reply has arrived', () => {
+	it('offers only the placeholder before any settings reply has arrived', () => {
 		// the state during startup, and the state when no settings replies arrive at all
 		const self = mockInstance()
 		for (const device of Object.values(self.devicesData)) {
 			Object.assign(device, { srOptions: undefined, encodingOptions: undefined, pullupOptions: undefined })
 		}
 		const definitions = build(self)
-		expect(deviceIds(definitions, 'setSampleRate')).toEqual([])
-		expect(deviceIds(definitions, 'setEncoding')).toEqual([])
+		expect(deviceIds(definitions, 'setSampleRate')).toEqual([''])
+		expect(deviceIds(definitions, 'setEncoding')).toEqual([''])
+	})
+})
+
+describe('no dropdown is emitted without choices', () => {
+	/**
+	 * Companion validates a dropdown's value against its choices and refuses to parse the whole
+	 * entity when one does not match - so an option with an empty choice list breaks the action
+	 * outright, including its learn, not just that one field.
+	 */
+	function emptyDropdowns(definitions: Record<string, DefinitionLike>): string[] {
+		const bad: string[] = []
+		for (const [definitionId, definition] of Object.entries(definitions)) {
+			for (const option of definition.options ?? []) {
+				if (option.type === 'dropdown' && option.choices?.length === 0) {
+					bad.push(`${definitionId}.${option.id}`)
+				}
+			}
+		}
+		return bad
+	}
+
+	it('holds for actions with fully populated devices', () => {
+		const self = mockInstance()
+		UpdateActions(self)
+		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
+	})
+
+	it('holds for feedbacks', () => {
+		const self = mockInstance()
+		UpdateFeedbacks(self)
+		expect(emptyDropdowns((self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
+	})
+
+	it('holds when a controller-style device reports nothing at all', () => {
+		// the case that broke setSampleRate: a device with no channels and no settings options still
+		// had per-device dropdowns generated for it, each with an empty choice list
+		const self = mockInstance()
+		self.devicesData['10.0.0.1'] = { name: 'AController', ports: {} }
+		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		UpdateActions(self)
+		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
+	})
+
+	it('holds when a device has channels but its choice lists have not been built yet', () => {
+		const self = mockInstance()
+		self.rxChannelsChoices = {}
+		self.txChannelsChoices = {}
+		UpdateActions(self)
+		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
+	})
+
+	it('holds when no device supports a setting', () => {
+		const self = mockInstance()
+		for (const device of Object.values(self.devicesData)) {
+			Object.assign(device, { srOptions: undefined, pullupOptions: undefined, encodingOptions: undefined })
+		}
+		UpdateActions(self)
+		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
 	})
 })
 
