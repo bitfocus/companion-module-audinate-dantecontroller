@@ -6,6 +6,7 @@ import {
 	bufferToInt,
 	incrementBE,
 	parseString,
+	parseStringAtPointer,
 	getChannelSubscriptionName,
 	hasRxChannels,
 	hasTxChannels,
@@ -165,10 +166,37 @@ describe('incrementBE', () => {
 	})
 })
 
+describe('parseStringAtPointer', () => {
+	const packet = Buffer.concat([Buffer.from('2729', 'hex'), Buffer.from('Talkback\u0000', 'utf8')])
+
+	it('reads the string a non-zero pointer refers to', () => {
+		expect(parseStringAtPointer(packet, 2)).toBe('Talkback')
+	})
+
+	it('treats a zero pointer as absent rather than reading the packet header', () => {
+		// an unrouted rx channel has a zero source pointer; dereferencing it yielded "')"
+		expect(parseStringAtPointer(packet, 0)).toBeUndefined()
+	})
+
+	it('treats a pointer past the end of the packet as absent', () => {
+		expect(parseStringAtPointer(packet, 999)).toBeUndefined()
+	})
+})
+
 describe('parseString', () => {
 	it('decodes a NUL-terminated UTF-8 string', () => {
 		const buf = Buffer.concat([Buffer.from('Hello', 'utf8'), Buffer.from([0x00]), Buffer.from('trailing')])
+		// offset 0 is a valid fixed offset here - only packet-supplied *pointers* treat 0 as absent,
+		// which is what parseStringAtPointer is for
 		expect(parseString(buf, 0)).toBe('Hello')
+	})
+
+	it('runs to the end of the buffer when there is no terminator', () => {
+		expect(parseString(Buffer.from('Hello', 'utf8'), 0)).toBe('Hello')
+	})
+
+	it('returns undefined for an offset past the end', () => {
+		expect(parseString(Buffer.from('Hello', 'utf8'), 99)).toBeUndefined()
 	})
 
 	it('returns undefined when startIndex is past the end of the buffer', () => {

@@ -171,11 +171,26 @@ export function incrementBE(buffer: Buffer): void {
 
 /** Reads a NUL-terminated UTF-8 string out of a Dante message buffer. */
 export function parseString(buffer: Buffer, startIndex: number): string | undefined {
-	const end = buffer.indexOf(0x00, startIndex)
-	if (buffer.length > startIndex) {
-		return buffer.toString('utf8', startIndex, end)
+	if (startIndex < 0 || startIndex >= buffer.length) {
+		return undefined
 	}
-	return undefined
+	const end = buffer.indexOf(0x00, startIndex)
+	// An unterminated string runs to the end of the packet rather than yielding nothing
+	return buffer.toString('utf8', startIndex, end === -1 ? buffer.length : end)
+}
+
+/**
+ * Reads a string at an offset the packet itself supplies, treating a zero pointer as "absent".
+ *
+ * Records use a zero pointer for fields they have no value for - an unrouted rx channel has no
+ * source device or channel, for instance. Dereferencing that reads from the start of the packet
+ * and returns the protocol header as text, so those fields end up holding `')` and similar.
+ */
+export function parseStringAtPointer(buffer: Buffer, pointer: number): string | undefined {
+	if (pointer === 0) {
+		return undefined
+	}
+	return parseString(buffer, pointer)
 }
 
 //**
@@ -240,7 +255,7 @@ function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
 		const returnChannel = tx[nameNumber]
 
 		// get name
-		returnChannel.friendlyName = parseString(reply, nameIndex)
+		returnChannel.friendlyName = parseStringAtPointer(reply, nameIndex)
 	}
 	return { tx }
 }
@@ -285,7 +300,7 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
 		const returnChannel = tx[nameNumber]
 
 		// get name
-		returnChannel.name = parseString(reply, nameIndex)
+		returnChannel.name = parseStringAtPointer(reply, nameIndex)
 
 		// get sampleRate
 		const sampleRateIndex = bufferToInt(infoBuffer, sampleRateOffset)
@@ -344,7 +359,7 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 		const returnChannel = rx[nameNumber]
 
 		// get name
-		returnChannel.name = parseString(reply, nameIndex)
+		returnChannel.name = parseStringAtPointer(reply, nameIndex)
 
 		// get routing
 		const sourceChannelIndex = bufferToInt(infoBuffer, sourceChannelOffset)
@@ -356,8 +371,8 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 			rx.count = i
 			break
 		}
-		returnChannel.sourceChannel = parseString(reply, sourceChannelIndex)
-		returnChannel.sourceDevice = parseString(reply, sourceDeviceIndex)
+		returnChannel.sourceChannel = parseStringAtPointer(reply, sourceChannelIndex)
+		returnChannel.sourceDevice = parseStringAtPointer(reply, sourceDeviceIndex)
 		returnChannel.channelStatus = bufferToInt(infoBuffer, channelStatusOffset)
 		returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset)
 		returnChannel.sampleRate = readU32At(reply, sampleRateIndex)
@@ -939,6 +954,41 @@ export function channelChoices(self: DanteInstance, device: DeviceData, channelT
 	if (!device.name) return []
 	const byDevice = channelType === 'rx' ? self.rxChannelsChoices : self.txChannelsChoices
 	return byDevice[device.name] ?? []
+}
+
+/** What an rx channel is currently subscribed to, as the device reports it. */
+export interface RxChannelSource {
+	/** Name of the transmitting device, with the '.' self-route shorthand already resolved. */
+	deviceName: string
+	/** Name of the transmitting channel. */
+	channelName: string
+}
+
+/**
+ * Reads what a device's rx channel is currently subscribed to, for the learn callbacks.
+ *
+ * Returns undefined when the channel is unrouted or the device is unknown, so a learn can decline
+ * to change anything rather than writing empty values over the user's settings.
+ *
+ * A self-route is reported by the device as the '.' shorthand rather than its own name; that is
+ * resolved here so callers always get a name they can match against `devicesChoices`.
+ */
+export function getRxChannelSource(
+	self: DanteInstance,
+	deviceIdentifier: string,
+	channelNumber: number,
+): RxChannelSource | undefined {
+	const deviceIp = self.devicesData[deviceIdentifier] ? deviceIdentifier : findDeviceIpByName(self, deviceIdentifier)
+	const device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
+	const channel = device?.rx?.[channelNumber]
+	if (!channel?.sourceDevice || !channel.sourceChannel) {
+		return undefined
+	}
+
+	return {
+		deviceName: channel.sourceDevice === '.' ? (device?.name ?? channel.sourceDevice) : channel.sourceDevice,
+		channelName: channel.sourceChannel,
+	}
 }
 
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */

@@ -20,6 +20,9 @@ import {
 	findTxChannelByName,
 	firstChoiceId,
 	currentChoiceId,
+	getRxChannelSource,
+	findRxChannelByName,
+	findDeviceIpByName,
 	rxDeviceChoices,
 	audioDeviceChoices,
 	devicesWithOptions,
@@ -162,6 +165,20 @@ export function UpdateActions(self: DanteInstance): void {
 					useVariables: true,
 				},
 			],
+			// Learn the source from whatever the chosen destination is currently subscribed to. Only the
+			// two source fields are returned - per the 2.0 contract, returning the destination fields
+			// as well would overwrite any expression the user has entered in them.
+			learn: (action) => {
+				const opt = action.options
+				const channel = findRxChannelByName(self, opt.destinationDeviceAddress, opt.destinationChannelNumber)
+				const channelNumber = channel?.number ?? Number(opt.destinationChannelNumber)
+				if (!Number.isFinite(channelNumber)) return undefined
+
+				const source = getRxChannelSource(self, opt.destinationDeviceAddress, channelNumber)
+				if (!source) return undefined
+
+				return { sourceChannelName: source.channelName, sourceDeviceName: source.deviceName }
+			},
 			callback: async (action) => {
 				const opt = action.options
 				makeCrosspoint(
@@ -214,6 +231,29 @@ export function UpdateActions(self: DanteInstance): void {
 						isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
 					})),
 			],
+			// Learn the source device and channel from the destination's current subscription. The
+			// source channel option id is per-device, so the learnt device decides which key to return.
+			learn: (action) => {
+				const opt = action.options
+				const source = getRxChannelSource(
+					self,
+					opt.destinationDevice,
+					opt[`destinationChannel_${opt.destinationDevice}`],
+				)
+				if (!source) return undefined
+
+				const sourceIp = findDeviceIpByName(self, source.deviceName)
+				if (!sourceIp) return undefined
+
+				const sourceChannel = findTxChannelByName(self, sourceIp, source.channelName)
+				if (sourceChannel?.number === undefined) return undefined
+
+				// Built by assignment, not as one literal: TypeScript widens a computed key in an object
+				// literal to `string`, which no longer matches the per-device option key type.
+				const learnt: Partial<MakeCrosspointDropDownOptions> = { sourceDevice: sourceIp }
+				learnt[`sourceChannel_${sourceIp}`] = sourceChannel.number
+				return learnt
+			},
 			callback: async (action) => {
 				const opt = action.options
 				const sourceChannelNumber = opt[`sourceChannel_${opt.sourceDevice}`]
@@ -404,6 +444,12 @@ export function UpdateActions(self: DanteInstance): void {
 					useVariables: true,
 				},
 			],
+			// Learn the new-name field from the channel's current name, as a starting point for an edit.
+			learn: (action) => {
+				const opt = action.options
+				const name = self.devicesData[opt.device]?.rx?.[opt[`channel_${opt.device}`]]?.name
+				return name ? { newName: name } : undefined
+			},
 			callback: async (action) => {
 				const opt = action.options
 				setRxChannelName(self, opt.device, opt[`channel_${opt.device}`], opt.newName)
@@ -467,6 +513,13 @@ export function UpdateActions(self: DanteInstance): void {
 					useVariables: true,
 				},
 			],
+			// Learn from the channel label the device reports, falling back to its canonical name.
+			learn: (action) => {
+				const opt = action.options
+				const channel = self.devicesData[opt.device]?.tx?.[opt[`channel_${opt.device}`]]
+				const name = getChannelSubscriptionName(channel)
+				return name ? { newName: name } : undefined
+			},
 			callback: async (action) => {
 				const opt = action.options
 				setTxChannelName(self, opt.device, opt[`channel_${opt.device}`], opt.newName)
@@ -520,6 +573,10 @@ export function UpdateActions(self: DanteInstance): void {
 					max: 1000,
 				},
 			],
+			learn: (action) => {
+				const latency = self.devicesData[action.options.destinationDevice]?.latency
+				return latency === undefined ? undefined : { latency }
+			},
 			callback: async (action) => {
 				const opt = action.options
 				setLatency(self, opt.destinationDevice, opt.latency)
@@ -579,6 +636,18 @@ export function UpdateActions(self: DanteInstance): void {
 					}),
 				),
 			],
+			learn: (action) => {
+				const ip = action.options.device
+				const device = self.devicesData[ip]
+				if (!device || device.sr === undefined) return undefined
+
+				const choices = array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? []
+				if (!choices.some((choice) => String(choice.id) === String(device.sr))) return undefined
+
+				const learnt: Partial<SetSampleRateOptions> = {}
+				learnt[`sr_${ip}`] = Number(device.sr)
+				return learnt
+			},
 			callback: async (action) => {
 				const opt = action.options
 				const ip = opt.device
@@ -612,6 +681,20 @@ export function UpdateActions(self: DanteInstance): void {
 					}),
 				),
 			],
+			learn: (action) => {
+				const ip = action.options.device
+				const device = self.devicesData[ip]
+				if (!device || device.pullup === undefined) return undefined
+
+				// device.pullup is the decoded label ('NONE'), the option value is the underlying code
+				const choices = object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions)
+				const match = choices.find((choice) => choice.label === device.pullup)
+				if (!match) return undefined
+
+				const learnt: Partial<SetPullupOptions> = {}
+				learnt[`pullup_${ip}`] = Number(match.id)
+				return learnt
+			},
 			callback: async (action) => {
 				const opt = action.options
 				const ip = opt.device
@@ -683,6 +766,22 @@ export function UpdateActions(self: DanteInstance): void {
 					default: '2',
 				},
 			],
+			// Learn the level of the selected output channel, where the device reports one. Levels are
+			// only known for devices that answer the codec query - many do not, in which case this
+			// declines rather than guessing.
+			learn: (action) => {
+				const opt = action.options
+				const channelNumber = opt[`channel_${opt.device}`]
+				const levels = self.devicesData[opt.device]?.output_levels
+				const current = levels?.[channelNumber - 1]
+				if (current === undefined) return undefined
+
+				// output_levels holds decoded labels ('+4dBu'); the option value is the level's code
+				const match = object2choices(DANTE_CONST.LEVELS).find(
+					(choice) => choice.label === String(current) || String(choice.id) === String(current),
+				)
+				return match ? { level: String(match.id) } : undefined
+			},
 			callback: async (action) => {
 				const opt = action.options
 				setLevel(self, opt.device, 'out', opt[`channel_${opt.device}`], Number(opt.level))
