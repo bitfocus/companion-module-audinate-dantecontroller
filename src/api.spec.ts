@@ -18,6 +18,8 @@ import {
 	keepAlive,
 	clearDeviceTimeouts,
 	scheduleUpdateData,
+	scheduleCheckVariables,
+	cancelCheckVariables,
 	cancelUpdateData,
 	flushUpdateData,
 	sendCommand,
@@ -432,6 +434,111 @@ describe('scheduleUpdateData', () => {
 		vi.advanceTimersByTime(500)
 		expect(a.setActionDefinitions).not.toHaveBeenCalled()
 		expect(b.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe('scheduleCheckVariables', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function twoDevices() {
+		return createMockInstance({
+			devicesData: {
+				'10.0.0.5': { name: 'DeviceA', ports: {}, rx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+				'10.0.0.6': { name: 'DeviceB', ports: {}, rx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+			},
+		})
+	}
+
+	function pushes(self: DanteInstance) {
+		return (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	it('pushes immediately on the leading edge', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		expect(pushes(self)).toHaveLength(1)
+	})
+
+	it('collapses a burst within the window into the leading push plus one trailing push', () => {
+		const self = twoDevices()
+		for (let i = 0; i < 20; i++) scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		expect(pushes(self)).toHaveLength(1) // leading only so far
+		vi.advanceTimersByTime(30)
+		expect(pushes(self)).toHaveLength(2) // trailing edge fires once
+	})
+
+	it('does not lose devices queued behind the leading edge', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'ip') // consumes the leading edge
+		scheduleCheckVariables(self, '10.0.0.5', 'rx_names')
+		scheduleCheckVariables(self, '10.0.0.6', 'rx_names')
+		vi.advanceTimersByTime(30)
+
+		// a last-args throttle would keep only DeviceB here and silently drop DeviceA's update
+		expect(pushes(self)).toHaveLength(2)
+		const last = pushes(self)[1][0]
+		expect(last).toHaveProperty('DeviceA_rx_names')
+		expect(last).toHaveProperty('DeviceB_rx_names')
+	})
+
+	it('unions requested types queued behind the leading edge into one push', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'ip') // consumes the leading edge
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		scheduleCheckVariables(self, '10.0.0.5', 'rx_names')
+		vi.advanceTimersByTime(30)
+
+		// the two queued requests coalesce into a single trailing push carrying both types
+		expect(pushes(self)).toHaveLength(2)
+		const last = pushes(self)[1][0]
+		expect(last).toHaveProperty('DeviceA_rx')
+		expect(last).toHaveProperty('DeviceA_rx_names')
+	})
+
+	it('an unscoped request widens the window to every device', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		scheduleCheckVariables(self) // all devices, all types
+		vi.advanceTimersByTime(30)
+
+		const last = pushes(self)[pushes(self).length - 1][0]
+		expect(last).toHaveProperty('DeviceA_ip')
+		expect(last).toHaveProperty('DeviceB_ip')
+	})
+
+	it('refreshes pullup on a default sweep', () => {
+		const self = twoDevices()
+		self.devicesData['10.0.0.5'].pullup = '0%'
+		scheduleCheckVariables(self)
+
+		const last = pushes(self)[pushes(self).length - 1][0]
+		expect(last).toHaveProperty('DeviceA_pullup', '0%')
+	})
+
+	it('cancelCheckVariables drops a pending trailing push', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx') // leading
+		scheduleCheckVariables(self, '10.0.0.6', 'rx') // queued for trailing
+		const before = pushes(self).length
+
+		cancelCheckVariables(self)
+		vi.advanceTimersByTime(1000)
+		expect(pushes(self)).toHaveLength(before)
+	})
+
+	it('keeps separate throttle state per instance', () => {
+		const a = twoDevices()
+		const b = twoDevices()
+		scheduleCheckVariables(a, '10.0.0.5', 'rx')
+		scheduleCheckVariables(b, '10.0.0.5', 'rx')
+		expect(pushes(a)).toHaveLength(1)
+		expect(pushes(b)).toHaveLength(1)
 	})
 })
 

@@ -12,6 +12,7 @@ import {
 	initConnection,
 	destroyDevice,
 	cancelUpdateData,
+	cancelCheckVariables,
 	type DevicesData,
 	type DanteSockets,
 	type ConnectionName,
@@ -68,6 +69,7 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		}
 		// destroyDevice queues a rebuild per device; none of them should reach a torn-down instance
 		cancelUpdateData(this)
+		cancelCheckVariables(this)
 
 		for (const socket of Object.values(this.sockets)) {
 			socket?.removeAllListeners()

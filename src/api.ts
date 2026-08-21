@@ -1,5 +1,5 @@
 import multidns from 'multicast-dns'
-import { debounce, type DebouncedFunc } from 'es-toolkit/compat'
+import { debounce, throttle, type DebouncedFunc } from 'es-toolkit/compat'
 import dgram from 'node:dgram'
 import merge from './utils/merge.js'
 import { networkInterfaces } from 'node:os'
@@ -538,8 +538,10 @@ export function initConnection(self: DanteInstance): void {
 
 	clearDeviceTimeouts(self)
 
-	// a rebuild queued by the outgoing generation would publish device data we are about to discard
+	// a rebuild or variable push queued by the outgoing generation would publish device data we are
+	// about to discard
 	cancelUpdateData(self)
+	cancelCheckVariables(self)
 	if (self.mdns) {
 		// drop the old listeners first, so a late callback from the outgoing instance can't
 		// write into the fresh state we're about to build
@@ -1023,15 +1025,15 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 					scheduleUpdateData(self)
 					break
 				case 'info':
-					CheckVariables(self, deviceIp, 'sr', 'latency')
+					scheduleCheckVariables(self, deviceIp, 'sr', 'latency')
 					break
 				case 'rx':
-					CheckVariables(self, deviceIp, 'rx', 'rx_names')
+					scheduleCheckVariables(self, deviceIp, 'rx', 'rx_names')
 					updateChannelChoices(self, deviceIp, 'rx')
 					self.checkFeedbacks('routing_bg', 'routing_bg_manual')
 					break
 				case 'tx':
-					CheckVariables(self, deviceIp, 'tx', 'tx_names')
+					scheduleCheckVariables(self, deviceIp, 'tx', 'tx_names')
 					updateChannelChoices(self, deviceIp, 'tx')
 					self.checkFeedbacks('routing_bg', 'routing_bg_manual')
 					break
@@ -1262,8 +1264,8 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		}
 
 		self.devicesData = merge(self.devicesData, deviceData)
-		CheckVariables(self, deviceIp)
-		CheckVariables(self, deviceIp, ...updateFlags)
+
+		scheduleCheckVariables(self, deviceIp)
 
 		for (const flag of updateFlags) {
 			if (flag.slice(-7) == 'Options') {
@@ -1309,13 +1311,14 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 				logger.info(`Port for service SETTINGS of device ${deviceId} is : ${bufferToInt(reply, 28)}`)
 
 				self.devicesData = merge(self.devicesData, deviceData)
-				CheckVariables(self, deviceIp)
+				scheduleCheckVariables(self, deviceIp)
 				refreshSettings(self, deviceIp)
 				break
 			}
 		}
-
-		CheckVariables(self)
+		// There was an unconditional all-devices/all-types sweep here. CMC replies only ever carry
+		// service ports, and the only branch that mutates devicesData is 0x1001 above - which now
+		// schedules its own scoped update (and that still refreshes the `devices` list variable).
 	}
 }
 
@@ -1985,6 +1988,98 @@ export function cancelUpdateData(self: DanteInstance): void {
 /** Runs any pending rebuild immediately. */
 export function flushUpdateData(self: DanteInstance): void {
 	debouncedUpdates.get(self)?.flush()
+}
+
+/**
+ * How often variable values may be pushed to Companion. Short enough that a fader move or a
+ * subscription change still feels instant, long enough to collapse the burst of per-channel-page
+ * replies a single device emits into one push.
+ */
+const VARIABLES_THROTTLE_MS = 30
+
+/**
+ * Pending variable work, accumulated between throttle ticks.
+ *
+ * A plain `throttle(CheckVariables)` would be wrong: throttling invokes with the *last* arguments,
+ * so a scoped update for device A arriving just before one for device B would silently discard A.
+ * Instead every request is unioned in here and the tick applies the combined result.
+ */
+interface PendingVariables {
+	ips: Set<string>
+	/** A request arrived with no IP, so every device needs refreshing. */
+	allDevices: boolean
+	types: Set<string>
+	/** A request arrived with no explicit types, so every category needs refreshing. */
+	allTypes: boolean
+}
+
+const pendingVariables = new WeakMap<DanteInstance, PendingVariables>()
+const throttledVariables = new WeakMap<DanteInstance, DebouncedFunc<() => void>>()
+
+function flushCheckVariables(self: DanteInstance): void {
+	const pending = pendingVariables.get(self)
+	if (!pending) return
+	pendingVariables.delete(self)
+
+	const types = pending.allTypes ? [] : [...pending.types]
+
+	// Collapse to a single unscoped sweep once more than one device is waiting: CheckVariables walks
+	// every device regardless (to rebuild the `devices` list), so N scoped calls cost about the same
+	// as one unscoped call but push N separate setVariableValues payloads instead of one.
+	if (pending.allDevices || pending.ips.size > 1) {
+		CheckVariables(self, undefined, ...types)
+	} else if (pending.ips.size === 1) {
+		CheckVariables(self, [...pending.ips][0], ...types)
+	}
+}
+
+function getThrottledVariables(self: DanteInstance): DebouncedFunc<() => void> {
+	let throttled = throttledVariables.get(self)
+	if (!throttled) {
+		throttled = throttle(() => flushCheckVariables(self), VARIABLES_THROTTLE_MS, {
+			// leading so the first change in a quiet period lands immediately, trailing so the last
+			// change in a busy one is never dropped
+			leading: true,
+			trailing: true,
+		})
+		throttledVariables.set(self, throttled)
+	}
+	return throttled
+}
+
+/**
+ * Requests a variable refresh, coalescing requests within {@link VARIABLES_THROTTLE_MS} into a
+ * single push to Companion. Arguments match {@link CheckVariables} and are unioned across the
+ * window rather than overwritten.
+ */
+export function scheduleCheckVariables(self: DanteInstance, ipAddress?: string, ...variableTypes: string[]): void {
+	let pending = pendingVariables.get(self)
+	if (!pending) {
+		pending = { ips: new Set(), allDevices: false, types: new Set(), allTypes: false }
+		pendingVariables.set(self, pending)
+	}
+
+	if (ipAddress === undefined) {
+		pending.allDevices = true
+	} else {
+		pending.ips.add(ipAddress)
+	}
+
+	if (variableTypes.length === 0) {
+		pending.allTypes = true
+	} else {
+		for (const variableType of variableTypes) {
+			pending.types.add(variableType)
+		}
+	}
+
+	getThrottledVariables(self)()
+}
+
+/** Drops any pending variable refresh, for when the state it would publish is going away. */
+export function cancelCheckVariables(self: DanteInstance): void {
+	throttledVariables.get(self)?.cancel()
+	pendingVariables.delete(self)
 }
 
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
