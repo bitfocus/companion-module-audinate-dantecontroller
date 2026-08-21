@@ -17,6 +17,12 @@ const logger = createModuleLogger('api')
 
 export type ServiceName = 'ARC' | 'SETTINGS' | 'CMC' | 'HEARTBEAT'
 
+/**
+ * Everything whose liveness feeds into the overall instance status: the four UDP sockets
+ * plus mDNS discovery, which has no socket of its own in `DanteSockets`.
+ */
+export type ConnectionName = ServiceName | 'MDNS'
+
 export type DanteSockets = Partial<Record<ServiceName, dgram.Socket>>
 
 export interface TxChannel {
@@ -438,11 +444,11 @@ export function findRxChannelByName(
 
 /**
  * Re-evaluates overall connection status from the ARC/CMC/SETTINGS/HEARTBEAT socket states
- * and updates the instance status accordingly.
- * @returns True if all sockets are active.
+ * and mDNS discovery, and updates the instance status accordingly.
+ * @returns True if all connections are active.
  */
 export function checkConnections(self: DanteInstance): boolean {
-	const services: ServiceName[] = ['ARC', 'CMC', 'SETTINGS', 'HEARTBEAT']
+	const services: ConnectionName[] = ['ARC', 'CMC', 'SETTINGS', 'HEARTBEAT', 'MDNS']
 	for (const service of services) {
 		if (!self.activeConnections[service]) {
 			if (self.CONNECTED) {
@@ -472,6 +478,9 @@ export function initConnection(self: DanteInstance): void {
 		}
 	}
 	if (self.mdns) {
+		// drop the old listeners first, so a late callback from the outgoing instance can't
+		// write into the fresh state we're about to build
+		self.mdns.removeAllListeners()
 		self.mdns.destroy()
 	}
 	if (self.INTERVAL) {
@@ -675,6 +684,42 @@ export function initConnection(self: DanteInstance): void {
 		self.mdns = multidns()
 	}
 	self.mdns.on('response', (response, rinfo) => danteDiscovery(self, response as unknown as MdnsResponsePacket, rinfo))
+
+	// `multicast-dns` returns a bare EventEmitter, so an unhandled 'error' event would throw and
+	// take down the module process. It only emits 'error' for EACCES/EADDRINUSE on the socket and
+	// for a failed bind - all of which mean discovery is dead, so report it rather than crash.
+	self.mdns.on('error', (error) => {
+		logger.error(`mDNS : ${error.message}`)
+		self.activeConnections.MDNS = false
+		if (self.CONNECTED) {
+			self.updateStatus(InstanceStatus.Disconnected)
+			self.CONNECTED = false
+		}
+	})
+
+	// Non-fatal problems all arrive as 'warning': malformed packets from anything on the network
+	// (potentially noisy, hence debug-gated) but also addMembership/setMulticastInterface failures,
+	// which are the difference between "no Dante devices here" and "discovery never started".
+	self.mdns.on('warning', (error) => {
+		if (self.debug) {
+			logger.warn(`mDNS : ${error.message}`)
+		} else {
+			logger.debug(`mDNS : ${error.message}`)
+		}
+	})
+
+	// Fires once the socket is bound. Sends issued before this are queued by multicast-dns, so
+	// the discovery query below is safe to send immediately - this only tracks liveness.
+	self.mdns.on('ready', () => {
+		self.activeConnections.MDNS = true
+		checkConnections(self)
+	})
+
+	self.mdns.on('networkInterface', () => {
+		if (self.debug) {
+			logger.debug('mDNS multicast memberships updated')
+		}
+	})
 
 	// dante devices discover
 	getMdnsServices(self)
@@ -1686,14 +1731,21 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 		const name = answer.name
 		// get devices and services names and port
 		if (answer.type == 'PTR' && DANTE_CONST.SERVICES_ARRAY.includes(name)) {
-			self.mdns.query({
-				questions: [
-					{
-						name: answer.data,
-						type: 'SRV',
-					},
-				],
-			})
+			self.mdns.query(
+				{
+					questions: [
+						{
+							name: answer.data,
+							type: 'SRV',
+						},
+					],
+				},
+				(error) => {
+					if (error) {
+						logger.warn(`mDNS SRV query for ${answer.data} failed : ${error.message}`)
+					}
+				},
+			)
 		} else if (answer.type == 'SRV') {
 			// register services and port
 			for (const [id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
@@ -1808,9 +1860,16 @@ export function getMdnsServices(self: DanteInstance): void {
 		type: 'PTR' as const,
 	}))
 
-	self.mdns?.query({
-		questions: questions,
-	})
+	self.mdns?.query(
+		{
+			questions: questions,
+		},
+		(error) => {
+			if (error) {
+				logger.warn(`mDNS discovery query failed : ${error.message}`)
+			}
+		},
+	)
 }
 
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */

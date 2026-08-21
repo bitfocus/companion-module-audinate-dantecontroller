@@ -75,7 +75,7 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		activeConnections: {},
 		CONNECTED: false,
 		INTERVAL: null,
-		mdns: { query: vi.fn() },
+		mdns: { query: vi.fn(), on: vi.fn(), removeAllListeners: vi.fn(), destroy: vi.fn() },
 		config: { ip: '', interval: 1000, timeoutInterval: 3000, verbose: false },
 		log: vi.fn(),
 		updateStatus: vi.fn(),
@@ -229,7 +229,7 @@ describe('findDeviceIpByName / findTxChannelByName / findRxChannelByName', () =>
 describe('checkConnections', () => {
 	it('returns true without updating status when already connected and all services active', () => {
 		const self = createMockInstance({
-			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true },
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
 			CONNECTED: true,
 		})
 		expect(checkConnections(self)).toBe(true)
@@ -238,7 +238,7 @@ describe('checkConnections', () => {
 
 	it('transitions to Ok when all services become active', () => {
 		const self = createMockInstance({
-			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true },
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
 			CONNECTED: false,
 		})
 		expect(checkConnections(self)).toBe(true)
@@ -249,6 +249,16 @@ describe('checkConnections', () => {
 	it('returns false and transitions to Disconnected when a service is inactive', () => {
 		const self = createMockInstance({
 			activeConnections: { ARC: true, CMC: false, SETTINGS: true, HEARTBEAT: true },
+			CONNECTED: true,
+		})
+		expect(checkConnections(self)).toBe(false)
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Disconnected)
+	})
+
+	it('returns false and transitions to Disconnected when mDNS is inactive', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: false },
 			CONNECTED: true,
 		})
 		expect(checkConnections(self)).toBe(false)

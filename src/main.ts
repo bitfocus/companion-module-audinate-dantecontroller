@@ -8,7 +8,7 @@ import type multidns from 'multicast-dns'
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions } from './actions.js'
-import { initConnection, destroyDevice, type DevicesData, type DanteSockets, type ServiceName } from './api.js'
+import { initConnection, destroyDevice, type DevicesData, type DanteSockets, type ConnectionName } from './api.js'
 import type { DanteModuleTypes } from './types.js'
 
 export { UpgradeScripts }
@@ -35,7 +35,7 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	mac: Buffer = Buffer.alloc(6)
 	debug = false
 	timeout = 0
-	activeConnections: Partial<Record<ServiceName, boolean>> = {}
+	activeConnections: Partial<Record<ConnectionName, boolean>> = {}
 	CONNECTED = false
 	INTERVAL: NodeJS.Timeout | null = null
 	mdns!: multidns.MulticastDNS
@@ -61,6 +61,11 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 
 		for (const socket of Object.values(this.sockets)) {
 			socket?.close()
+		}
+
+		if (this.mdns) {
+			this.mdns.removeAllListeners()
+			this.mdns.destroy()
 		}
 	}
 
