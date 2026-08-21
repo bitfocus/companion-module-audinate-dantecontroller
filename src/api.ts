@@ -499,6 +499,20 @@ export function checkConnections(self: DanteInstance): boolean {
 }
 
 /**
+ * Cancels every device's pending offline timeout.
+ *
+ * Must be called before `devicesData` is reset or the instance is torn down: the timers hold a
+ * closure over `self` and the device IP, so an orphaned one fires up to `timeoutInterval` later
+ * and calls `destroyDevice` for an IP that fresh discovery has since re-registered - silently
+ * removing a device that is present and responding.
+ */
+export function clearDeviceTimeouts(self: DanteInstance): void {
+	for (const device of Object.values(self.devicesData)) {
+		clearTimeout(device?.timeoutArray?.[0])
+	}
+}
+
+/**
  * (Re)opens the ARC, SETTINGS, CMC, and HEARTBEAT UDP sockets, closing any sockets/mdns/interval
  * left over from a previous call, then starts mDNS device discovery.
  */
@@ -507,6 +521,10 @@ export function initConnection(self: DanteInstance): void {
 	// try to rebind the fixed Settings/Heartbeat ports while the old sockets still hold them
 	if (self.sockets) {
 		for (const socket of Object.values(self.sockets)) {
+			// 'close' (and any in-flight 'error') fires asynchronously, i.e. after this function has
+			// finished rebuilding state. The handlers close over `self`, so a stale event would mark
+			// the *replacement* socket inactive and flip the instance to Disconnected. Drop them first.
+			socket?.removeAllListeners()
 			try {
 				socket?.close()
 			} catch (error) {
@@ -516,6 +534,8 @@ export function initConnection(self: DanteInstance): void {
 			}
 		}
 	}
+
+	clearDeviceTimeouts(self)
 	if (self.mdns) {
 		// drop the old listeners first, so a late callback from the outgoing instance can't
 		// write into the fresh state we're about to build

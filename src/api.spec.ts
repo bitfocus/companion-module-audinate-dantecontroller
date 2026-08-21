@@ -16,6 +16,7 @@ import {
 	registerDevice,
 	destroyDevice,
 	keepAlive,
+	clearDeviceTimeouts,
 	sendCommand,
 	makeCommand,
 	makeSettingCommand,
@@ -333,6 +334,35 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		destroyDevice(self, '10.0.0.5')
 		expect(self.devicesData['10.0.0.5']).toBeUndefined()
 		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('clearDeviceTimeouts disarms the pending offline timeout', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		clearDeviceTimeouts(self)
+		vi.advanceTimersByTime(10000)
+
+		expect(self.devicesData['10.0.0.5']).toBeDefined()
+	})
+
+	it('a re-init that clears timeouts does not later destroy a re-registered device', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		// what initConnection does on re-init: disarm the old timers, then drop the device table
+		clearDeviceTimeouts(self)
+		self.devicesData = {}
+		self.devicesChoices = []
+
+		// discovery immediately re-finds the same device
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		keepAlive(self, '10.0.0.5')
+
+		// the timer armed before the re-init must not reach across and delete the live entry
+		vi.advanceTimersByTime(2999)
+		expect(self.devicesData['10.0.0.5']).toBeDefined()
+		expect(self.devicesChoices).toContainEqual({ id: '10.0.0.5', label: 'MyDevice' })
 	})
 })
 
