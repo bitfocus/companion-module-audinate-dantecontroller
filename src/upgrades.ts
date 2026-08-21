@@ -65,17 +65,32 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 		_context: CompanionUpgradeContext<ModuleConfig>,
 		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
 	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
-		// The clear-crosspoint actions gained a `clearAll` checkbox. Actions saved before that have no
-		// such option, which leaves the channel field's `!$(options:clearAll)` visibility expression
-		// resolving against undefined - so give existing actions the explicit `false` they predate.
+		// Options added or retyped in this release. Note that options are stored as ExpressionOrValue
+		// wrappers rather than bare values, so migrated values have to be written in that shape.
 		const changedActions: CompanionMigrationAction[] = []
 		for (const action of props.actions) {
-			if (!clearAllActionIds.includes(action.actionId)) continue
-			if (action.options.clearAll !== undefined) continue
+			let changed = false
 
-			// Options are stored as ExpressionOrValue wrappers, not bare values
-			action.options.clearAll = { value: false, isExpression: false }
-			changedActions.push(action)
+			// The clear-crosspoint actions gained a `clearAll` checkbox. Actions saved before that have
+			// no such option, which leaves the channel field's `!$(options:clearAll)` visibility
+			// expression resolving against undefined - so give them the explicit `false` they predate.
+			if (clearAllActionIds.includes(action.actionId) && action.options.clearAll === undefined) {
+				action.options.clearAll = { value: false, isExpression: false }
+				changed = true
+			}
+
+			// setOutputLevel's Level dropdown draws its choices from object2choices, which builds ids
+			// with Object.entries and so always yields strings. Its default was the number 2, which
+			// matched no choice - so saved actions can hold a number the dropdown cannot display.
+			if (action.actionId === 'setOutputLevel') {
+				const level = action.options.level
+				if (level !== undefined && !level.isExpression && typeof level.value === 'number') {
+					action.options.level = { value: String(level.value), isExpression: false }
+					changed = true
+				}
+			}
+
+			if (changed) changedActions.push(action)
 		}
 
 		return {

@@ -18,6 +18,10 @@ import {
 	refreshSettings,
 	refreshArc,
 	findTxChannelByName,
+	firstChoiceId,
+	rxDeviceChoices,
+	txDeviceChoices,
+	channelChoices,
 	getChannelSubscriptionName,
 	hasRxChannels,
 	hasTxChannels,
@@ -90,7 +94,8 @@ type SetEncodingOptions = {
 
 type SetOutputLevelOptions = {
 	device: string
-	level: number
+	/** String, because `object2choices` builds ids from `Object.entries` and so always yields strings. */
+	level: string
 } & Record<`channel_${string}`, number>
 
 export type ActionSchema = {
@@ -173,8 +178,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Destination Device',
 					id: 'destinationDevice',
-					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: rxDeviceChoices(self),
+					default: firstChoiceId(rxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -183,16 +188,16 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${ip}`,
-						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'rx'),
+						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
 						isVisibleExpression: `$(options:destinationDevice) == '${ip}'`,
 					})),
 				{
 					type: 'dropdown',
 					label: 'Source Device',
 					id: 'sourceDevice',
-					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: txDeviceChoices(self),
+					default: firstChoiceId(txDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -201,8 +206,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Source channel',
 						id: `sourceChannel_${ip}`,
-						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'tx'),
+						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
 						isVisibleExpression: `$(options:sourceDevice) == '${ip}'`,
 					})),
 			],
@@ -269,8 +274,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Destination Device',
 					id: 'destinationDevice',
-					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: rxDeviceChoices(self),
+					default: firstChoiceId(rxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				{
@@ -287,8 +292,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Destination channel',
 						id: `destinationChannel_${ip}`,
-						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'rx'),
+						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
 						isVisibleExpression: `$(options:destinationDevice) == '${ip}' && !$(options:clearAll)`,
 					})),
 			],
@@ -374,8 +379,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: rxDeviceChoices(self),
+					default: firstChoiceId(rxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -384,8 +389,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
-						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'rx'),
+						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					})),
 				{
@@ -409,8 +414,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: rxDeviceChoices(self),
+					default: firstChoiceId(rxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -419,8 +424,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
-						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'rx'),
+						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					})),
 			],
@@ -437,8 +442,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: txDeviceChoices(self),
+					default: firstChoiceId(txDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -447,8 +452,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
-						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'tx'),
+						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					})),
 				{
@@ -472,8 +477,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: txDeviceChoices(self),
+					default: firstChoiceId(txDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -482,8 +487,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'channel',
 						id: `channel_${ip}`,
-						choices: device.name ? (self.txChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'tx'),
+						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					})),
 			],
@@ -561,7 +566,10 @@ export function UpdateActions(self: DanteInstance): void {
 						label: 'Sample rate',
 						id: `sr_${ip}`,
 						choices: array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? [],
-						default: 0,
+						default: firstChoiceId(
+							array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? [],
+							0,
+						),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
 				),
@@ -590,7 +598,7 @@ export function UpdateActions(self: DanteInstance): void {
 						label: 'Sample rate pullup',
 						id: `pullup_${ip}`,
 						choices: object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
-						default: 0,
+						default: firstChoiceId(object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
 				),
@@ -619,7 +627,7 @@ export function UpdateActions(self: DanteInstance): void {
 						label: 'Encoding',
 						id: `encoding_${ip}`,
 						choices: object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
-						default: 0,
+						default: firstChoiceId(object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					}),
 				),
@@ -638,8 +646,8 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id])),
-					default: self.devicesChoices[0]?.id ?? '',
+					choices: rxDeviceChoices(self),
+					default: firstChoiceId(rxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 				},
 				...Object.entries(self.devicesData)
@@ -648,8 +656,8 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${ip}`,
-						choices: device.name ? (self.rxChannelsChoices[device.name] ?? []) : [],
-						default: 0,
+						choices: channelChoices(self, device, 'rx'),
+						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
 						isVisibleExpression: `$(options:device) == '${ip}'`,
 					})),
 				{
@@ -657,12 +665,14 @@ export function UpdateActions(self: DanteInstance): void {
 					label: 'Level',
 					id: 'level',
 					choices: object2choices(DANTE_CONST.LEVELS),
-					default: 2,
+					// '2' (+4dBu), as a string to match the choice ids - the numeric 2 it used to be
+					// matched nothing, so the dropdown opened with no level selected
+					default: '2',
 				},
 			],
 			callback: async (action) => {
 				const opt = action.options
-				setLevel(self, opt.device, 'out', opt[`channel_${opt.device}`], opt.level)
+				setLevel(self, opt.device, 'out', opt[`channel_${opt.device}`], Number(opt.level))
 			},
 		},
 

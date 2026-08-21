@@ -90,6 +90,48 @@ describe('clearAll upgrade script', () => {
 		expect(run([stale, current, unrelated]).updatedActions).toEqual([stale])
 	})
 
+	it('converts a numeric setOutputLevel level to the string id the dropdown offers', () => {
+		const existing = action('setOutputLevel', { level: { value: 2, isExpression: false } })
+		const result = run([existing])
+
+		expect(result.updatedActions).toEqual([existing])
+		expect(existing.options.level).toEqual({ value: '2', isExpression: false })
+	})
+
+	it('leaves a level already stored as a string alone', () => {
+		const current = action('setOutputLevel', { level: { value: '2', isExpression: false } })
+		expect(run([current]).updatedActions).toEqual([])
+		expect(current.options.level).toEqual({ value: '2', isExpression: false })
+	})
+
+	it('leaves a level set to an expression alone', () => {
+		const expression = action('setOutputLevel', { level: { value: '$(internal:foo)', isExpression: true } })
+		expect(run([expression]).updatedActions).toEqual([])
+		expect(expression.options.level).toEqual({ value: '$(internal:foo)', isExpression: true })
+	})
+
+	it('leaves a setOutputLevel action with no stored level alone', () => {
+		const bare = action('setOutputLevel', {})
+		expect(run([bare]).updatedActions).toEqual([])
+		expect(bare.options.level).toBeUndefined()
+	})
+
+	it('migrates both concerns in one pass, reporting the action once', () => {
+		const clear = action('clearCrosspoint')
+		const level = action('setOutputLevel', { level: { value: 5, isExpression: false } })
+		const result = run([clear, level])
+
+		expect(result.updatedActions).toEqual([clear, level])
+		expect(clear.options.clearAll).toEqual({ value: false, isExpression: false })
+		expect(level.options.level).toEqual({ value: '5', isExpression: false })
+	})
+
+	it('does not add clearAll to a setOutputLevel action', () => {
+		const level = action('setOutputLevel', { level: { value: 2, isExpression: false } })
+		run([level])
+		expect(level.options.clearAll).toBeUndefined()
+	})
+
 	it('does not touch config or feedbacks', () => {
 		const result = run([action('clearCrosspoint')])
 		expect(result.updatedConfig).toBeNull()

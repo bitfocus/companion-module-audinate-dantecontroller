@@ -833,6 +833,34 @@ export function initConnection(self: DanteInstance): void {
 	getMdnsServices(self)
 }
 
+/**
+ * The id to use as a dropdown's default: the first entry of the list that dropdown actually offers.
+ *
+ * Dropdowns whose choices are filtered must take their default from the filtered list. Defaulting
+ * to the first device overall can select one the filter removed, leaving the control showing a
+ * value that is not selectable and an action pointed at a device that cannot perform it.
+ */
+export function firstChoiceId<T extends string | number>(choices: DropdownChoice[], fallback: T): string | number {
+	return choices[0]?.id ?? fallback
+}
+
+/** Devices that have receive channels, as dropdown choices. */
+export function rxDeviceChoices(self: DanteInstance): DropdownChoice[] {
+	return self.devicesChoices.filter((choice) => hasRxChannels(self.devicesData[choice.id]))
+}
+
+/** Devices that have transmit channels, as dropdown choices. */
+export function txDeviceChoices(self: DanteInstance): DropdownChoice[] {
+	return self.devicesChoices.filter((choice) => hasTxChannels(self.devicesData[choice.id]))
+}
+
+/** A device's rx or tx channel choices, or an empty list if it has none yet. */
+export function channelChoices(self: DanteInstance, device: DeviceData, channelType: 'rx' | 'tx'): DropdownChoice[] {
+	if (!device.name) return []
+	const byDevice = channelType === 'rx' ? self.rxChannelsChoices : self.txChannelsChoices
+	return byDevice[device.name] ?? []
+}
+
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */
 export function insertDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
 	logger.info(`INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)

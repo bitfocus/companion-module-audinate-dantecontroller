@@ -40,6 +40,9 @@ function mockInstance() {
 
 interface OptionLike {
 	id: string
+	type?: string
+	choices?: { id: string | number; label: string }[]
+	default?: unknown
 	isVisibleExpression?: string
 	disableAutoExpression?: boolean
 }
@@ -115,5 +118,71 @@ describe('isVisibleExpression dependencies', () => {
 				},
 			}),
 		).toEqual(['bad.toggle (missing disableAutoExpression)'])
+	})
+})
+
+/** Returns `definitionId.optionId` for every dropdown whose default is not one of its own choices. */
+function defaultsNotInChoices(definitions: Record<string, DefinitionLike>): string[] {
+	const bad: string[] = []
+	for (const [definitionId, definition] of Object.entries(definitions)) {
+		for (const option of definition.options ?? []) {
+			if (option.type !== 'dropdown' || !option.choices) continue
+			// A dropdown with nothing to offer has no valid default to pick.
+			if (option.choices.length === 0) continue
+
+			if (!option.choices.some((choice) => choice.id === option.default)) {
+				bad.push(`${definitionId}.${option.id} (default ${JSON.stringify(option.default)} not in choices)`)
+			}
+		}
+	}
+	return bad
+}
+
+describe('dropdown defaults', () => {
+	it('every action dropdown defaults to one of its own choices', () => {
+		const self = mockInstance()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		expect(defaultsNotInChoices(definitions)).toEqual([])
+	})
+
+	it('every feedback dropdown defaults to one of its own choices', () => {
+		const self = mockInstance()
+		UpdateFeedbacks(self)
+		const definitions = (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		expect(defaultsNotInChoices(definitions)).toEqual([])
+	})
+
+	it('holds when a filter excludes the first device overall', () => {
+		// DeviceA has no tx channels, so any tx-filtered dropdown must not default to it
+		const self = mockInstance()
+		;(self.devicesData['10.0.0.5'] as { tx?: unknown }).tx = undefined
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		expect(defaultsNotInChoices(definitions)).toEqual([])
+	})
+
+	it('actually inspects dropdowns, rather than passing because it found none', () => {
+		const self = mockInstance()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		const dropdowns = Object.values(definitions as Record<string, DefinitionLike>).flatMap((definition) =>
+			(definition.options ?? []).filter((option) => option.type === 'dropdown' && option.choices?.length),
+		)
+		expect(dropdowns.length).toBeGreaterThan(10)
+	})
+
+	it('flags a dropdown whose default was filtered out', () => {
+		expect(
+			defaultsNotInChoices({
+				bad: {
+					options: [{ id: 'device', type: 'dropdown', choices: [{ id: 'b', label: 'B' }], default: 'a' }],
+				},
+			}),
+		).toEqual(['bad.device (default "a" not in choices)'])
 	})
 })
