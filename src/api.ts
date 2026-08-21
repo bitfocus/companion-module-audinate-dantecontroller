@@ -1884,44 +1884,62 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 			delete channel.friendlyName
 		}
 	}
-	const commandArguments = Buffer.from('0001000100', 'hex')
-	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.TX
-	for (let page = 0; page < Math.max(1, Math.ceil((device.tx?.count ?? 0) / perPage)); page++) {
-		commandArguments.writeUInt8(page * perPage + 1, 3)
-		const commandBuffer = makeCommand(
-			self,
-			DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
-			commandArguments,
-		)
-		sendCommand(self, commandBuffer, ipaddress)
-	}
+	sendChannelQuery(
+		self,
+		ipaddress,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
+		device.tx?.count ?? 0,
+		DANTE_CONST.CHANNELS_PER_PAGE.TX,
+	)
 }
 
 /** Queries a device's tx channel details (names, sample rates), paginating the request 32 channels at a time. */
 export function getTxChannels(self: DanteInstance, ipaddress: string): void {
-	const commandArguments = Buffer.from('0001000100', 'hex')
-	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.TX
-	const txCount = self.devicesData[ipaddress]?.tx?.count ?? 0
-	for (let page = 0; page < Math.max(1, Math.ceil(txCount / perPage)); page++) {
-		commandArguments.writeUInt8(page * perPage + 1, 3)
-		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, commandArguments)
-		sendCommand(self, commandBuffer, ipaddress)
-	}
+	sendChannelQuery(
+		self,
+		ipaddress,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY,
+		self.devicesData[ipaddress]?.tx?.count ?? 0,
+		DANTE_CONST.CHANNELS_PER_PAGE.TX,
+	)
 }
 
 /** Queries a device's rx channel details (names, routing, subscription status), paginating the request 16 channels at a time. */
+/**
+ * Sends a channel query, one command per page, covering `channelCount` channels.
+ *
+ * Always sends at least one page: before a device has reported its channel counts that first query
+ * is how they get discovered.
+ */
+function sendChannelQuery(
+	self: DanteInstance,
+	ipaddress: string,
+	commandType: number,
+	channelCount: number,
+	channelsPerPage: number,
+): void {
+	for (let page = 0; page < Math.max(1, Math.ceil(channelCount / channelsPerPage)); page++) {
+		const commandArguments = Buffer.from('0001000100', 'hex')
+		// The starting channel is a big-endian u16 spanning argument bytes 2-3. Writing a single byte
+		// at byte 3 produced identical packets for channels 1-255 but threw ERR_OUT_OF_RANGE beyond
+		// that, so a device with more than 255 channels in one direction could not be paged past the
+		// first 255. Writing the full u16 is the same bytes below 256 and correct above it.
+		commandArguments.writeUInt16BE(page * channelsPerPage + 1, 2)
+		sendCommand(self, makeCommand(self, commandType, commandArguments), ipaddress)
+	}
+}
+
 export function getRxChannels(self: DanteInstance, ipaddress: string): void {
-	const commandArguments = Buffer.from('0001000100', 'hex')
 	// rx.count, not tx.count - paging the receive query by the transmit count silently truncates
 	// discovery on any device with more inputs than outputs (a 32x8 DSP would only ever report its
 	// first 16 receive channels)
-	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.RX
-	const rxCount = self.devicesData[ipaddress]?.rx?.count ?? 0
-	for (let page = 0; page < Math.max(1, Math.ceil(rxCount / perPage)); page++) {
-		commandArguments.writeUInt8(page * perPage + 1, 3)
-		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, commandArguments)
-		sendCommand(self, commandBuffer, ipaddress)
-	}
+	sendChannelQuery(
+		self,
+		ipaddress,
+		DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY,
+		self.devicesData[ipaddress]?.rx?.count ?? 0,
+		DANTE_CONST.CHANNELS_PER_PAGE.RX,
+	)
 }
 
 /** Queries a device's name. */

@@ -34,6 +34,8 @@ import {
 	makeCrosspoint,
 	clearCrosspoint,
 	clearAllCrosspoints,
+	getRxChannels,
+	getTxChannels,
 	firstChoiceId,
 	currentChoiceId,
 	parseHeartbeatReply,
@@ -788,6 +790,70 @@ describe('firstChoiceId / currentChoiceId', () => {
 			{ id: 'b', label: 'c' },
 		]
 		expect(currentChoiceId(ambiguous, 'b', '')).toBe('b')
+	})
+})
+
+describe('channel query paging', () => {
+	function withCounts(rx: number, tx: number) {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, rx: { count: rx }, tx: { count: tx } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('0001', 'hex'),
+		})
+		return { self, send }
+	}
+
+	/**
+	 * The starting channel a query asks for.
+	 *
+	 * makeCommand lays out protocol(2) length(2) counter(2) opcode(2) requestFlag(2) then the
+	 * arguments, so argument bytes 2-3 - which hold the channel as a big-endian u16 - are at packet
+	 * offset 12.
+	 */
+	const startingChannel = (packet: Buffer) => packet.readUInt16BE(12)
+
+	it('pages the receive query by the receive count', () => {
+		const { self, send } = withCounts(32, 8)
+		getRxChannels(self, '10.0.0.5')
+		expect(send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))).toEqual([1, 17])
+	})
+
+	it('pages the transmit query by 32', () => {
+		const { self, send } = withCounts(8, 64)
+		getTxChannels(self, '10.0.0.5')
+		expect(send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))).toEqual([1, 33])
+	})
+
+	it('sends one probe when the channel count is not yet known', () => {
+		const { self, send } = withCounts(0, 0)
+		getRxChannels(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(1)
+		expect(startingChannel(send.mock.calls[0][0] as Buffer)).toBe(1)
+	})
+
+	it('emits the exact bytes the devices are known to accept', () => {
+		const { self, send } = withCounts(4, 0)
+		getRxChannels(self, '10.0.0.5')
+		expect((send.mock.calls[0][0] as Buffer).toString('hex')).toBe('27290010000130000000000100010000')
+	})
+
+	it('pages past channel 255 rather than throwing', () => {
+		const { self, send } = withCounts(512, 0)
+		expect(() => getRxChannels(self, '10.0.0.5')).not.toThrow()
+
+		const starts = send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))
+		expect(starts).toHaveLength(32)
+		expect(starts[0]).toBe(1)
+		expect(starts[16]).toBe(257) // the page a single-byte write could not express
+		expect(starts[31]).toBe(497)
+	})
+
+	it('covers every channel of a 512-channel device exactly once', () => {
+		const { self, send } = withCounts(512, 0)
+		getRxChannels(self, '10.0.0.5')
+		const starts = send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))
+		expect(starts).toEqual(Array.from({ length: 32 }, (_, i) => i * 16 + 1))
 	})
 })
 
