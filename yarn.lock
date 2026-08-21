@@ -861,6 +861,7 @@ __metadata:
     "@companion-module/tools": "npm:^3.0.2"
     "@types/multicast-dns": "npm:^7.2.4"
     "@types/node": "npm:^26.2.0"
+    es-toolkit: "npm:^1.51.0"
     eslint: "npm:^10.8.1"
     husky: "npm:^9.1.7"
     lint-staged: "npm:^17.3.0"
@@ -984,6 +985,20 @@ __metadata:
   version: 2.3.2
   resolution: "es-module-lexer@npm:2.3.2"
   checksum: 10c0/5e7389424c43478439f12f9a6aca1750f6f99afa384fc3de329f4a45f152ab156671055008adaafc74960877abf8cc338aeebf6bed8c21297b146fd6eb7a22f8
+  languageName: node
+  linkType: hard
+
+"es-toolkit@npm:^1.51.0":
+  version: 1.51.0
+  resolution: "es-toolkit@npm:1.51.0"
+  dependenciesMeta:
+    "@trivago/prettier-plugin-sort-imports@4.3.0":
+      unplugged: true
+    prettier-plugin-sort-re-exports@0.0.1:
+      unplugged: true
+    vitepress-plugin-sandpack@1.1.4:
+      unplugged: true
+  checksum: 10c0/ad519228a317a27b11144b582c1168c552143dd58ce4e62be50c185de48c69dea996f6ad6ebc518129ebd58c34da150c1a2134d4a3d7cdc75120c626e57ce7c4
   languageName: node
   linkType: hard
 

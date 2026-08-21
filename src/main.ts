@@ -8,7 +8,14 @@ import type multidns from 'multicast-dns'
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions } from './actions.js'
-import { initConnection, destroyDevice, type DevicesData, type DanteSockets, type ConnectionName } from './api.js'
+import {
+	initConnection,
+	destroyDevice,
+	cancelUpdateData,
+	type DevicesData,
+	type DanteSockets,
+	type ConnectionName,
+} from './api.js'
 import type { DanteModuleTypes } from './types.js'
 
 export { UpgradeScripts }
@@ -59,6 +66,8 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		for (const ip of Object.keys(this.devicesData)) {
 			destroyDevice(this, ip)
 		}
+		// destroyDevice queues a rebuild per device; none of them should reach a torn-down instance
+		cancelUpdateData(this)
 
 		for (const socket of Object.values(this.sockets)) {
 			socket?.removeAllListeners()

@@ -17,6 +17,9 @@ import {
 	destroyDevice,
 	keepAlive,
 	clearDeviceTimeouts,
+	scheduleUpdateData,
+	cancelUpdateData,
+	flushUpdateData,
 	sendCommand,
 	makeCommand,
 	makeSettingCommand,
@@ -363,6 +366,72 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		vi.advanceTimersByTime(2999)
 		expect(self.devicesData['10.0.0.5']).toBeDefined()
 		expect(self.devicesChoices).toContainEqual({ id: '10.0.0.5', label: 'MyDevice' })
+	})
+})
+
+describe('scheduleUpdateData', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it('coalesces a burst of requests into a single rebuild', () => {
+		const self = createMockInstance()
+		for (let i = 0; i < 50; i++) scheduleUpdateData(self)
+
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+		vi.advanceTimersByTime(500)
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	it('does not rebuild while requests keep arriving inside the debounce window', () => {
+		const self = createMockInstance()
+		for (let i = 0; i < 9; i++) {
+			scheduleUpdateData(self)
+			vi.advanceTimersByTime(400) // 3.6s elapsed, never a quiet 500ms
+		}
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+	})
+
+	it('rebuilds anyway once maxWait elapses under sustained load', () => {
+		const self = createMockInstance()
+		// a steady stream that never leaves a 500ms gap, as during discovery on a large network
+		for (let i = 0; i < 40; i++) {
+			scheduleUpdateData(self)
+			vi.advanceTimersByTime(400)
+		}
+		// 16s of sustained requests must have produced rebuilds via the 10s maxWait
+		expect(self.setActionDefinitions).toHaveBeenCalled()
+		expect((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThan(5)
+	})
+
+	it('cancelUpdateData drops a pending rebuild', () => {
+		const self = createMockInstance()
+		scheduleUpdateData(self)
+		cancelUpdateData(self)
+		vi.advanceTimersByTime(10000)
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+	})
+
+	it('flushUpdateData runs a pending rebuild immediately', () => {
+		const self = createMockInstance()
+		scheduleUpdateData(self)
+		flushUpdateData(self)
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	it('keeps separate debounce state per instance', () => {
+		const a = createMockInstance()
+		const b = createMockInstance()
+		scheduleUpdateData(a)
+		cancelUpdateData(a)
+		scheduleUpdateData(b)
+		vi.advanceTimersByTime(500)
+		expect(a.setActionDefinitions).not.toHaveBeenCalled()
+		expect(b.setActionDefinitions).toHaveBeenCalledTimes(1)
 	})
 })
 

@@ -1,4 +1,5 @@
 import multidns from 'multicast-dns'
+import { debounce, type DebouncedFunc } from 'es-toolkit/compat'
 import dgram from 'node:dgram'
 import merge from './utils/merge.js'
 import { networkInterfaces } from 'node:os'
@@ -536,6 +537,9 @@ export function initConnection(self: DanteInstance): void {
 	}
 
 	clearDeviceTimeouts(self)
+
+	// a rebuild queued by the outgoing generation would publish device data we are about to discard
+	cancelUpdateData(self)
 	if (self.mdns) {
 		// drop the old listeners first, so a late callback from the outgoing instance can't
 		// write into the fresh state we're about to build
@@ -812,7 +816,7 @@ export function updateDeviceChoice(self: DanteInstance, deviceIp: string, device
 				self.devicesChoices.sort((deviceA, deviceB) => {
 					return deviceA.label.localeCompare(deviceB.label)
 				})
-				updateData(self)
+				scheduleUpdateData(self)
 			}
 			break
 		}
@@ -849,12 +853,12 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 	}
 	if (!choicesByDevice[deviceName]) {
 		choicesByDevice[deviceName] = channelChoice
-		updateData(self)
+		scheduleUpdateData(self)
 	} else {
 		for (let i = 1; i < channelChoice.length; i++) {
 			if (!choicesByDevice[deviceName][i] || channelChoice[i].label != choicesByDevice[deviceName][i].label) {
 				choicesByDevice[deviceName] = channelChoice
-				updateData(self)
+				scheduleUpdateData(self)
 				break
 			}
 		}
@@ -908,7 +912,7 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	// delete object from devicesData
 	delete self.devicesData[deviceIp]
 
-	updateData(self)
+	scheduleUpdateData(self)
 }
 
 /** Resets a device's offline timeout, keeping it from being considered offline. */
@@ -1016,7 +1020,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 		for (const flag of updateFlags) {
 			switch (flag) {
 				case 'name':
-					updateData(self)
+					scheduleUpdateData(self)
 					break
 				case 'info':
 					CheckVariables(self, deviceIp, 'sr', 'latency')
@@ -1825,13 +1829,13 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 					} else {
 						// create data object if needed
 						currDevice = registerDevice(self, deviceIp, deviceName)
-						updateData(self)
+						scheduleUpdateData(self)
 					}
 
 					if (currDevice.name != deviceName) {
 						currDevice.name = deviceName
 						updateDeviceChoice(self, deviceIp, deviceName)
-						updateData(self)
+						scheduleUpdateData(self)
 					}
 					if (!currDevice.ports) {
 						currDevice.ports = {}
@@ -1933,6 +1937,54 @@ export function getMdnsServices(self: DanteInstance): void {
 			}
 		},
 	)
+}
+
+/**
+ * How long the definition rebuild waits for the flurry of discovery replies to settle.
+ * Long enough to coalesce a device's registration, name, and paged channel replies into one
+ * rebuild; short enough that a single device appearing still feels immediate.
+ */
+const UPDATE_DEBOUNCE_MS = 500
+
+/**
+ * Upper bound on how long a rebuild can be deferred. On a large network the replies never stop
+ * arriving for long enough to reach the debounce window, so without this the dropdowns would
+ * stay empty for the whole of discovery. This guarantees visible progress every 10s instead.
+ */
+const UPDATE_MAX_WAIT_MS = 10_000
+
+/** One debounced rebuild per instance. Weakly held so a discarded instance is still collectable. */
+const debouncedUpdates = new WeakMap<DanteInstance, DebouncedFunc<() => void>>()
+
+function getDebouncedUpdate(self: DanteInstance): DebouncedFunc<() => void> {
+	let debounced = debouncedUpdates.get(self)
+	if (!debounced) {
+		debounced = debounce(() => updateData(self), UPDATE_DEBOUNCE_MS, { maxWait: UPDATE_MAX_WAIT_MS })
+		debouncedUpdates.set(self, debounced)
+	}
+	return debounced
+}
+
+/**
+ * Requests a definition rebuild, coalescing bursts of requests into a single one.
+ *
+ * Discovery calls this once per device registration, once per name, and once per 32-channel page
+ * in each direction, while every rebuild re-serialises the definitions for *all* devices to the
+ * Companion host - so the uncoalesced cost is quadratic in network size. Prefer this over calling
+ * `updateData` directly for anything on the discovery path.
+ */
+export function scheduleUpdateData(self: DanteInstance): void {
+	getDebouncedUpdate(self)()
+}
+
+/** Drops any pending rebuild, for when the state it would publish is being torn down or replaced. */
+export function cancelUpdateData(self: DanteInstance): void {
+	debouncedUpdates.get(self)?.cancel()
+}
+
+/** Runs any pending rebuild immediately. */
+export function flushUpdateData(self: DanteInstance): void {
+	debouncedUpdates.get(self)?.flush()
 }
 
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
