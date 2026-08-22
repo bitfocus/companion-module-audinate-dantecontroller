@@ -11,6 +11,7 @@ import { UpdateVariableDefinitions, CheckVariables } from '../variables.js'
 import { listNetworkInterfaces, findInterfaceForAddress } from '../config.js'
 import type DanteInstance from '../main.js'
 import type { DeviceData, RxChannelSource, TxChannel, RxChannel } from './types.js'
+import { isSubscriptionConnected } from './protocol-rules.js'
 import type { DanteDeviceVariables } from '../types.js'
 import { insertDeviceChoice } from './choices.js'
 
@@ -285,6 +286,7 @@ export function getRxChannelSource(
 	return {
 		deviceName: channel.sourceDevice === '.' ? (device?.name ?? channel.sourceDevice) : channel.sourceDevice,
 		channelName: channel.sourceChannel,
+		connected: isSubscriptionConnected(channel.subscriptionStatus),
 	}
 }
 

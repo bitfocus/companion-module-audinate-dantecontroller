@@ -8,13 +8,14 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - Select network interface
 - Set poll interval time to discover from network
 - Set response time before considering a device offline
+- Set create module variables. If set false, the same data can be access via value feedbacks.
 
 ## Actions
 
 - Make Crosspoint
-- Make Crosspoint (with dynamics drop-down choices)
+- Make Crosspoint (with dynamic drop-down choices)
 - Clear Crosspoint
-- Clear Crosspoint (with dynamics drop-down choices)
+- Clear Crosspoint (with dynamic drop-down choices)
 - Set Device Name
 - Reset Device Name
 - Set Tx Channel Name
@@ -64,5 +65,7 @@ The same values are available through the Device Property feedback.
 
 ## Feedbacks
 
+- Channel Subscription (_Value_)
 - Crosspoint Connected (_Boolean_)
+- Crosspoint Connected (with dynamic drop-down choices) (_Boolean_)
 - Device Property (_Value_)

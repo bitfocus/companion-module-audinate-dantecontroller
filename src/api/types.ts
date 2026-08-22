@@ -110,4 +110,12 @@ export interface RxChannelSource {
 	deviceName: string
 	/** Name of the transmitting channel. */
 	channelName: string
+	/**
+	 * True when the subscription is actually carrying audio.
+	 *
+	 * A subscription can exist and not be working - the source device offline, or the channel it
+	 * names no longer present - in which case the device reports a status that is not one of the
+	 * connected ones.
+	 */
+	connected: boolean
 }

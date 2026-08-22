@@ -16,6 +16,7 @@ import {
 	findTxChannelByName,
 	firstChoiceId,
 	getChannelSubscriptionName,
+	getRxChannelSource,
 	isSubscriptionConnected,
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,
@@ -48,10 +49,40 @@ type DevicePropertyOptions = {
 	property: string
 }
 
+type ChannelSubscriptionOptions = {
+	device: string
+} & Record<`channel_${string}`, number>
+
+/**
+ * What a receive channel is subscribed to.
+ *
+ * Always this shape, even when nothing is subscribed - a layout reading `channel.number` should not
+ * have to guard against the whole object being absent. An empty subscription reports empty strings
+ * and channel 0, which is not a valid Dante channel number.
+ */
+interface ChannelSubscriptionValue {
+	/**
+	 * True only when the subscription is carrying audio.
+	 *
+	 * False both when nothing is subscribed and when a subscription exists but is not working -
+	 * the source device offline, for instance.
+	 */
+	connected: boolean
+	device: { name: string; ip: string }
+	channel: { name: string; number: number }
+}
+
+const NO_SUBSCRIPTION = {
+	connected: false,
+	device: { name: '', ip: '' },
+	channel: { name: '', number: 0 },
+} as const satisfies ChannelSubscriptionValue
+
 export type FeedbackSchema = {
 	routing_bg: { type: 'boolean'; options: RoutingBgOptions }
 	routing_bg_manual: { type: 'boolean'; options: RoutingBgManualOptions }
 	device_property: { type: 'value'; options: DevicePropertyOptions }
+	channel_subscription: { type: 'value'; options: ChannelSubscriptionOptions }
 }
 
 /** True if a stored option value names a property this module knows. */
@@ -319,10 +350,73 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 		},
 	}
 
+	const channelSubscription: CompanionValueFeedbackDefinition<ChannelSubscriptionOptions> = {
+		type: 'value',
+		name: 'Channel Subscription',
+		description: 'Returns the channel a destination is subscribed to',
+		options: [
+			{
+				type: 'dropdown',
+				label: 'Device',
+				id: 'device',
+				choices: rxDeviceChoices(self),
+				default: firstChoiceId(rxDeviceChoices(self), ''),
+				disableAutoExpression: true,
+				// see actions.ts: a legacy address must remain a selectable value
+				allowCustom: true,
+			},
+			...Object.entries(self.devicesData)
+				.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
+				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof ChannelSubscriptionOptions> => ({
+					type: 'dropdown',
+					label: 'Channel',
+					id: `channel_${device.name}`,
+					choices: channelChoices(self, device, 'rx'),
+					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+					allowCustom: true,
+					isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
+				})),
+		],
+		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
+		callback: (feedback) => {
+			const opt = feedback.options
+			const channelNumber = deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
+			const source = getRxChannelSource(self, opt.device, channelNumber)
+
+			// Depends on the destination (which reports the subscription) and on the source (whose
+			// transmit channels give the number), so a change to either must re-check this feedback -
+			// the same pair the Crosspoint Connected feedback tracks.
+			trackFeedbackDevices(
+				self,
+				feedback.id,
+				// With no subscription there is no source to depend on, so the destination alone decides
+				// this value. Passing an undefined source instead would register the feedback as a
+				// wildcard and have every device's traffic re-check it.
+				source
+					? [resolveDeviceIp(self, opt.device), resolveDeviceIp(self, source.deviceName)]
+					: [resolveDeviceIp(self, opt.device)],
+			)
+
+			if (!source) {
+				return { ...NO_SUBSCRIPTION }
+			}
+
+			// The name is the one the destination reports, which is the subscription as it stands - a
+			// source renamed since it was made still reports the name the subscription was built with.
+			const sourceChannel = findTxChannelByName(self, source.deviceName, source.channelName)
+			return {
+				connected: source.connected,
+				device: { name: source.deviceName, ip: resolveDeviceIp(self, source.deviceName) ?? '' },
+				channel: { name: source.channelName, number: sourceChannel?.number ?? 0 },
+			}
+		},
+	}
+
 	const feedbacks: CompanionFeedbackDefinitions<FeedbackSchema> = {
 		routing_bg: routingBg,
 		routing_bg_manual: routingBgManual,
 		device_property: devicePropertyFeedback,
+		channel_subscription: channelSubscription,
 	}
 
 	self.setFeedbackDefinitions(feedbacks)
