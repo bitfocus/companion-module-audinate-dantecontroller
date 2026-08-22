@@ -59,11 +59,13 @@ function mockInstance() {
 
 interface OptionLike {
 	id: string
+	label?: string
 	type?: string
 	choices?: { id: string | number; label: string }[]
 	default?: unknown
 	isVisibleExpression?: string
 	disableAutoExpression?: boolean
+	expressionDescription?: string
 }
 
 interface DefinitionLike {
@@ -474,5 +476,68 @@ describe('dropdown defaults', () => {
 				},
 			}),
 		).toEqual(['bad.device (default "a" not in choices)'])
+	})
+})
+
+/**
+ * A channel picker switched to expression mode shows no choices, so its `expressionDescription` is
+ * the only thing telling the user what the expression has to produce. Every one of them needs it,
+ * and a new action gaining a channel dropdown must not quietly ship without one.
+ */
+function channelDropdowns(definitions: Record<string, DefinitionLike>): [string, OptionLike][] {
+	const found: [string, OptionLike][] = []
+	for (const [definitionId, definition] of Object.entries(definitions)) {
+		for (const option of definition.options ?? []) {
+			if (option.type !== 'dropdown') continue
+			if (!/^(destination|source)?[Cc]hannel_/.test(option.id)) continue
+			found.push([definitionId, option])
+		}
+	}
+	return found
+}
+
+describe('channel dropdowns state their range in expression mode', () => {
+	function pickers(build: (self: DanteInstance) => void, setter: 'setActionDefinitions' | 'setFeedbackDefinitions') {
+		const self = mockInstance()
+		build(self)
+		return channelDropdowns((self[setter] as ReturnType<typeof vi.fn>).mock.calls[0][0])
+	}
+
+	const actionPickers = pickers(UpdateActions, 'setActionDefinitions')
+	const feedbackPickers = pickers(UpdateFeedbacks, 'setFeedbackDefinitions')
+
+	it('finds the channel dropdowns it means to check', () => {
+		// a rename that stopped these matching would make every assertion below vacuous
+		expect(actionPickers.length).toBeGreaterThan(0)
+		expect(feedbackPickers.length).toBeGreaterThan(0)
+	})
+
+	it.each(
+		[...actionPickers, ...feedbackPickers].map(([id, option]): [string, OptionLike] => [`${id}.${option.id}`, option]),
+	)('%s has an expressionDescription', (name, option) => {
+		expect(option.expressionDescription, name).toBeTypeOf('string')
+	})
+
+	it('names the range that matches the choices offered', () => {
+		for (const [definitionId, option] of [...actionPickers, ...feedbackPickers]) {
+			const real = (option.choices ?? []).filter((choice) => choice.id !== 0)
+			expect(option.expressionDescription, `${definitionId}.${option.id}`).toContain(`to ${real.length}`)
+		}
+	})
+
+	it('starts the range at 0 only where 0 clears the crosspoint', () => {
+		for (const [definitionId, option] of [...actionPickers, ...feedbackPickers]) {
+			const offersNone = (option.choices ?? []).some((choice) => choice.id === 0)
+			const description = option.expressionDescription ?? ''
+			expect(description.includes('from 0'), `${definitionId}.${option.id}`).toBe(offersNone)
+			expect(description.includes('clears the crosspoint'), `${definitionId}.${option.id}`).toBe(offersNone)
+		}
+	})
+
+	it('names the device the range belongs to, since channel counts differ per device', () => {
+		for (const [definitionId, option] of [...actionPickers, ...feedbackPickers]) {
+			const deviceName = option.id.slice(option.id.indexOf('_') + 1)
+			expect(option.expressionDescription, `${definitionId}.${option.id}`).toContain(deviceName)
+		}
 	})
 })

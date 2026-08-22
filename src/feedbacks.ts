@@ -8,6 +8,7 @@ import {
 } from '@companion-module/base'
 import {
 	channelChoices,
+	channelRangeDescription,
 	deviceByIdentifier,
 	deviceOptionValue,
 	deviceSelectedExpression,
@@ -131,6 +132,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					id: `destinationChannel_${device.name}`,
 					choices: channelChoices(self, device, 'rx'),
 					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+					expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 					// allowCustom keeps actions still holding it parseable rather than failing outright
 					allowCustom: true,
@@ -154,6 +156,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					id: `sourceChannel_${device.name}`,
 					choices: channelChoices(self, device, 'tx'),
 					default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+					expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
 					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 					// allowCustom keeps actions still holding it parseable rather than failing outright
 					allowCustom: true,
@@ -373,6 +376,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					id: `channel_${device.name}`,
 					choices: channelChoices(self, device, 'rx'),
 					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+					expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 					allowCustom: true,
 					isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
 				})),

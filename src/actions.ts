@@ -3,6 +3,7 @@ import {
 	array2choices,
 	audioDeviceChoices,
 	channelChoices,
+	channelRangeDescription,
 	clearAllCrosspoints,
 	clearCrosspoint,
 	currentChoiceId,
@@ -221,6 +222,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `destinationChannel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -248,6 +250,7 @@ export function UpdateActions(self: DanteInstance): void {
 						// a route. The default is still the first real channel, not None.
 						choices: [{ id: 0, label: 'None (clear the crosspoint)' }, ...channelChoices(self, device, 'tx')],
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? '', true),
 						allowCustom: true,
 						isVisibleExpression: deviceSelectedExpression('sourceDevice', device.name ?? '', ip),
 					})),
@@ -370,6 +373,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `destinationChannel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -477,6 +481,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -526,6 +531,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -560,6 +566,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'tx'),
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -610,6 +617,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'tx'),
 						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
@@ -845,6 +853,7 @@ export function UpdateActions(self: DanteInstance): void {
 						id: `channel_${device.name}`,
 						choices: channelChoices(self, device, 'rx'),
 						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,

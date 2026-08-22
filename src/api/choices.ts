@@ -134,6 +134,23 @@ export function channelChoices(
 }
 
 /**
+ * What a channel dropdown accepts, shown in place of the description while the field is in
+ * expression mode.
+ *
+ * A field switched to expression mode shows no choices, so nothing otherwise tells the user what the
+ * expression has to produce. Channel ids run 1..count with no gaps - see `updateChannelChoices` - so
+ * the range is the whole story.
+ */
+export function channelRangeDescription(
+	choices: DropdownChoice<number>[],
+	deviceName: string,
+	zeroClears = false,
+): string {
+	const clears = zeroClears ? ', where 0 clears the crosspoint' : ''
+	return `Must evaluate to a channel number from ${zeroClears ? 0 : 1} to ${choices.length} on ${deviceName}${clears}`
+}
+
+/**
  * A visibility expression matching a device picker against one device.
  *
  * Matches the device name, which is what pickers store, *and* its current address, which is what
