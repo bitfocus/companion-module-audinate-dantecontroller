@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
 	CompanionMigrationAction,
 	CompanionStaticUpgradeProps,
 	CompanionUpgradeContext,
 } from '@companion-module/base'
 import { UpgradeScripts } from '../upgrades.js'
+import { REFRESH_ALL, UpdateActions } from '../actions.js'
+import type DanteInstance from '../main.js'
 import { TIMEOUT_MAXIMUM, TIMEOUT_MINIMUM, UPDATE_MAXIMUM, UPDATE_MINIMUM } from '../config.js'
 import type { ModuleConfig } from '../config.js'
 
@@ -18,12 +20,14 @@ const CLEAR_ALL_SCRIPT_INDEX = 2
 const CONFIG_RENAME_SCRIPT_INDEX = 3
 const VARIABLES_OPTION_SCRIPT_INDEX = 4
 const INTERVAL_MINIMUMS_SCRIPT_INDEX = 5
-const EXPECTED_SCRIPT_COUNT = 6
+const REFRESH_DEVICE_SCRIPT_INDEX = 6
+const EXPECTED_SCRIPT_COUNT = 7
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
 const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
 const applyIntervalMinimums = UpgradeScripts[INTERVAL_MINIMUMS_SCRIPT_INDEX]
+const addRefreshDeviceOption = UpgradeScripts[REFRESH_DEVICE_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -377,5 +381,84 @@ describe('interval bounds', () => {
 			expect(config.timeoutInterval, `timeout from ${value}`).toBeGreaterThanOrEqual(TIMEOUT_MINIMUM)
 			expect(config.timeoutInterval, `timeout from ${value}`).toBeLessThanOrEqual(TIMEOUT_MAXIMUM)
 		}
+	})
+})
+
+/** Enough of an instance for `UpdateActions` to build the refresh picker. */
+function mockInstanceWithDevices(): DanteInstance {
+	return {
+		devicesData: { '10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } } },
+		devicesChoices: [{ id: 'DeviceA', label: 'DeviceA' }],
+		rxChannelsChoices: {},
+		txChannelsChoices: {},
+		setActionDefinitions: vi.fn(),
+		log: vi.fn(),
+	} as unknown as DanteInstance
+}
+
+describe('refresh device option upgrade script', () => {
+	function runRefresh(actions: CompanionMigrationAction[]) {
+		return addRefreshDeviceOption({} as CompanionUpgradeContext<ModuleConfig>, {
+			config: null,
+			secrets: null,
+			actions,
+			feedbacks: [],
+		})
+	}
+
+	it('defaults a refresh action saved before the picker existed to all devices', () => {
+		// it took no options at all and always refreshed everything, so "all" preserves its behaviour
+		const existing = action('refresh', {})
+		const result = runRefresh([existing])
+
+		expect(result.updatedActions).toEqual([existing])
+		expect(existing.options.device).toEqual({ value: REFRESH_ALL, isExpression: false })
+	})
+
+	it('leaves a refresh action that already names a device alone', () => {
+		const existing = action('refresh', { device: { value: 'DeviceA', isExpression: false } })
+		const result = runRefresh([existing])
+
+		expect(result.updatedActions).toEqual([])
+		expect(existing.options.device).toEqual({ value: 'DeviceA', isExpression: false })
+	})
+
+	it('leaves an existing all-devices selection alone', () => {
+		const existing = action('refresh', { device: { value: REFRESH_ALL, isExpression: false } })
+		expect(runRefresh([existing]).updatedActions).toEqual([])
+	})
+
+	it('leaves an expression alone rather than replacing it with the sentinel', () => {
+		const existing = action('refresh', { device: { value: '$(dante:target)', isExpression: true } })
+		expect(runRefresh([existing]).updatedActions).toEqual([])
+	})
+
+	it('does not touch other actions', () => {
+		const other = action('clearCrosspoint', { destinationChannelNumber: '1' })
+		const result = runRefresh([other])
+
+		expect(result.updatedActions).toEqual([])
+		expect(other.options.device).toBeUndefined()
+	})
+
+	it('leaves the config and feedbacks alone', () => {
+		const result = runRefresh([action('refresh', {})])
+
+		expect(result.updatedConfig).toBeNull()
+		expect(result.updatedFeedbacks).toEqual([])
+	})
+
+	it('produces a value the rebuilt dropdown actually offers', () => {
+		// a dropdown whose stored value matches no choice fails to parse, taking the action with it
+		const existing = action('refresh', {})
+		runRefresh([existing])
+
+		const self = mockInstanceWithDevices()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		const picker = definitions.refresh.options.find((option: { id: string }) => option.id === 'device')
+
+		const stored = existing.options.device as unknown as { value: string }
+		expect(picker.choices.map((choice: { id: string }) => choice.id)).toContain(stored.value)
 	})
 })

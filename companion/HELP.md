@@ -26,6 +26,7 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - Clear Crosspoint
 - Clear Crosspoint (with dynamic drop-down choices)
 - Set Device Name
+- Set Device Name (custom device)
 - Reset Device Name
 - Set Tx Channel Name
 - Reset Tx Channel Name
@@ -37,6 +38,7 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - Set Latency
 - Set Encoding (bit depth)
 - Set Output Level (currently only for AVIO 2out)
+- Refresh Parameters
 
 ## Variables
 

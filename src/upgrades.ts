@@ -7,6 +7,7 @@ import {
 	type CompanionStaticUpgradeProps,
 } from '@companion-module/base'
 import { TIMEOUT_MAXIMUM, TIMEOUT_MINIMUM, UPDATE_MAXIMUM, UPDATE_MINIMUM, type ModuleConfig } from './config.js'
+import { REFRESH_ALL } from './actions.js'
 
 /**
  * Maps an action id to the list of its option ids which used to be a numeric textinput
@@ -181,6 +182,28 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 		return {
 			updatedConfig: { ...config, interval, timeoutInterval },
 			updatedActions: [],
+			updatedFeedbacks: [],
+		}
+	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// Refresh gained a device picker. It used to take no options at all and always refreshed
+		// everything, so an action saved before this has no `device` value - and a dropdown with an
+		// undefined value fails to parse, which would break the action outright. Default it to the
+		// sentinel meaning "all devices", which is what it did before.
+		const changedActions: CompanionMigrationAction[] = []
+		for (const action of props.actions) {
+			if (action.actionId !== 'refresh' || action.options.device !== undefined) continue
+
+			action.options.device = { value: REFRESH_ALL, isExpression: false }
+			changedActions.push(action)
+		}
+
+		return {
+			updatedConfig: null,
+			updatedActions: changedActions,
 			updatedFeedbacks: [],
 		}
 	},

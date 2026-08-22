@@ -1,4 +1,8 @@
-import type { CompanionActionDefinitions, SomeCompanionActionInputField } from '@companion-module/base'
+import {
+	createModuleLogger,
+	type CompanionActionDefinitions,
+	type SomeCompanionActionInputField,
+} from '@companion-module/base'
 import {
 	array2choices,
 	audioDeviceChoices,
@@ -24,6 +28,7 @@ import {
 	orPlaceholder,
 	refreshArc,
 	refreshSettings,
+	resolveDeviceIp,
 	resetDeviceName,
 	resetRxChannelName,
 	resetTxChannelName,
@@ -39,6 +44,8 @@ import {
 	txDeviceChoices,
 } from './api/index.js'
 import type DanteInstance from './main.js'
+
+const logger = createModuleLogger('actions')
 
 type MakeCrosspointOptions = {
 	sourceChannelName: string
@@ -113,6 +120,19 @@ type SetOutputLevelOptions = {
 	level: string
 } & Record<`channel_${string}`, number>
 
+/**
+ * The sentinel a Refresh action stores to mean "every known device".
+ *
+ * A device could in principle be named `all`, in which case it is refreshed along with everything
+ * else rather than on its own. Harmless: refreshing only reads, so the cost of the collision is a
+ * few extra queries.
+ */
+export const REFRESH_ALL = 'all'
+
+type RefreshOptions = {
+	device: string
+}
+
 export type ActionSchema = {
 	makeCrosspoint: { options: MakeCrosspointOptions }
 	makeCrosspointDropDown: { options: MakeCrosspointDropDownOptions }
@@ -131,7 +151,7 @@ export type ActionSchema = {
 	setPullup: { options: SetPullupOptions }
 	setEncoding: { options: SetEncodingOptions }
 	setOutputLevel: { options: SetOutputLevelOptions }
-	refresh: { options: Record<string, never> }
+	refresh: { options: RefreshOptions }
 }
 
 /**
@@ -899,10 +919,40 @@ export function UpdateActions(self: DanteInstance): void {
 
 		refresh: {
 			name: 'Refresh parameters',
-			options: [],
-			callback: async () => {
-				refreshSettings(self)
-				refreshArc(self)
+			description:
+				'Re-reads names, routing and settings from a device. Devices announce their own changes, ' +
+				'so this is only needed when one of those announcements is missed - they are multicast, ' +
+				'and can be dropped on a congested network.',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Device',
+					id: 'device',
+					// Every device, unfiltered: refreshing reads whatever a device has, and one with no
+					// audio channels still has a name, versions and model information worth re-reading.
+					choices: [{ id: REFRESH_ALL, label: 'All devices' }, ...self.devicesChoices],
+					default: REFRESH_ALL,
+					// see the device pickers above: a value saved before devices were keyed by name is an
+					// address, which is no longer among the choices
+					allowCustom: true,
+				},
+			],
+			callback: async (action) => {
+				const device = action.options.device
+
+				if (device === REFRESH_ALL) {
+					refreshSettings(self)
+					refreshArc(self)
+					return
+				}
+
+				const deviceIp = resolveDeviceIp(self, device)
+				if (deviceIp === undefined) {
+					logger.error(`Can't refresh '${device}' - no such device is known`)
+					return
+				}
+				refreshSettings(self, deviceIp)
+				refreshArc(self, deviceIp)
 			},
 		},
 	}
