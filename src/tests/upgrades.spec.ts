@@ -5,6 +5,7 @@ import type {
 	CompanionUpgradeContext,
 } from '@companion-module/base'
 import { UpgradeScripts } from '../upgrades.js'
+import { TIMEOUT_MAXIMUM, TIMEOUT_MINIMUM, UPDATE_MAXIMUM, UPDATE_MINIMUM } from '../config.js'
 import type { ModuleConfig } from '../config.js'
 
 /**
@@ -16,11 +17,13 @@ import type { ModuleConfig } from '../config.js'
 const CLEAR_ALL_SCRIPT_INDEX = 2
 const CONFIG_RENAME_SCRIPT_INDEX = 3
 const VARIABLES_OPTION_SCRIPT_INDEX = 4
-const EXPECTED_SCRIPT_COUNT = 5
+const INTERVAL_MINIMUMS_SCRIPT_INDEX = 5
+const EXPECTED_SCRIPT_COUNT = 6
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
 const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
+const applyIntervalMinimums = UpgradeScripts[INTERVAL_MINIMUMS_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -290,5 +293,89 @@ describe('create-variables option default', () => {
 		const result = runConfig({ mac: '' })
 		expect(result.updatedActions).toEqual([])
 		expect(result.updatedFeedbacks).toEqual([])
+	})
+})
+
+describe('interval bounds', () => {
+	function runConfig(config: Record<string, unknown> | null) {
+		return applyIntervalMinimums(
+			{} as CompanionUpgradeContext<ModuleConfig>,
+			{
+				config,
+				secrets: null,
+				actions: [],
+				feedbacks: [],
+			} as unknown as CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+		)
+	}
+
+	it('raises values that predate the minimums', () => {
+		const result = runConfig({ interval: 10, timeoutInterval: 50 })
+		expect(result.updatedConfig).toMatchObject({
+			interval: UPDATE_MINIMUM,
+			timeoutInterval: TIMEOUT_MINIMUM,
+		})
+	})
+
+	it('raises 0, which used to mean "off"', () => {
+		const result = runConfig({ interval: 0, timeoutInterval: 0 })
+		expect(result.updatedConfig).toMatchObject({
+			interval: UPDATE_MINIMUM,
+			timeoutInterval: TIMEOUT_MINIMUM,
+		})
+	})
+
+	it('leaves a configuration already at or above the minimums alone', () => {
+		expect(runConfig({ interval: UPDATE_MINIMUM, timeoutInterval: TIMEOUT_MINIMUM })?.updatedConfig).toBeNull()
+		expect(runConfig({ interval: 5000, timeoutInterval: 30000 })?.updatedConfig).toBeNull()
+	})
+
+	it('raises only the field that is too low', () => {
+		const result = runConfig({ interval: 5000, timeoutInterval: 10 })
+		expect(result.updatedConfig).toMatchObject({ interval: 5000, timeoutInterval: TIMEOUT_MINIMUM })
+	})
+
+	it('carries the other settings through untouched', () => {
+		const result = runConfig({ mac: 'aa|1.2.3.4', interval: 0, timeoutInterval: 0, variables: false, verbose: true })
+		expect(result.updatedConfig).toMatchObject({ mac: 'aa|1.2.3.4', variables: false, verbose: true })
+	})
+
+	it('handles a connection with no config at all', () => {
+		expect(runConfig(null)?.updatedConfig).toBeNull()
+	})
+
+	it('does not touch actions or feedbacks', () => {
+		const result = runConfig({ interval: 0, timeoutInterval: 0 })
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
+	})
+
+	it('lowers values that predate the maximums', () => {
+		// an hour between polls left an unplugged device looking healthy for two
+		const result = runConfig({ interval: 3600000, timeoutInterval: 3600000 })
+		expect(result.updatedConfig).toMatchObject({
+			interval: UPDATE_MAXIMUM,
+			timeoutInterval: TIMEOUT_MAXIMUM,
+		})
+	})
+
+	it('leaves a configuration already inside the range alone', () => {
+		expect(runConfig({ interval: UPDATE_MAXIMUM, timeoutInterval: TIMEOUT_MAXIMUM })?.updatedConfig).toBeNull()
+	})
+
+	it('lowers only the field that is too high', () => {
+		const result = runConfig({ interval: 3600000, timeoutInterval: 30000 })
+		expect(result.updatedConfig).toMatchObject({ interval: UPDATE_MAXIMUM, timeoutInterval: 30000 })
+	})
+
+	it('leaves every result inside the range the config fields accept', () => {
+		for (const value of [0, 10, 250, 1000, 60000, 300000, 3600000, Number.MAX_SAFE_INTEGER]) {
+			const result = runConfig({ interval: value, timeoutInterval: value })
+			const config = result.updatedConfig ?? { interval: value, timeoutInterval: value }
+			expect(config.interval, `interval from ${value}`).toBeGreaterThanOrEqual(UPDATE_MINIMUM)
+			expect(config.interval, `interval from ${value}`).toBeLessThanOrEqual(UPDATE_MAXIMUM)
+			expect(config.timeoutInterval, `timeout from ${value}`).toBeGreaterThanOrEqual(TIMEOUT_MINIMUM)
+			expect(config.timeoutInterval, `timeout from ${value}`).toBeLessThanOrEqual(TIMEOUT_MAXIMUM)
+		}
 	})
 })

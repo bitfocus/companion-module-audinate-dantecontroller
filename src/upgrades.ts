@@ -6,7 +6,7 @@ import {
 	type CompanionUpgradeContext,
 	type CompanionStaticUpgradeProps,
 } from '@companion-module/base'
-import type { ModuleConfig } from './config.js'
+import { TIMEOUT_MAXIMUM, TIMEOUT_MINIMUM, UPDATE_MAXIMUM, UPDATE_MINIMUM, type ModuleConfig } from './config.js'
 
 /**
  * Maps an action id to the list of its option ids which used to be a numeric textinput
@@ -154,6 +154,32 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 
 		return {
 			updatedConfig: { ...config, variables: true },
+			updatedActions: [],
+			updatedFeedbacks: [],
+		}
+	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// The interval fields gained bounds. Values saved before that could be anything the number field
+		// allowed: 0, which used to mean "off" and now just means "far too fast", or an hour, which
+		// left an unplugged device looking healthy for two. Pull anything outside the range back into
+		// it; leave everything already inside alone.
+		const config = props.config
+		if (!config) {
+			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
+		}
+
+		const clamp = (value: number | undefined, low: number, high: number) => Math.min(Math.max(value ?? low, low), high)
+		const interval = clamp(config.interval, UPDATE_MINIMUM, UPDATE_MAXIMUM)
+		const timeoutInterval = clamp(config.timeoutInterval, TIMEOUT_MINIMUM, TIMEOUT_MAXIMUM)
+		if (interval === config.interval && timeoutInterval === config.timeoutInterval) {
+			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
+		}
+
+		return {
+			updatedConfig: { ...config, interval, timeoutInterval },
 			updatedActions: [],
 			updatedFeedbacks: [],
 		}

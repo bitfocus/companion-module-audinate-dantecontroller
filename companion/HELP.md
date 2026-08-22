@@ -5,10 +5,19 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Config
 
-- Select network interface
-- Set poll interval time to discover from network
-- Set response time before considering a device offline
-- Set create module variables. If set false, the same data can be access via value feedbacks.
+- **Network card** — the interface on the Dante network. _Automatic_ uses whichever card reaches each
+  device; picking one pins the module to it. The choice is stored by MAC address, so it survives an IP
+  change (link-local or DHCP). If the card is missing, discovery still works but device settings stay
+  empty and the connection reports an error.
+- **Update Interval** — how often the module sweeps the network for devices (250 ms – 60 s, default
+  1 s). Devices announce themselves when they appear, so this mainly sets how quickly one that has
+  gone away is noticed.
+- **Timeout Interval** — how long a device may go unheard before it is dropped (1 s – 5 min, default
+  3 s). Dante hardware sends heartbeats several times a second and is unaffected; software endpoints
+  are kept alive only by the sweep, so anything below twice the Update Interval is raised to it.
+- **Create Module Variables** — on by default. Turn it off to skip the per-device variables and read
+  the same values through the Device Property feedback instead.
+- **Verbose Logging** — extra detail in the log, for troubleshooting.
 
 ## Actions
 

@@ -6,7 +6,7 @@ import multidns from 'multicast-dns'
 import dgram from 'node:dgram'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
-import { listNetworkInterfaces, resolveConfiguredInterface, encodeInterfaceId } from '../config.js'
+import { listNetworkInterfaces, resolveConfiguredInterface, encodeInterfaceId, effectiveTimeout } from '../config.js'
 import type DanteInstance from '../main.js'
 import type { ConnectionName, ServiceName, DanteSockets, MdnsResponsePacket } from './types.js'
 import {
@@ -210,7 +210,17 @@ export function initConnection(self: DanteInstance): void {
 	self.counter = Buffer.from('0000', 'hex')
 
 	self.debug = self.config.verbose
-	self.timeout = self.config.timeoutInterval
+	// Never less than two poll intervals - see `effectiveTimeout`. The config panel shows a warning
+	// alongside the field whenever this overrides what was configured.
+	self.timeout = effectiveTimeout(self.config)
+
+	if (self.timeout !== self.config.timeoutInterval) {
+		logger.warn(
+			`Timeout Interval (${self.config.timeoutInterval}ms) is less than twice the Update Interval ` +
+				`(${self.config.interval}ms). Devices that do not send heartbeats could drop and reappear ` +
+				`between polls, so ${self.timeout}ms is being used instead.`,
+		)
+	}
 	self.activeConnections = {}
 	self.updateStatus(InstanceStatus.Connecting)
 

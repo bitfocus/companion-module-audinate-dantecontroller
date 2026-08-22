@@ -3,6 +3,10 @@ import {
 	encodeInterfaceId,
 	resolveConfiguredInterface,
 	findInterfaceForAddress,
+	effectiveTimeout,
+	GetConfigFields,
+	TIMEOUT_MINIMUM,
+	UPDATE_MINIMUM,
 	type NetworkInterfaceInfo,
 } from '../config.js'
 
@@ -140,5 +144,96 @@ describe('findInterfaceForAddress', () => {
 		}
 		expect(findInterfaceForAddress([high], '200.1.1.9')?.name).toBe('en9')
 		expect(findInterfaceForAddress([high], '200.1.2.9')).toBeUndefined()
+	})
+})
+
+describe('effectiveTimeout', () => {
+	it('keeps a timeout that is already at least two poll intervals', () => {
+		expect(effectiveTimeout({ interval: 1000, timeoutInterval: 3000 })).toBe(3000)
+	})
+
+	it('keeps a timeout of exactly two poll intervals', () => {
+		expect(effectiveTimeout({ interval: 1000, timeoutInterval: 2000 })).toBe(2000)
+	})
+
+	it('raises a timeout shorter than two poll intervals', () => {
+		// heartbeat-less devices are kept alive only by the poll, so a shorter timeout drops them
+		// between polls and they are rediscovered in a loop
+		expect(effectiveTimeout({ interval: 5000, timeoutInterval: 2000 })).toBe(10000)
+	})
+
+	it('raises a timeout that would expire between two polls even when it exceeds one interval', () => {
+		expect(effectiveTimeout({ interval: 1000, timeoutInterval: 1500 })).toBe(2000)
+	})
+
+	it('never returns less than two intervals for the smallest settings allowed', () => {
+		expect(effectiveTimeout({ interval: UPDATE_MINIMUM, timeoutInterval: TIMEOUT_MINIMUM })).toBeGreaterThanOrEqual(
+			UPDATE_MINIMUM * 2,
+		)
+	})
+})
+
+/**
+ * The config panel evaluates `isVisibleExpression` itself, so the expression has to agree with
+ * `effectiveTimeout` or the warning appears when nothing is being overridden, or stays hidden when
+ * it is. Rather than reimplement Companion's expression parser, this recognises the one form the
+ * expression is allowed to take and evaluates that - so rewriting it into some other shape fails
+ * here instead of quietly going unchecked.
+ */
+const VISIBILITY_FORM = /^\$\(options:([A-Za-z0-9_]+)\) < \$\(options:([A-Za-z0-9_]+)\) \* (\d+)$/
+
+function evaluateVisibility(expression: string, config: { interval: number; timeoutInterval: number }): boolean {
+	const parsed = VISIBILITY_FORM.exec(expression)
+	expect(parsed, `unrecognised visibility expression: ${expression}`).not.toBeNull()
+
+	const values = config as unknown as Record<string, number>
+	const [, left, right, factor] = parsed as RegExpExecArray
+	expect(values[left], `expression reads unknown config field "${left}"`).toBeTypeOf('number')
+	expect(values[right], `expression reads unknown config field "${right}"`).toBeTypeOf('number')
+
+	return values[left] < values[right] * Number(factor)
+}
+
+describe('the timeout warning config field', () => {
+	const fields = GetConfigFields()
+	const warning = fields.find((field) => field.id === 'timeoutWarning')
+
+	it('sits directly below the Timeout Interval field', () => {
+		expect(fields.findIndex((field) => field.id === 'timeoutWarning')).toBe(
+			fields.findIndex((field) => field.id === 'timeoutInterval') + 1,
+		)
+	})
+
+	it('is static text that says which value is used instead', () => {
+		expect(warning?.type).toBe('static-text')
+		expect((warning as { value: string }).value).toMatch(/twice the Update Interval/)
+	})
+
+	it('is hidden unless it has something to warn about', () => {
+		expect(warning?.isVisibleExpression).toBeTypeOf('string')
+	})
+
+	it.each([
+		{ interval: 1000, timeoutInterval: 3000 },
+		{ interval: 1000, timeoutInterval: 2000 },
+		{ interval: 1000, timeoutInterval: 1999 },
+		{ interval: 5000, timeoutInterval: 2000 },
+		{ interval: UPDATE_MINIMUM, timeoutInterval: TIMEOUT_MINIMUM },
+		{ interval: 3600000, timeoutInterval: TIMEOUT_MINIMUM },
+	])('shows exactly when the timeout is overridden ($interval / $timeoutInterval)', (config) => {
+		expect(evaluateVisibility(warning?.isVisibleExpression ?? '', config)).toBe(
+			effectiveTimeout(config) !== config.timeoutInterval,
+		)
+	})
+
+	it('only reads fields that exist and are marked disableAutoExpression', () => {
+		const ids = [...(warning?.isVisibleExpression ?? '').matchAll(/\$\(options:([A-Za-z0-9_]+)\)/g)].map(
+			(match) => match[1],
+		)
+		expect(ids).toContain('interval')
+		expect(ids).toContain('timeoutInterval')
+		for (const id of ids) {
+			expect(fields.find((field) => field.id === id)?.disableAutoExpression, id).toBe(true)
+		}
 	})
 })

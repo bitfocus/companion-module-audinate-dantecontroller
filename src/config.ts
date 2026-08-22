@@ -1,6 +1,23 @@
 import { networkInterfaces } from 'node:os'
 import type { DropdownChoice, SomeCompanionConfigField } from '@companion-module/base'
 
+export const UPDATE_MINIMUM = 250
+/**
+ * Dante devices advertise their SRV records with a 120s TTL, and RFC 6762 has a resolver refresh an
+ * active query at 80% of that - so a poll slower than ~96s leaves the module's view of the network
+ * staler than the records it is built from. 60s stays clear of that, and keeps the timeout it
+ * implies (twice the interval) at the TTL rather than beyond it.
+ */
+export const UPDATE_MAXIMUM = 60000
+
+export const TIMEOUT_MINIMUM = 1000
+/**
+ * Long enough to ride out a badly lossy network, short enough that an unplugged device does not sit
+ * on a button looking healthy. Beyond this the module is not reporting the network, it is
+ * remembering it.
+ */
+export const TIMEOUT_MAXIMUM = 300000
+
 export type ModuleConfig = {
 	/**
 	 * The chosen network card, as `mac|address`.
@@ -111,6 +128,22 @@ export function resolveConfiguredInterface(
 	return undefined
 }
 
+/**
+ * The timeout the module actually uses, which is never less than two poll intervals.
+ *
+ * A device that broadcasts heartbeats is kept alive by those whatever the poll is doing, but one
+ * only seen through discovery - a software controller, for instance - is kept alive solely by the
+ * poll. If its timeout can expire between two polls it drops and is rediscovered in a loop,
+ * rebuilding every action and feedback definition each time. Two intervals leaves room for one late
+ * or lost reply, so a configured value below that is raised rather than obeyed.
+ */
+export function effectiveTimeout(config: Pick<ModuleConfig, 'interval' | 'timeoutInterval'>): number {
+	return Math.max(config.timeoutInterval, config.interval * 2)
+}
+
+/** Shows the timeout warning field exactly when `effectiveTimeout` would override the configured value. */
+const TIMEOUT_WARNING_EXPRESSION = `$(options:timeoutInterval) < $(options:interval) * 2`
+
 export function GetConfigFields(): SomeCompanionConfigField[] {
 	// "Automatic" rather than "All": the module listens on every interface for discovery, but a
 	// command to a device is sent carrying the address of the one card that reaches it. Nothing acts
@@ -125,15 +158,15 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			type: 'static-text',
 			id: 'info',
 			width: 12,
-			label: 'Information',
-			value: 'This module controls Dante devices',
+			label: '',
+			value: 'This module controls Dante devices on the selected network.',
 		},
 
 		{
 			type: 'dropdown',
 			label: 'Network card',
 			id: 'mac',
-			tooltip:
+			description:
 				'Choose the network card bound to Dante Controller, or leave on Automatic to use whichever ' +
 				'card reaches each device. A chosen card is remembered by its MAC address, so the ' +
 				'connection keeps working if its IP changes (link-local or DHCP).',
@@ -146,44 +179,51 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			type: 'number',
 			id: 'interval',
 			label: 'Update Interval',
-			tooltip:
-				'Please enter the amount of time in milliseconds to periodically discover new devices. Set to 0 to disable.',
+			description: 'The time in milliseconds to periodically discover new devices.',
 			width: 3,
 			default: 1000,
-			min: 0,
-			max: 3600000,
+			min: UPDATE_MINIMUM,
+			max: UPDATE_MAXIMUM,
 			asInteger: true,
+			disableAutoExpression: true,
 		},
 
 		{
 			type: 'number',
 			id: 'timeoutInterval',
 			label: 'Timeout Interval',
-			tooltip: 'Please enter the time in milliseconds before a device is considered offline. Set to 0 to disable.',
+			description:
+				'The time in milliseconds before a device is considered offline. Set this to at least twice ' +
+				'the Update Interval, or devices that do not send heartbeats may drop and reappear between polls.',
 			width: 3,
 			default: 3000,
-			min: 0,
-			max: 3600000,
+			min: TIMEOUT_MINIMUM,
+			max: TIMEOUT_MAXIMUM,
 			asInteger: true,
+			disableAutoExpression: true,
+		},
+
+		{
+			type: 'static-text',
+			id: 'timeoutWarning',
+			label: 'Warning',
+			width: 6,
+			value:
+				'The Timeout Interval is less than twice the Update Interval, so a device that does not ' +
+				'send heartbeats can time out between two polls and be dropped. Twice the Update Interval ' +
+				'is being used instead.',
+			isVisibleExpression: TIMEOUT_WARNING_EXPRESSION,
 		},
 
 		{
 			type: 'checkbox',
 			id: 'variables',
 			label: 'Create Module Variables',
-			tooltip:
+			description:
 				'Publish a variable for every device property. Turn this off to keep the connection light ' +
 				'and read device properties through the Device Property feedback instead.',
 			width: 12,
 			default: true,
-		},
-
-		{
-			type: 'static-text',
-			id: 'info2',
-			label: 'Verbose Logging',
-			width: 12,
-			value: `Enabling this option will put more detail in the log, which can be useful for troubleshooting purposes.`,
 		},
 
 		{
@@ -192,6 +232,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			label: 'Verbose Logging',
 			width: 12,
 			default: false,
+			description: `Enabling this option will put more detail in the log, which can be useful for troubleshooting purposes.`,
 		},
 	]
 }
