@@ -19,6 +19,7 @@ import {
 	keepAlive,
 	clearDeviceTimeouts,
 	scheduleUpdateData,
+	updateData,
 	scheduleCheckVariables,
 	cancelCheckVariables,
 	scheduleCheckFeedbacks,
@@ -437,6 +438,51 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		expect(self.devicesData['10.0.0.5']).toBeDefined()
 		// choices are keyed by device name, which survives an address change
 		expect(self.devicesChoices).toContainEqual({ id: 'MyDevice', label: 'MyDevice' })
+	})
+})
+
+describe('updateData with nothing discovered', () => {
+	/**
+	 * `configUpdated` calls this directly because every other rebuild trigger needs a device -
+	 * registration, a name change, channel choices, a settings reply, destruction. A network with no
+	 * Dante devices reaches none of them, so this one call is all a connection ever gets.
+	 */
+	it('still registers actions, feedbacks and variables', () => {
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+		expect(self.setFeedbackDefinitions).toHaveBeenCalledTimes(1)
+		expect(self.setVariableDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	it('registers the global variables that do not depend on a device', () => {
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		const defined = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		// the device-names list is the one variable that exists before anything is discovered
+		expect(Object.keys(defined)).toContain('devices')
+	})
+
+	it('leaves every action and feedback definition parseable with no devices', () => {
+		// a dropdown with no choices can never validate, which fails the whole entity - so the
+		// empty-network rebuild must still give every dropdown something to offer
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		const groups = [
+			(self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+			(self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+		]
+		for (const definitions of groups) {
+			for (const [id, definition] of Object.entries(definitions as Record<string, { options?: unknown[] }>)) {
+				for (const option of (definition.options ?? []) as { id: string; type?: string; choices?: unknown[] }[]) {
+					if (option.type !== 'dropdown') continue
+					expect(option.choices?.length, `${id}.${option.id}`).toBeGreaterThan(0)
+				}
+			}
+		}
 	})
 })
 

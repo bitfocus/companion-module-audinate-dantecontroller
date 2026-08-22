@@ -7,13 +7,13 @@ import {
 import type multidns from 'multicast-dns'
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
-import { UpdateActions } from './actions.js'
 import {
 	DanteConnection,
 	cancelCheckFeedbacks,
 	initConnection,
 	destroyDevice,
 	cancelUpdateData,
+	updateData,
 	cancelCheckVariables,
 	type DevicesData,
 	type DanteSockets,
@@ -136,7 +136,11 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		this.updateStatus(InstanceStatus.Connecting)
 
 		initConnection(this)
-		UpdateActions(this)
+		// Every other rebuild is triggered by a device appearing, changing or going away, so on a
+		// network with no Dante devices this is the only one that ever runs. It has to register
+		// feedbacks and variables as well as actions, or a connection that finds nothing offers
+		// nothing - not even the global device-names variable.
+		updateData(this)
 	}
 
 	getConfigFields(): SomeCompanionConfigField[] {
