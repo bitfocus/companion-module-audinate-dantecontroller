@@ -594,3 +594,74 @@ describe('naming convention', () => {
 		}
 	})
 })
+
+/**
+ * `(custom)` marks the variant that takes its selection as free text - typed by hand, or driven by a
+ * variable or expression - rather than picking from what has been discovered. Everything else uses
+ * dropdowns, so the dropdown form is the unmarked default and only the exception carries a suffix.
+ *
+ * These check the suffix against what the definition actually offers, not just how it is spelled: a
+ * name claiming `(custom)` with no free-entry field, or a pair whose base form is the free-text one,
+ * would both pass a spelling check and mislead the user.
+ */
+describe('the (custom) suffix', () => {
+	interface Definition {
+		name: string
+		options?: { type?: string }[]
+	}
+
+	function definitions(
+		build: (self: DanteInstance) => void,
+		setter: 'setActionDefinitions' | 'setFeedbackDefinitions',
+	): Definition[] {
+		const self = mockInstance()
+		build(self)
+		return Object.values((self[setter] as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, Definition>)
+	}
+
+	const all = [
+		...definitions(UpdateActions, 'setActionDefinitions'),
+		...definitions(UpdateFeedbacks, 'setFeedbackDefinitions'),
+	]
+
+	/** Fields the user types into, as opposed to choosing from a list. */
+	function freeEntryFields(definition: Definition): number {
+		return (definition.options ?? []).filter((option) => option.type === 'textinput' || option.type === 'number').length
+	}
+
+	const SUFFIX = ' (custom)'
+
+	it('finds the definitions it means to check', () => {
+		expect(all.filter((definition) => definition.name.endsWith(SUFFIX)).length).toBeGreaterThan(0)
+	})
+
+	it('is the only suffix in use, so no "(drop down menu)" or "(manual)" creeps back', () => {
+		const suffixed = all.map((definition) => definition.name).filter((name) => name.includes('('))
+		expect(suffixed.every((name) => name.endsWith(SUFFIX))).toBe(true)
+	})
+
+	it.each(all.filter((definition) => definition.name.endsWith(SUFFIX)).map((d) => [d.name, d] as const))(
+		'"%s" actually offers a field to type into',
+		(_name, definition) => {
+			expect(freeEntryFields(definition)).toBeGreaterThan(0)
+		},
+	)
+
+	it.each(all.filter((definition) => definition.name.endsWith(SUFFIX)).map((d) => [d.name, d] as const))(
+		'"%s" takes more by hand than the variant it is named after',
+		(name, custom) => {
+			// the pairing is the point: without a base form to compare against, the suffix says nothing
+			const base = all.find((definition) => definition.name === name.slice(0, -SUFFIX.length))
+			expect(base, `no base variant for ${name}`).toBeDefined()
+			expect(freeEntryFields(custom)).toBeGreaterThan(freeEntryFields(base as Definition))
+		},
+	)
+
+	it('leaves every unsuffixed variant of a pair choosing from dropdowns', () => {
+		for (const custom of all.filter((definition) => definition.name.endsWith(SUFFIX))) {
+			const base = all.find((definition) => definition.name === custom.name.slice(0, -SUFFIX.length))
+			const dropdowns = (base?.options ?? []).filter((option) => option.type === 'dropdown').length
+			expect(dropdowns, `${base?.name} offers no dropdown`).toBeGreaterThan(0)
+		}
+	})
+})

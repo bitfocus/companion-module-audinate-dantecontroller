@@ -211,7 +211,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const routingBgManual: CompanionBooleanFeedbackDefinition<RoutingBgManualOptions> = {
 		type: 'boolean',
-		name: 'Crosspoint - Connected (manual)',
+		name: 'Crosspoint - Connected (custom)',
 		description: 'True if the specified source channel specified is routed to the correct output',
 		defaultStyle: {
 			color: combineRgb(0, 0, 0),

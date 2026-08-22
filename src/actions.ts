@@ -161,7 +161,7 @@ export type ActionSchema = {
 export function UpdateActions(self: DanteInstance): void {
 	const actions: CompanionActionDefinitions<ActionSchema> = {
 		makeCrosspoint: {
-			name: 'Crosspoint - Make',
+			name: 'Crosspoint - Make (custom)',
 			options: [
 				{
 					type: 'textinput',
@@ -221,7 +221,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		makeCrosspointDropDown: {
-			name: 'Crosspoint - Make (drop down menu)',
+			name: 'Crosspoint - Make',
 			options: [
 				{
 					type: 'dropdown',
@@ -325,7 +325,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		clearCrosspoint: {
-			name: 'Crosspoint - Clear',
+			name: 'Crosspoint - Clear (custom)',
 			options: [
 				{
 					type: 'textinput',
@@ -364,7 +364,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		clearCrosspointDropDown: {
-			name: 'Crosspoint - Clear (drop down menu)',
+			name: 'Crosspoint - Clear',
 			options: [
 				{
 					type: 'dropdown',
@@ -439,7 +439,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setDeviceNameCustom: {
-			name: 'Device Name - Set (custom device)',
+			name: 'Device Name - Set (custom)',
 			options: [
 				{
 					type: 'textinput',

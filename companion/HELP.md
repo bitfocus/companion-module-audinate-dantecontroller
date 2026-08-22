@@ -21,13 +21,17 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Actions
 
+Actions that pick from discovered devices and channels use drop-down menus. Those marked `(custom)`
+take the same selection as free text instead, so it can be typed by hand or driven by a variable or
+expression.
+
 - Crosspoint - Clear
-- Crosspoint - Clear (drop down menu)
+- Crosspoint - Clear (custom)
 - Crosspoint - Make
-- Crosspoint - Make (drop down menu)
+- Crosspoint - Make (custom)
 - Device Name - Reset
 - Device Name - Set
-- Device Name - Set (custom device)
+- Device Name - Set (custom)
 - Encoding - Set
 - Latency - Set
 - Output Level - Set (currently only for AVIO 2out)
@@ -37,7 +41,7 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - Rx Channel Name - Reset
 - Rx Channel Name - Set
 - Sample Rate - Set
-- Sample Rate - Set (custom)
+- Sample Rate - Set (custom) - takes any rate the device accepts, rather than the listed ones
 - Sample Rate Pullup - Set
 - Tx Channel Name - Reset
 - Tx Channel Name - Set
@@ -80,5 +84,5 @@ The same values are available through the Device Property feedback.
 
 - Channel - Subscription (_Value_)
 - Crosspoint - Connected (_Boolean_)
-- Crosspoint - Connected (manual) (_Boolean_)
+- Crosspoint - Connected (custom) (_Boolean_)
 - Device - Property (_Value_)
