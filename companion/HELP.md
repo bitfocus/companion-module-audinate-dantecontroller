@@ -1,7 +1,7 @@
 # Audinate Dante Controller
 
 This module controls Dante audio devices and routing in simple local networks.
-It's based on Chris Ritsen's [Network audio controller](https://github.com/chris-ritsen/network-audio-controller) ( Python project)
+It's based on Chris Ritsen's [Network audio controller](https://github.com/chris-ritsen/network-audio-controller) (Python project)
 
 ## Config
 
