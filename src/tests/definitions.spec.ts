@@ -541,3 +541,56 @@ describe('channel dropdowns state their range in expression mode', () => {
 		}
 	})
 })
+
+/**
+ * Companion lists actions and feedbacks alphabetically, so the name has to lead with what the entry
+ * acts on rather than what it does to it - otherwise every "Set ..." lands in one place and the four
+ * things you can do to a crosspoint scatter across the list.
+ */
+describe('naming convention', () => {
+	const SUBJECT_FIRST = /^[A-Z][A-Za-z0-9 ]* - [A-Z]/
+
+	function names(build: (self: DanteInstance) => void, setter: 'setActionDefinitions' | 'setFeedbackDefinitions') {
+		const self = mockInstance()
+		build(self)
+		const definitions = (self[setter] as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		return Object.values(definitions as Record<string, { name: string }>).map((definition) => definition.name)
+	}
+
+	const actionNames = names(UpdateActions, 'setActionDefinitions')
+	const feedbackNames = names(UpdateFeedbacks, 'setFeedbackDefinitions')
+
+	it('finds the definitions it means to check', () => {
+		expect(actionNames.length).toBeGreaterThan(0)
+		expect(feedbackNames.length).toBeGreaterThan(0)
+	})
+
+	it.each([...actionNames, ...feedbackNames])('"%s" names its subject before its verb', (name) => {
+		expect(name).toMatch(SUBJECT_FIRST)
+	})
+
+	it.each([
+		['actions', () => actionNames],
+		['feedbacks', () => feedbackNames],
+	])('every %s subject stays in one contiguous run when sorted', (_kind, get) => {
+		const sorted = [...get()].sort((a, b) => a.localeCompare(b))
+		const subjects = sorted.map((name) => name.slice(0, name.indexOf(' - ')))
+
+		// a subject reappearing after a different one has intervened means the grouping is broken
+		const seen = new Set<string>()
+		let previous = ''
+		for (const subject of subjects) {
+			if (subject !== previous) {
+				expect(seen.has(subject), `${subject} is split across the sorted list`).toBe(false)
+				seen.add(subject)
+				previous = subject
+			}
+		}
+	})
+
+	it('has no duplicate names, which would be indistinguishable in the picker', () => {
+		for (const list of [actionNames, feedbackNames]) {
+			expect(new Set(list).size).toBe(list.length)
+		}
+	})
+})

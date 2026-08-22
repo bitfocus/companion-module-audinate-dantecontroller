@@ -80,7 +80,7 @@ describe('Device Property feedback', () => {
 	it('is a value feedback with the requested name', () => {
 		const definitions = definition()
 		expect(definitions.type).toBe('value')
-		expect(definitions.name).toBe('Device Property')
+		expect(definitions.name).toBe('Device - Property')
 	})
 
 	it('offers every device, not only sources or destinations', () => {

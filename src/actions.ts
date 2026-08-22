@@ -161,7 +161,7 @@ export type ActionSchema = {
 export function UpdateActions(self: DanteInstance): void {
 	const actions: CompanionActionDefinitions<ActionSchema> = {
 		makeCrosspoint: {
-			name: 'Make Crosspoint',
+			name: 'Crosspoint - Make',
 			options: [
 				{
 					type: 'textinput',
@@ -221,7 +221,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		makeCrosspointDropDown: {
-			name: 'Make Crosspoint (drop down menu)',
+			name: 'Crosspoint - Make (drop down menu)',
 			options: [
 				{
 					type: 'dropdown',
@@ -325,7 +325,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		clearCrosspoint: {
-			name: 'Clear Crosspoint',
+			name: 'Crosspoint - Clear',
 			options: [
 				{
 					type: 'textinput',
@@ -364,7 +364,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		clearCrosspointDropDown: {
-			name: 'Clear Crosspoint (drop down menu)',
+			name: 'Crosspoint - Clear (drop down menu)',
 			options: [
 				{
 					type: 'dropdown',
@@ -415,7 +415,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setDeviceName: {
-			name: 'Set Device name',
+			name: 'Device Name - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -439,7 +439,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setDeviceNameCustom: {
-			name: 'Set Device name (custom device)',
+			name: 'Device Name - Set (custom device)',
 			options: [
 				{
 					type: 'textinput',
@@ -463,7 +463,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		resetDeviceName: {
-			name: 'Reset Device name',
+			name: 'Device Name - Reset',
 			options: [
 				{
 					type: 'dropdown',
@@ -480,7 +480,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setRxChannelName: {
-			name: 'Set Rx channel name',
+			name: 'Rx Channel Name - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -530,7 +530,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		resetRxChannelName: {
-			name: 'Reset Rx channel name',
+			name: 'Rx Channel Name - Reset',
 			options: [
 				{
 					type: 'dropdown',
@@ -565,7 +565,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setTxChannelName: {
-			name: 'Set Tx channel name',
+			name: 'Tx Channel Name - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -616,7 +616,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		resetTxChannelName: {
-			name: 'Reset Tx channel name',
+			name: 'Tx Channel Name - Reset',
 			options: [
 				{
 					type: 'dropdown',
@@ -651,7 +651,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setLatency: {
-			name: 'Set Latency',
+			name: 'Latency - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -680,7 +680,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setSampleRateCustom: {
-			name: 'Set Sample rate (custom)',
+			name: 'Sample Rate - Set (custom)',
 			options: [
 				{
 					type: 'dropdown',
@@ -706,7 +706,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setSampleRate: {
-			name: 'Set Sample rate',
+			name: 'Sample Rate - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -760,7 +760,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setPullup: {
-			name: 'Set Sample rate pullup',
+			name: 'Sample Rate Pullup - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -814,7 +814,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setEncoding: {
-			name: 'Set Encoding',
+			name: 'Encoding - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -852,7 +852,7 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		setOutputLevel: {
-			name: 'Set Output Level',
+			name: 'Output Level - Set',
 			options: [
 				{
 					type: 'dropdown',
@@ -918,12 +918,19 @@ export function UpdateActions(self: DanteInstance): void {
 		},
 
 		refresh: {
-			name: 'Refresh parameters',
-			description:
-				'Re-reads names, routing and settings from a device. Devices announce their own changes, ' +
-				'so this is only needed when one of those announcements is missed - they are multicast, ' +
-				'and can be dropped on a congested network.',
+			name: 'Parameters - Refresh',
 			options: [
+				{
+					// A static field rather than the definition's `description`: no other action here sets
+					// one, and a lone description renders differently enough to look like a mistake.
+					type: 'static-text',
+					id: 'info',
+					label: 'When to use this',
+					value:
+						'Re-reads names, routing and settings from a device. Devices announce their own changes, ' +
+						'so this is only needed when one of those announcements is missed - they are multicast, ' +
+						'and can be dropped on a congested network.',
+				},
 				{
 					type: 'dropdown',
 					label: 'Device',

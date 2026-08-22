@@ -21,24 +21,26 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Actions
 
-- Make Crosspoint
-- Make Crosspoint (with dynamic drop-down choices)
-- Clear Crosspoint
-- Clear Crosspoint (with dynamic drop-down choices)
-- Set Device Name
-- Set Device Name (custom device)
-- Reset Device Name
-- Set Tx Channel Name
-- Reset Tx Channel Name
-- Set Rx Channel Name
-- Reset Rx Channel Name
-- Set Sample Rate (with standard available Sample rates)
-- Set Sample Rate (custom sample rate)
-- Set Sample Rate Pullup
-- Set Latency
-- Set Encoding (bit depth)
-- Set Output Level (currently only for AVIO 2out)
-- Refresh Parameters
+- Crosspoint - Clear
+- Crosspoint - Clear (drop down menu)
+- Crosspoint - Make
+- Crosspoint - Make (drop down menu)
+- Device Name - Reset
+- Device Name - Set
+- Device Name - Set (custom device)
+- Encoding - Set
+- Latency - Set
+- Output Level - Set (currently only for AVIO 2out)
+- Parameters - Refresh - re-reads names, routing and settings from one device or all of them. Devices
+  announce their own changes, so this is only needed if one of those announcements is missed; they
+  are multicast, and can be dropped on a congested network.
+- Rx Channel Name - Reset
+- Rx Channel Name - Set
+- Sample Rate - Set
+- Sample Rate - Set (custom)
+- Sample Rate Pullup - Set
+- Tx Channel Name - Reset
+- Tx Channel Name - Set
 
 ## Variables
 
@@ -76,7 +78,7 @@ The same values are available through the Device Property feedback.
 
 ## Feedbacks
 
-- Channel Subscription (_Value_)
-- Crosspoint Connected (_Boolean_)
-- Crosspoint Connected (with dynamic drop-down choices) (_Boolean_)
-- Device Property (_Value_)
+- Channel - Subscription (_Value_)
+- Crosspoint - Connected (_Boolean_)
+- Crosspoint - Connected (manual) (_Boolean_)
+- Device - Property (_Value_)

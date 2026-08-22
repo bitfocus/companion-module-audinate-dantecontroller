@@ -66,7 +66,7 @@ describe('Channel Subscription feedback', () => {
 	it('is a value feedback with the requested name and description', () => {
 		const definitions = definition(instance())
 		expect(definitions.type).toBe('value')
-		expect(definitions.name).toBe('Channel Subscription')
+		expect(definitions.name).toBe('Channel - Subscription')
 		expect(definitions.description).toBe('Returns the channel a destination is subscribed to')
 	})
 

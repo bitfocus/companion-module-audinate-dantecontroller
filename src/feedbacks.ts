@@ -107,7 +107,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const routingBg: CompanionBooleanFeedbackDefinition<RoutingBgOptions> = {
 		type: 'boolean',
-		name: 'Crosspoint Connected',
+		name: 'Crosspoint - Connected',
 		description: 'True If the specified source channel specified is routed to the correct output',
 		defaultStyle: {
 			color: combineRgb(0, 0, 0),
@@ -211,7 +211,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const routingBgManual: CompanionBooleanFeedbackDefinition<RoutingBgManualOptions> = {
 		type: 'boolean',
-		name: 'Crosspoint Connected (manual)',
+		name: 'Crosspoint - Connected (manual)',
 		description: 'True if the specified source channel specified is routed to the correct output',
 		defaultStyle: {
 			color: combineRgb(0, 0, 0),
@@ -309,7 +309,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 	const deviceProperties = orPlaceholder(self.devicesChoices, 'No devices found')
 	const devicePropertyFeedback: CompanionValueFeedbackDefinition<DevicePropertyOptions> = {
 		type: 'value',
-		name: 'Device Property',
+		name: 'Device - Property',
 		description: 'The current value of one device property, the same value its module variable holds.',
 		options: [
 			{
@@ -355,7 +355,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 	const channelSubscription: CompanionValueFeedbackDefinition<ChannelSubscriptionOptions> = {
 		type: 'value',
-		name: 'Channel Subscription',
+		name: 'Channel - Subscription',
 		description: 'Returns the channel a destination is subscribed to',
 		options: [
 			{
