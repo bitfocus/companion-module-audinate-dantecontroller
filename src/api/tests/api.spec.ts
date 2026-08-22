@@ -20,6 +20,8 @@ import {
 	clearDeviceTimeouts,
 	scheduleUpdateData,
 	updateData,
+	UPDATE_DEBOUNCE_MS,
+	UPDATE_MAX_WAIT_MS,
 	scheduleCheckVariables,
 	cancelCheckVariables,
 	scheduleCheckFeedbacks,
@@ -465,6 +467,25 @@ describe('updateData with nothing discovered', () => {
 		expect(Object.keys(defined)).toContain('devices')
 	})
 
+	it('still registers everything when reached the way configUpdated reaches it', () => {
+		// configUpdated schedules rather than rebuilding directly, so on a network where nothing is
+		// ever discovered the debounce is the only thing that can register any definitions at all
+		vi.useFakeTimers()
+		try {
+			const self = createMockInstance({ devicesData: {} })
+			scheduleUpdateData(self)
+
+			expect(self.setActionDefinitions).not.toHaveBeenCalled()
+			vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
+
+			expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+			expect(self.setFeedbackDefinitions).toHaveBeenCalledTimes(1)
+			expect(self.setVariableDefinitions).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it('leaves every action and feedback definition parseable with no devices', () => {
 		// a dropdown with no choices can never validate, which fails the whole entity - so the
 		// empty-network rebuild must still give every dropdown something to offer
@@ -500,27 +521,33 @@ describe('scheduleUpdateData', () => {
 		for (let i = 0; i < 50; i++) scheduleUpdateData(self)
 
 		expect(self.setActionDefinitions).not.toHaveBeenCalled()
-		vi.advanceTimersByTime(500)
+		vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
 		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
 	})
 
+	/** A request cadence that never leaves a quiet debounce window, whatever the window is set to. */
+	const RESTLESS_STEP = Math.floor(UPDATE_DEBOUNCE_MS * 0.8)
+
 	it('does not rebuild while requests keep arriving inside the debounce window', () => {
 		const self = createMockInstance()
-		for (let i = 0; i < 9; i++) {
+		// stops short of maxWait, so the only thing that could fire a rebuild is the window settling
+		const steps = Math.floor(UPDATE_MAX_WAIT_MS / RESTLESS_STEP) - 1
+		for (let i = 0; i < steps; i++) {
 			scheduleUpdateData(self)
-			vi.advanceTimersByTime(400) // 3.6s elapsed, never a quiet 500ms
+			vi.advanceTimersByTime(RESTLESS_STEP)
 		}
 		expect(self.setActionDefinitions).not.toHaveBeenCalled()
 	})
 
 	it('rebuilds anyway once maxWait elapses under sustained load', () => {
 		const self = createMockInstance()
-		// a steady stream that never leaves a 500ms gap, as during discovery on a large network
-		for (let i = 0; i < 40; i++) {
+		// a steady stream that never leaves a quiet window, as during discovery on a large network
+		const elapsed = UPDATE_MAX_WAIT_MS * 2
+		for (let i = 0; i < elapsed / RESTLESS_STEP; i++) {
 			scheduleUpdateData(self)
-			vi.advanceTimersByTime(400)
+			vi.advanceTimersByTime(RESTLESS_STEP)
 		}
-		// 16s of sustained requests must have produced rebuilds via the 10s maxWait
+		// twice maxWait of sustained requests must have produced rebuilds, but only a handful
 		expect(self.setActionDefinitions).toHaveBeenCalled()
 		expect((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThan(5)
 	})
@@ -546,7 +573,7 @@ describe('scheduleUpdateData', () => {
 		scheduleUpdateData(a)
 		cancelUpdateData(a)
 		scheduleUpdateData(b)
-		vi.advanceTimersByTime(500)
+		vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
 		expect(a.setActionDefinitions).not.toHaveBeenCalled()
 		expect(b.setActionDefinitions).toHaveBeenCalledTimes(1)
 	})

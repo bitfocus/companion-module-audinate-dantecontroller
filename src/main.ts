@@ -13,7 +13,7 @@ import {
 	initConnection,
 	destroyDevice,
 	cancelUpdateData,
-	updateData,
+	scheduleUpdateData,
 	cancelCheckVariables,
 	type DevicesData,
 	type DanteSockets,
@@ -140,7 +140,13 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		// network with no Dante devices this is the only one that ever runs. It has to register
 		// feedbacks and variables as well as actions, or a connection that finds nothing offers
 		// nothing - not even the global device-names variable.
-		updateData(this)
+		//
+		// Scheduled rather than run here: discovery usually finds its first devices inside the
+		// debounce window, so the two collapse into one rebuild carrying real data instead of an
+		// empty one immediately followed by the real one. It also means a re-config leaves the
+		// previous definitions in place for that window rather than blanking every dropdown first.
+		// `initConnection` has just cancelled anything the outgoing generation had pending.
+		scheduleUpdateData(this)
 	}
 
 	getConfigFields(): SomeCompanionConfigField[] {

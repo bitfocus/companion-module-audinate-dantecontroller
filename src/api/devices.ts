@@ -430,15 +430,21 @@ export function keepAlive(self: DanteInstance, deviceIp: string): void {
  * How long the definition rebuild waits for the flurry of discovery replies to settle.
  * Long enough to coalesce a device's registration, name, and paged channel replies into one
  * rebuild; short enough that a single device appearing still feels immediate.
+ *
+ * Sized against the slowest reply measured on real hardware rather than a round number: one device
+ * here answers the encoding query almost exactly a second after the sample-rate query it was sent
+ * alongside, and a window shorter than that split every startup into two rebuilds.
+ *
+ * Exported so tests advance the clock by the real window instead of restating it.
  */
-const UPDATE_DEBOUNCE_MS = 500
+export const UPDATE_DEBOUNCE_MS = 1000
 
 /**
  * Upper bound on how long a rebuild can be deferred. On a large network the replies never stop
  * arriving for long enough to reach the debounce window, so without this the dropdowns would
  * stay empty for the whole of discovery. This guarantees visible progress every 10s instead.
  */
-const UPDATE_MAX_WAIT_MS = 10_000
+export const UPDATE_MAX_WAIT_MS = 10_000
 
 /** One debounced rebuild per instance. Weakly held so a discarded instance is still collectable. */
 const debouncedUpdates = new WeakMap<DanteInstance, DebouncedFunc<() => void>>()

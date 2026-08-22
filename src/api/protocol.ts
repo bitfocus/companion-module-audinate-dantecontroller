@@ -6,7 +6,6 @@ import { DANTE_CONST } from './const.js'
 import { codeLabel, isSubscriptionConnected } from './protocol-rules.js'
 import merge from '../utils/merge.js'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
-import { UpdateActions } from '../actions.js'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import type { DeviceData, RxChannel, RxChannels, TxChannels } from './types.js'
@@ -757,9 +756,13 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		// all of them device properties a feedback can be reading
 		scheduleCheckFeedbacks(self, deviceIp)
 
+		// A settings reply carrying new option lists changes what the per-device sample rate, pullup and
+		// encoding dropdowns offer, so the definitions have to be rebuilt. Schedule it rather than
+		// rebuilding here: discovery brings a burst of these replies, one per setting per device, and
+		// rebuilding on each one re-serialises every definition to the host each time.
 		for (const flag of updateFlags) {
 			if (flag.slice(-7) == 'Options') {
-				UpdateActions(self)
+				scheduleUpdateData(self)
 				break
 			}
 		}
