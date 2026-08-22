@@ -34,7 +34,7 @@
 		"@companion-module/tools": "^3.0.2",
 		"@types/multicast-dns": "^7.2.4",
 		"@types/node": "^26.2.0",
-		"eslint": "^10.8.1",
+		"eslint": "^10.9.0",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.3.0",
 		"prettier": "^3.9.6",
