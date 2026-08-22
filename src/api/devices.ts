@@ -303,6 +303,17 @@ export function resolveDeviceIp(self: DanteInstance, identifier: string): string
 	return findDeviceIpByName(self, identifier)
 }
 
+/**
+ * `name (ip)` for log lines, or the address alone for a device discovered but not yet named.
+ *
+ * Logs are read by someone matching what they see against a device list and a patch panel, so both
+ * halves matter: the name is what they recognise, the address is what they can ping.
+ */
+export function deviceLabel(self: DanteInstance, deviceIp: string): string {
+	const name = self.devicesData[deviceIp]?.name
+	return name ? `${name} (${deviceIp})` : deviceIp
+}
+
 /** The device record behind an identifier, which may be a name or an IP. */
 export function deviceByIdentifier(self: DanteInstance, identifier: string): DeviceData | undefined {
 	const ip = resolveDeviceIp(self, identifier)
@@ -360,6 +371,13 @@ export function registerDevice(self: DanteInstance, deviceIp: string, deviceName
 		]
 	}
 
+	if (self.debug) {
+		logger.debug(
+			`${deviceName} (${deviceIp}) registered` +
+				(self.timeout > 0 ? `, offline timeout armed at ${self.timeout}ms` : ', no offline timeout'),
+		)
+	}
+
 	insertDeviceChoice(self, deviceIp, deviceName)
 	return currDevice
 }
@@ -370,7 +388,7 @@ export function registerDevice(self: DanteInstance, deviceIp: string, deviceName
  */
 export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	const deviceName = self.devicesData[deviceIp]?.name
-	logger.warn(`${deviceName} (${deviceIp}) is offline. Destroying references`)
+	logger.warn(`${deviceName ?? deviceIp} (${deviceIp}) went offline - nothing heard for ${self.timeout}ms`)
 
 	// delete channels name choices
 	if (deviceName !== undefined) {
@@ -697,6 +715,9 @@ export function cancelCheckFeedbacks(self: DanteInstance): void {
 
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
 export function updateData(self: DanteInstance): void {
+	if (self.debug) {
+		logger.debug(`Rebuilding definitions for ${Object.keys(self.devicesData).length} device(s)`)
+	}
 	UpdateActions(self)
 	UpdateVariableDefinitions(self)
 	CheckVariables(self)

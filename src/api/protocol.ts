@@ -3,13 +3,13 @@
  */
 
 import { DANTE_CONST } from './const.js'
-import { codeLabel } from './protocol-rules.js'
+import { codeLabel, isSubscriptionConnected } from './protocol-rules.js'
 import merge from '../utils/merge.js'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import { UpdateActions } from '../actions.js'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
-import type { DeviceData, RxChannels, TxChannels } from './types.js'
+import type { DeviceData, RxChannel, RxChannels, TxChannels } from './types.js'
 import { updateChannelChoices, updateDeviceChoice } from './choices.js'
 import {
 	keepAlive,
@@ -329,6 +329,63 @@ function parseDeviceSettings(reply: Buffer): Partial<DeviceData> {
  * Handles an incoming ARC socket message: parses the reply and merges the resulting
  * device info into `devicesData`, registering the device first if it's new.
  */
+/** How a subscription reads in a log line: `Device / Channel`, or `-` for an empty one. */
+function subscriptionLabel(channel: RxChannel | undefined): string {
+	if (!channel?.sourceDevice && !channel?.sourceChannel) return '-'
+	return `${channel.sourceDevice ?? '?'} / ${channel.sourceChannel ?? '?'}`
+}
+
+/**
+ * Reports routing changes on a device's receive channels at info.
+ *
+ * Called before the incoming page is merged, so `self.devicesData` still holds the previous state to
+ * compare against. Only channels that were already known can have *changed* - a channel seen for the
+ * first time is the initial state, not a route change, and logging those at info would print the
+ * whole patch of every device on every connect. Those go to debug instead.
+ *
+ * The subscription status is included because a route can stop working without its source changing:
+ * the transmitter going offline flips the status while the names stay put.
+ */
+function logRouteChanges(self: DanteInstance, deviceIp: string, incoming: RxChannels | undefined): void {
+	if (!incoming) return
+
+	const deviceName = self.devicesData[deviceIp]?.name ?? deviceIp
+	const known = self.devicesData[deviceIp]?.rx
+
+	for (const key of Object.keys(incoming)) {
+		// `count` shares the object with the numbered channels, so index by number to skip it
+		const channelNumber = Number(key)
+		if (!Number.isInteger(channelNumber)) continue
+
+		const channel = incoming[channelNumber]
+		const before = known?.[channelNumber]
+		const channelName = channel.name ?? `channel ${channelNumber}`
+
+		if (!before) {
+			if (self.debug) {
+				logger.debug(`${deviceName} ${channelName} <- ${subscriptionLabel(channel)}`)
+			}
+			continue
+		}
+
+		const wasConnected = isSubscriptionConnected(before.subscriptionStatus)
+		const isConnected = isSubscriptionConnected(channel.subscriptionStatus)
+		const sourceChanged = before.sourceDevice !== channel.sourceDevice || before.sourceChannel !== channel.sourceChannel
+
+		if (sourceChanged) {
+			logger.info(
+				`Route changed: ${deviceName} ${channelName} <- ${subscriptionLabel(channel)}` +
+					` (was ${subscriptionLabel(before)})${isConnected ? '' : ' - not connected'}`,
+			)
+		} else if (wasConnected !== isConnected) {
+			// same subscription, different health - the source coming or going
+			logger.info(
+				`Route ${isConnected ? 'restored' : 'lost'}: ${deviceName} ${channelName} <- ${subscriptionLabel(channel)}`,
+			)
+		}
+	}
+}
+
 export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
 	const deviceIp = rinfo.address
 	const replySize = rinfo.size
@@ -403,6 +460,8 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 			// rxChannels
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY: {
 				deviceData[deviceIp] = parseRxChannels(reply)
+				// must run before the merge below, which is what makes the incoming state the current one
+				logRouteChanges(self, deviceIp, deviceData[deviceIp].rx)
 				updateFlags.push('rx')
 				break
 			}
@@ -476,6 +535,23 @@ export function parseHeartbeatReply(self: DanteInstance, reply: Buffer, rinfo: d
 		// device is online
 		keepAlive(self, rinfo.address)
 	}
+}
+
+/**
+ * Completes the discovery line once make and model are known.
+ *
+ * `insertDeviceChoice` announces a device the moment mDNS finds it, but at that point only its name
+ * and address exist - make and model arrive later, in a settings reply, and only if the module has a
+ * usable hardware address to ask with. Logged once, on the transition from unknown to known, since
+ * this reply is re-requested on every settings refresh.
+ */
+function logDeviceIdentity(self: DanteInstance, deviceIp: string, incoming: Partial<DeviceData>): void {
+	const known = self.devicesData[deviceIp]
+	if (known?.modelName || !incoming.modelName) return
+
+	// manufacturer is the full name, manfShortName the abbreviated one; either identifies the make
+	const make = incoming.manufacturer || incoming.manfShortName || 'unknown make'
+	logger.info(`${known?.name ?? deviceIp} (${deviceIp}) is a ${make} ${incoming.modelName}`)
 }
 
 /**
@@ -624,6 +700,8 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 				currDevice.manfShortName = parseString(payload, 8)
 				currDevice.manufacturer = parseString(payload, 52)
 				currDevice.modelName = parseString(payload, 180)
+				// before the merge, so "did we already know this" is still answerable
+				logDeviceIdentity(self, deviceIp, currDevice)
 				currDevice.softwareVersionMajor = bufferToInt(payload, 32, 1)
 				currDevice.softwareVersionMinor = bufferToInt(payload, 33, 1)
 				currDevice.softwareVersionPatch = bufferToInt(payload, 34, 2)
@@ -719,8 +797,11 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 			case 0x1001: {
 				currDevice.ports = { SETTINGS: bufferToInt(reply, 28) }
 
-				const deviceId = self.devicesData[deviceIp]?.name ?? deviceIp
-				logger.info(`Port for service SETTINGS of device ${deviceId} is : ${bufferToInt(reply, 28)}`)
+				if (self.debug) {
+					// plumbing, like the mDNS port announcements in discovery.ts
+					const deviceId = self.devicesData[deviceIp]?.name ?? deviceIp
+					logger.debug(`Port for service SETTINGS of device ${deviceId} is : ${bufferToInt(reply, 28)}`)
+				}
 
 				self.devicesData = merge(self.devicesData, deviceData)
 				scheduleCheckVariables(self, deviceIp)

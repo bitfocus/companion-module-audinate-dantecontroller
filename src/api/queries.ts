@@ -2,18 +2,34 @@
  * Commands that ask a device for information.
  */
 
+import { createModuleLogger } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
 import type DanteInstance from '../main.js'
 import { incrementBE, intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import { setEncoding, setSampleRate } from './commands.js'
-import { macForDevice } from './devices.js'
+import { deviceLabel, macForDevice } from './devices.js'
+
+const logger = createModuleLogger('api:queries')
+
+/**
+ * Records an outgoing query, when verbose logging is on.
+ *
+ * Queries are the half of the conversation the packet dumps in `parseReply` do not show, and a
+ * device that answers nothing looks identical to one that was never asked. Naming the query and its
+ * target makes the difference visible.
+ */
+function logQuery(self: DanteInstance, deviceIp: string, what: string): void {
+	if (!self.debug) return
+	logger.debug(`Query -> ${deviceLabel(self, deviceIp)} : ${what}`)
+}
 
 /**
  * Queries a device's rx/tx channel counts.
  * @returns The device's last-known channel count entry, if any (the reply itself arrives asynchronously via {@link parseReply}).
  */
 export function getChannelCount(self: DanteInstance, ipaddress: string): number | undefined {
+	logQuery(self, ipaddress, 'channel counts')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.channelCount)
 	sendCommand(self, commandBuffer, ipaddress)
 
@@ -67,7 +83,15 @@ function sendChannelQuery(
 	channelCount: number,
 	channelsPerPage: number,
 ): void {
-	for (let page = 0; page < Math.max(1, Math.ceil(channelCount / channelsPerPage)); page++) {
+	const pages = Math.max(1, Math.ceil(channelCount / channelsPerPage))
+	if (self.debug) {
+		logger.debug(
+			`Query -> ${deviceLabel(self, ipaddress)} : channel details, ${pages} page(s) of ${channelsPerPage}` +
+				` covering ${channelCount} channel(s)`,
+		)
+	}
+
+	for (let page = 0; page < pages; page++) {
 		const commandArguments = Buffer.from('0001000100', 'hex')
 		// The starting channel is a big-endian u16 spanning argument bytes 2-3. Writing a single byte
 		// at byte 3 produced identical packets for channels 1-255 but threw ERR_OUT_OF_RANGE beyond
@@ -93,12 +117,14 @@ export function getRxChannels(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's name. */
 export function getDeviceName(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'device name')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_NAME_QUERY)
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
 /** Queries a device's settings (sample rate, latency). */
 export function getSettings(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'device settings')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY)
 	sendCommand(self, commandBuffer, ipaddress)
 }
@@ -110,6 +136,7 @@ export function getSampleRate(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's current sample rate pullup setting. */
 export function getPullup(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'sample rate pullup')
 	const flag = intToBuffer(0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(0, 4)])
 	const commandBuffer = makeSettingCommand(
@@ -128,6 +155,7 @@ export function getEncoding(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's current output levels. */
 export function getLevel(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'output levels')
 	const commandBuffer = makeSettingCommand(
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_CODEC_CONTROL,
@@ -139,6 +167,7 @@ export function getLevel(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's manufacturer/model version info. */
 export function getManfVersion(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'manufacturer and model')
 	const commandBuffer = makeSettingCommand(
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_MANF_VERSIONS_QUERY,
@@ -150,6 +179,7 @@ export function getManfVersion(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's Dante firmware/product version info. */
 export function getVersion(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'firmware and product versions')
 	const commandBuffer = makeSettingCommand(
 		self,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_VERSIONS_QUERY,
@@ -161,6 +191,7 @@ export function getVersion(self: DanteInstance, ipaddress: string): void {
 
 /** Queries a device's SETTINGS service port over the CMC socket. */
 export function getSettingsPort(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'SETTINGS service port')
 	const commandBuffer = Buffer.concat([
 		intToBuffer(0x1200, 2),
 		intToBuffer(20), // command size
@@ -183,6 +214,9 @@ export function getSettingsPort(self: DanteInstance, ipaddress: string): void {
  */
 export function refreshSettings(self: DanteInstance, deviceIp?: string): void {
 	const ipArray = deviceIp ? [deviceIp] : Object.keys(self.devicesData)
+	if (self.debug) {
+		logger.debug(`Refreshing SETTINGS parameters for ${ipArray.length} device(s)`)
+	}
 	for (const ip of ipArray) {
 		getSampleRate(self, ip)
 		getPullup(self, ip)
@@ -199,6 +233,9 @@ export function refreshSettings(self: DanteInstance, deviceIp?: string): void {
  */
 export function refreshArc(self: DanteInstance, deviceIp?: string): void {
 	const ipArray = deviceIp ? [deviceIp] : Object.keys(self.devicesData)
+	if (self.debug) {
+		logger.debug(`Refreshing ARC parameters for ${ipArray.length} device(s)`)
+	}
 	for (const ip of ipArray) {
 		getDeviceName(self, ip)
 		getSettings(self, ip)

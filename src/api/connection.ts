@@ -146,14 +146,19 @@ export class DanteConnection {
 		const period = this.self.config?.interval ?? 0
 		if (period > 0) {
 			this.interval = setInterval(() => getMdnsServices(this.self), period)
-			logger.info('Starting Update Interval: Every ' + period + 'ms')
+			// module plumbing rather than network news - the same call as the port announcements
+			if (this.self.debug) {
+				logger.debug('Starting Update Interval: Every ' + period + 'ms')
+			}
 		}
 	}
 
 	/** Stops the periodic discovery sweep. */
 	stopInterval(): void {
 		if (this.interval !== null) {
-			logger.info('Stopping Update Interval.')
+			if (this.self.debug) {
+				logger.debug('Stopping Update Interval.')
+			}
 			clearInterval(this.interval)
 			this.interval = null
 		}

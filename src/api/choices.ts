@@ -182,7 +182,9 @@ export function deviceOptionValue<T>(
 
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */
 export function insertDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
-	logger.info(`INSERT DEVICE : ${deviceName}, ip : ${deviceIp}`)
+	// Make and model are not known yet - they arrive with the settings reply, which logs the fuller
+	// line once it does. See `logDeviceIdentity`.
+	logger.info(`Discovered ${deviceName} at ${deviceIp}`)
 
 	self.devicesChoices.push({ id: deviceName, label: deviceName })
 	self.devicesChoices.sort((deviceA, deviceB) => {
@@ -195,12 +197,17 @@ export function insertDeviceChoice(self: DanteInstance, deviceIp: string, device
  * re-sorting and rebuilding action/feedback/variable definitions when it does.
  */
 export function updateDeviceChoice(self: DanteInstance, deviceIp: string, deviceName: string): void {
-	logger.info('UPDATE DEVICE NAME : ' + deviceName)
-
 	// Choices are keyed by name, so a rename replaces the entry rather than relabelling it. Actions
 	// referring to the old name keep their stored value - `allowCustom` lets it stay selected - but
 	// will not resolve until they are pointed at the new name.
 	const previousName = self.devicesData[deviceIp]?.name
+
+	// Worth an info line either way: a rename silently breaks every action pointed at the old name.
+	if (previousName && previousName !== deviceName) {
+		logger.info(`Device renamed: '${previousName}' is now '${deviceName}' (${deviceIp})`)
+	} else if (self.debug) {
+		logger.debug(`Device name for ${deviceIp} confirmed as '${deviceName}'`)
+	}
 	const existing = self.devicesChoices.findIndex((choice) => choice.id === (previousName ?? deviceIp))
 	if (existing !== -1) {
 		self.devicesChoices.splice(existing, 1)
@@ -244,8 +251,42 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 		existing.length !== channelChoice.length ||
 		channelChoice.some((choice, index) => choice.label !== existing[index]?.label)
 	if (changed) {
+		logChannelNameChanges(deviceName, channelType, existing, channelChoice)
 		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
+	}
+}
+
+/**
+ * Reports channel renames at info, and the first sight of a device's channels at debug.
+ *
+ * A channel name is what every crosspoint action and feedback is stored against, so a rename can
+ * quietly break a whole page of buttons - the same reason a device rename is worth an info line.
+ * The initial population is not a change and would otherwise log one line per channel per device on
+ * every connect, so it stays at debug.
+ */
+function logChannelNameChanges(
+	deviceName: string,
+	channelType: 'tx' | 'rx',
+	existing: DropdownChoice<number>[] | undefined,
+	incoming: DropdownChoice<number>[],
+): void {
+	const direction = channelType === 'tx' ? 'transmit' : 'receive'
+
+	if (!existing) {
+		logger.debug(`${deviceName}: learned ${incoming.length} ${direction} channel(s)`)
+		return
+	}
+
+	if (existing.length !== incoming.length) {
+		logger.info(`${deviceName}: ${direction} channel count changed from ${existing.length} to ${incoming.length}`)
+	}
+
+	for (const [index, choice] of incoming.entries()) {
+		const before = existing[index]
+		// only channels that were already there can have been renamed; the rest are new
+		if (before === undefined || before.label === choice.label) continue
+		logger.info(`${deviceName} ${direction} channel ${choice.id} renamed: '${before.label}' -> '${choice.label}'`)
 	}
 }
 

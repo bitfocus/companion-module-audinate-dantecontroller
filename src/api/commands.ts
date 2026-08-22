@@ -8,12 +8,19 @@ import { Regex, createModuleLogger } from '@companion-module/base'
 import type DanteInstance from '../main.js'
 import { intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
-import { findDeviceIpByName, findRxChannelByName, findTxChannelByName, getChannelSubscriptionName } from './devices.js'
+import {
+	deviceLabel,
+	findDeviceIpByName,
+	findRxChannelByName,
+	findTxChannelByName,
+	getChannelSubscriptionName,
+} from './devices.js'
 
 const logger = createModuleLogger('api:commands')
 
 /** Resets a device's name back to its factory default. */
 export function resetDeviceName(self: DanteInstance, ipaddress: string): void {
+	logCommand(self, deviceLabel(self, ipaddress), 'reset device name to factory default')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.setDeviceName)
 	sendCommand(self, commandBuffer, ipaddress)
 }
@@ -36,6 +43,19 @@ export function setDeviceName(self: DanteInstance, ipaddress: string, name: stri
  * action saved without picking a channel still carries it. Nothing can be done with channel 0, and
  * failing loudly beats the silent no-op it used to be.
  */
+/**
+ * Records a control command the module is issuing, when verbose logging is on.
+ *
+ * Distinct from the route and rename lines logged at info: those report what a device says its
+ * state *is*, which is the thing worth knowing normally. This reports what the module asked for,
+ * which only matters when the two disagree - a command rejected by a locked device, or one that
+ * never arrived.
+ */
+function logCommand(self: DanteInstance, target: string, what: string): void {
+	if (!self.debug) return
+	logger.debug(`Command -> ${target} : ${what}`)
+}
+
 function hasChannel(channelNumber: number, what: string): boolean {
 	if (channelNumber > 0) return true
 	logger.error(`No channel selected for ${what} - pick one in the action's Channel dropdown`)
@@ -252,6 +272,12 @@ export function makeCrosspoint(
 		sourceDeviceNameBuffer, // source device name
 	])
 
+	logCommand(
+		self,
+		`${destinationDevice} ch${destinationChannelNumber}`,
+		`subscribe to ${sourceDeviceName} / ${sourceSubscriptionName}`,
+	)
+
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.subscription, commandArguments)
 
 	sendCommand(self, commandBuffer, ipaddress)
@@ -280,6 +306,8 @@ export function clearCrosspoint(
 		return
 	}
 
+	logCommand(self, `${destinationDevice} ch${destinationChannelNumber}`, 'clear subscription')
+
 	const commandArguments = Buffer.concat([
 		Buffer.from('0401', 'hex'),
 		intToBuffer(Number(destinationChannelNumber)),
@@ -294,6 +322,7 @@ export function clearCrosspoint(
 
 /** Sets a device's link-offset latency. */
 export function setLatency(self: DanteInstance, ipaddress: string, latency: number): void {
+	logCommand(self, deviceLabel(self, ipaddress), `set latency to ${latency}ms`)
 	const commandArguments = Buffer.from('050382050020021100108301002400000000000000000000000000000000', 'hex')
 	commandArguments.writeUInt32BE(latency * 1000000, 22)
 	commandArguments.writeUInt32BE(latency * 1000000, 26)
@@ -306,6 +335,12 @@ export function setLatency(self: DanteInstance, ipaddress: string, latency: numb
  * (see {@link getSampleRate}).
  */
 export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate: number): void {
+	// 0 is the query form of this command, not a rate anyone set
+	logCommand(
+		self,
+		deviceLabel(self, ipaddress),
+		sampleRate === 0 ? 'query sample rate' : `set sample rate to ${sampleRate}`,
+	)
 	const flag = intToBuffer(sampleRate > 0 ? 1 : 0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(sampleRate, 4)])
 	const commandBuffer = makeSettingCommand(
@@ -319,6 +354,7 @@ export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate
 
 /** Sets a device's sample rate pullup. */
 export function setPullup(self: DanteInstance, ipaddress: string, pullup: number): void {
+	logCommand(self, deviceLabel(self, ipaddress), `set sample rate pullup to ${pullup}`)
 	const flag = intToBuffer(3, 4)
 	const commandArguments = Buffer.concat([
 		Buffer.from('00000064', 'hex'),
@@ -340,6 +376,7 @@ export function setPullup(self: DanteInstance, ipaddress: string, pullup: number
  * of changing it (see {@link getEncoding}).
  */
 export function setEncoding(self: DanteInstance, ipaddress: string, encoding: number): void {
+	logCommand(self, deviceLabel(self, ipaddress), encoding === 0 ? 'query encoding' : `set encoding to ${encoding}`)
 	const flag = intToBuffer(encoding > 0 ? 1 : 0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(encoding, 4)])
 
