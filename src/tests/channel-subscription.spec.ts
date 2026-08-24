@@ -15,7 +15,7 @@ function devicesData(): DevicesData {
 		[DEST]: {
 			name: 'DeviceA',
 			ports: { ARC: 4440 },
-			rx: {
+			audioRx: {
 				count: 4,
 				// a self-route, which the device reports with the '.' shorthand
 				1: { number: 1, name: 'In 1', sourceDevice: '.', sourceChannel: 'Local Out', subscriptionStatus: 4 },
@@ -24,13 +24,13 @@ function devicesData(): DevicesData {
 				// configured but not resolving: the source is not on the network
 				4: { number: 4, name: 'In 4', sourceDevice: 'AbsentDevice', sourceChannel: 'Out 1', subscriptionStatus: 1 },
 			},
-			tx: { count: 1, 1: { number: 1, name: 'Local Out' } },
+			audioTx: { count: 1, 1: { number: 1, name: 'Local Out' } },
 		},
 		[SOURCE]: {
 			name: 'DeviceB',
 			ports: { ARC: 4440 },
-			rx: { count: 1, 1: { number: 1, name: 'In 1' } },
-			tx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
+			audioRx: { count: 1, 1: { number: 1, name: 'In 1' } },
+			audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
 		},
 	}
 }
@@ -157,7 +157,7 @@ describe('Channel Subscription feedback', () => {
 	it('reports the name the destination holds, not the source current label', () => {
 		// a source renamed after the subscription was made still reports the old name until re-subscribed
 		const data = devicesData()
-		;(data[SOURCE].tx as Record<number, { friendlyName?: string }>)[2].friendlyName = 'Renamed'
+		;(data[SOURCE].audioTx as Record<number, { friendlyName?: string }>)[2].friendlyName = 'Renamed'
 		expect(read(2, 'DeviceA', instance(data))).toMatchObject({ channel: { name: 'Talkback' } })
 	})
 })

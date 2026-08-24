@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
 	CompanionMigrationAction,
+	CompanionMigrationFeedback,
 	CompanionStaticUpgradeProps,
 	CompanionUpgradeContext,
 } from '@companion-module/base'
@@ -21,13 +22,15 @@ const CONFIG_RENAME_SCRIPT_INDEX = 3
 const VARIABLES_OPTION_SCRIPT_INDEX = 4
 const INTERVAL_MINIMUMS_SCRIPT_INDEX = 5
 const REFRESH_DEVICE_SCRIPT_INDEX = 6
-const EXPECTED_SCRIPT_COUNT = 7
+const CHANNEL_TYPE_SCRIPT_INDEX = 7
+const EXPECTED_SCRIPT_COUNT = 8
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
 const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
 const applyIntervalMinimums = UpgradeScripts[INTERVAL_MINIMUMS_SCRIPT_INDEX]
 const addRefreshDeviceOption = UpgradeScripts[REFRESH_DEVICE_SCRIPT_INDEX]
+const addChannelTypeOption = UpgradeScripts[CHANNEL_TYPE_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -35,6 +38,15 @@ function action(actionId: string, options: Record<string, unknown> = {}): Compan
 		controlId: 'bank-1',
 		actionId,
 		options: options as CompanionMigrationAction['options'],
+	}
+}
+
+function feedback(feedbackId: string, options: Record<string, unknown> = {}): CompanionMigrationFeedback {
+	return {
+		id: `feedback-${feedbackId}`,
+		controlId: 'bank-1',
+		feedbackId,
+		options: options as CompanionMigrationFeedback['options'],
 	}
 }
 
@@ -460,5 +472,74 @@ describe('refresh device option upgrade script', () => {
 
 		const stored = existing.options.device as unknown as { value: string }
 		expect(picker.choices.map((choice: { id: string }) => choice.id)).toContain(stored.value)
+	})
+})
+
+describe('channelType option upgrade script', () => {
+	function runChannelType(actions: CompanionMigrationAction[], feedbacks: CompanionMigrationFeedback[] = []) {
+		return addChannelTypeOption({} as CompanionUpgradeContext<ModuleConfig>, {
+			config: null,
+			secrets: null,
+			actions,
+			feedbacks,
+		})
+	}
+
+	it.each([
+		'makeCrosspoint',
+		'makeCrosspointDropDown',
+		'clearCrosspoint',
+		'clearCrosspointDropDown',
+		'setRxChannelName',
+		'resetRxChannelName',
+		'setTxChannelName',
+		'resetTxChannelName',
+	])('defaults %s to audio, since every one saved before this predates video', (actionId) => {
+		const existing = action(actionId, { destinationChannelNumber: '1' })
+		const result = runChannelType([existing])
+
+		expect(result.updatedActions).toEqual([existing])
+		expect(existing.options.channelType).toEqual({ value: 'audio', isExpression: false })
+	})
+
+	it.each(['routing_bg', 'routing_bg_manual', 'channel_subscription'])(
+		'defaults the %s feedback to audio, since every one saved before this predates video',
+		(feedbackId) => {
+			const existing = feedback(feedbackId, {})
+			const result = runChannelType([], [existing])
+
+			expect(result.updatedFeedbacks).toEqual([existing])
+			expect(existing.options.channelType).toEqual({ value: 'audio', isExpression: false })
+		},
+	)
+
+	it('leaves an action that already has a channelType alone', () => {
+		const existing = action('makeCrosspointDropDown', { channelType: { value: 'video', isExpression: false } })
+		const result = runChannelType([existing])
+
+		expect(result.updatedActions).toEqual([])
+		expect(existing.options.channelType).toEqual({ value: 'video', isExpression: false })
+	})
+
+	it('leaves a feedback that already has a channelType alone', () => {
+		const existing = feedback('routing_bg', { channelType: { value: 'video', isExpression: false } })
+		const result = runChannelType([], [existing])
+
+		expect(result.updatedFeedbacks).toEqual([])
+	})
+
+	it('does not touch an unrelated action or feedback', () => {
+		const otherAction = action('setLatency', { latency: { value: 1, isExpression: false } })
+		const otherFeedback = feedback('device_property', {})
+		const result = runChannelType([otherAction], [otherFeedback])
+
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
+		expect(otherAction.options.channelType).toBeUndefined()
+		expect(otherFeedback.options.channelType).toBeUndefined()
+	})
+
+	it('leaves the config alone', () => {
+		expect(runChannelType([action('makeCrosspoint', {})]).updatedConfig).toBeNull()
 	})
 })

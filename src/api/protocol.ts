@@ -8,16 +8,32 @@ import merge from '../utils/merge.js'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
-import type { DeviceData, RxChannel, RxChannels, TxChannels } from './types.js'
-import { updateChannelChoices, updateDeviceChoice } from './choices.js'
+import type {
+	DeviceData,
+	AudioRxChannel,
+	AudioRxChannels,
+	AudioTxChannels,
+	VideoRxChannels,
+	VideoTxChannels,
+} from './types.js'
+import { updateChannelChoices, updateDeviceChoice, updateVideoChannelChoices } from './choices.js'
 import {
+	deviceLabel,
 	keepAlive,
 	macForDevice,
 	scheduleCheckFeedbacks,
 	scheduleCheckVariables,
 	scheduleUpdateData,
 } from './devices.js'
-import { getRxChannels, getSettings, getTxChannelFriendlyNames, getTxChannels, refreshSettings } from './queries.js'
+import {
+	getRxChannels,
+	getSettings,
+	getTxChannelFriendlyNames,
+	getTxChannels,
+	getVideoRxChannels,
+	getVideoTxChannels,
+	refreshSettings,
+} from './queries.js'
 
 const logger = createModuleLogger('api:protocol')
 
@@ -103,7 +119,7 @@ function parseChannelCount(reply: Buffer): Partial<DeviceData> {
 	// it turns "my button does nothing" into something the user can actually see. Guard the read:
 	// only longer replies carry the field.
 	const locked = reply.length >= 36 ? reply.readUInt16BE(34) !== 0 : undefined
-	return { tx: { count: reply[13] }, rx: { count: reply[15] }, locked }
+	return { audioTx: { count: reply[13] }, audioRx: { count: reply[15] }, locked }
 }
 
 /**
@@ -121,9 +137,17 @@ function readU32At(buffer: Buffer, pointer: number): number | undefined {
 	return buffer.readUInt32BE(pointer)
 }
 
+/** As {@link readU32At}, but for the u16 pointers and tags `AV_EXTENDED` replies are built from. */
+function readU16At(buffer: Buffer, pointer: number): number | undefined {
+	if (pointer < 0 || pointer + 2 > buffer.length) {
+		return undefined
+	}
+	return buffer.readUInt16BE(pointer)
+}
+
 /** Parses a tx-channel-friendly-names-query reply. */
 function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
-	const tx: TxChannels = {}
+	const tx: AudioTxChannels = {}
 
 	// const channelCount = reply[10]
 	const recCount = reply[11]
@@ -157,7 +181,7 @@ function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
 		// get name
 		returnChannel.friendlyName = parseStringAtPointer(reply, nameIndex)
 	}
-	return { tx }
+	return { audioTx: tx }
 }
 
 /**
@@ -165,7 +189,7 @@ function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
  * Stops early (recording the count reached so far) if it encounters a channel from a different sample-rate group.
  */
 function parseTxChannels(reply: Buffer): Partial<DeviceData> {
-	const tx: TxChannels = {}
+	const tx: AudioTxChannels = {}
 	let firstChannelGroup: number | undefined
 
 	// const channelCount = reply[10]
@@ -212,7 +236,7 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
 		}
 		returnChannel.sampleRate = readU32At(reply, sampleRateIndex)
 	}
-	return { tx }
+	return { audioTx: tx }
 }
 
 /**
@@ -220,7 +244,7 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
  * Stops early (recording the count reached so far) if it encounters a channel from a different sample-rate group.
  */
 function parseRxChannels(reply: Buffer): Partial<DeviceData> {
-	const rx: RxChannels = {}
+	const rx: AudioRxChannels = {}
 	let firstChannelGroup: number | undefined
 
 	// const channelCount = reply[10]
@@ -277,7 +301,7 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 		returnChannel.subscriptionStatus = bufferToInt(infoBuffer, subscriptionStatusOffset)
 		returnChannel.sampleRate = readU32At(reply, sampleRateIndex)
 	}
-	return { rx }
+	return { audioRx: rx }
 }
 
 /** Parses a device-name-query reply. */
@@ -320,6 +344,114 @@ function parseDeviceSettings(reply: Buffer): Partial<DeviceData> {
 	return deviceInfo
 }
 
+/**
+ * Byte offsets within one channel-record descriptor of an `AV_EXTENDED` channel-directory reply
+ * (`MESSAGE_TYPE_AV_RX_CHANNEL_QUERY`/`MESSAGE_TYPE_AV_TX_CHANNEL_QUERY`), relative to the
+ * descriptor's own start - which the reply gives as one absolute-offset pointer per channel, not a
+ * fixed stride, so records must be walked via those pointers rather than by a computed size.
+ *
+ * Reverse-engineered by diffing an identical multi-channel reply captured immediately after a
+ * batch-clear and immediately after a batch-set: everything here was constant between the two
+ * except the two source pointers, confirming their meaning. See the `dante-video-routing-protocol`
+ * project notes for the full byte-by-byte derivation.
+ */
+const AV_CHANNEL_RECORD = {
+	/** `AV_MEDIA_TYPE.AUDIO` or `.VIDEO` - the one dependable way to tell a record's kind. */
+	MEDIA_TYPE: 6,
+	/**
+	 * The channel's number within its own media type, which is what a crosspoint command addresses
+	 * it by - unlike the field at +2, which is its position across all the device's channels
+	 * combined (a device's sole video channel, listed after two audio ones, reports +2 = 3 but
+	 * +8 = 1).
+	 */
+	CHANNEL_NUMBER: 8,
+	OWN_NAME_POINTER: 20,
+	/** Absent (0) when the channel has no live source. */
+	SOURCE_CHANNEL_NAME_POINTER: 48,
+	/** Absent (0) when the channel has no live source. */
+	SOURCE_DEVICE_NAME_POINTER: 50,
+}
+
+interface AvChannelRecord {
+	channelNumber: number
+	name?: string
+	sourceChannel?: string
+	sourceDevice?: string
+}
+
+/**
+ * Walks every channel-record pointer an `AV_EXTENDED` channel-directory reply lists, decoding the
+ * ones whose media type is `mediaType` (records of another kind are skipped, so a reply mixing
+ * audio and video channels only yields the kind asked for).
+ *
+ * Matching is on the media type field, never on the opaque tag at each record's offset 0: that tag
+ * varies by both reply kind and device model (see `AV_MEDIA_TYPE`), so a parser keyed to it works
+ * only against the device it was derived from and silently reports zero channels everywhere else.
+ *
+ * The record count at offset 16 is a byte pair - a fixed `0x03` marker then the real count, the
+ * same shape `MESSAGE_TYPE_AV_CROSSPOINT_CONTROL` uses - not a plain u16; reading it as one
+ * inflates a 3-channel reply's count into the hundreds.
+ */
+function parseAvChannelDirectory(reply: Buffer, mediaType: number): AvChannelRecord[] {
+	const recordCount = reply.length > 17 ? reply[17] : 0
+	const records: AvChannelRecord[] = []
+
+	for (let i = 0; i < recordCount; i++) {
+		const descriptorStart = readU16At(reply, 18 + i * 2)
+		if (descriptorStart === undefined) continue
+		if (readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.MEDIA_TYPE) !== mediaType) continue
+
+		records.push({
+			// Falls back to the running count for a record that somehow reports no number, so a
+			// malformed reply still yields usable 1..n numbering rather than a channel 0.
+			channelNumber: readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.CHANNEL_NUMBER) || records.length + 1,
+			name: parseStringAtPointer(reply, readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.OWN_NAME_POINTER) ?? 0),
+			sourceChannel: parseStringAtPointer(
+				reply,
+				readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.SOURCE_CHANNEL_NAME_POINTER) ?? 0,
+			),
+			sourceDevice: parseStringAtPointer(
+				reply,
+				readU16At(reply, descriptorStart + AV_CHANNEL_RECORD.SOURCE_DEVICE_NAME_POINTER) ?? 0,
+			),
+		})
+	}
+
+	return records
+}
+
+/** Parses an `AV_EXTENDED` rx-side channel-directory reply into this device's video rx channels. */
+function parseVideoRxChannels(reply: Buffer): Partial<DeviceData> {
+	const videoRx: VideoRxChannels = {}
+	let count = 0
+	for (const record of parseAvChannelDirectory(reply, DANTE_CONST.AV_MEDIA_TYPE.VIDEO)) {
+		videoRx[record.channelNumber] = {
+			number: record.channelNumber,
+			name: record.name,
+			sourceChannel: record.sourceChannel,
+			sourceDevice: record.sourceDevice,
+		}
+		// The highest number seen, not the number of records: channel numbers come from the device
+		// now, so a gap in them would otherwise leave `count` short and hide the tail of the list
+		// from every consumer that walks 1..count (the dropdown builders all do).
+		count = Math.max(count, record.channelNumber)
+	}
+	videoRx.count = count
+	return { videoRx }
+}
+
+/** Parses an `AV_EXTENDED` tx-side channel-directory reply into this device's video tx channels. */
+function parseVideoTxChannels(reply: Buffer): Partial<DeviceData> {
+	const videoTx: VideoTxChannels = {}
+	let count = 0
+	for (const record of parseAvChannelDirectory(reply, DANTE_CONST.AV_MEDIA_TYPE.VIDEO)) {
+		videoTx[record.channelNumber] = { number: record.channelNumber, name: record.name }
+		count = Math.max(count, record.channelNumber)
+	}
+	videoTx.count = count
+	return { videoTx }
+}
+
 //**
 //** Module API
 //**
@@ -329,7 +461,7 @@ function parseDeviceSettings(reply: Buffer): Partial<DeviceData> {
  * device info into `devicesData`, registering the device first if it's new.
  */
 /** How a subscription reads in a log line: `Device / Channel`, or `-` for an empty one. */
-function subscriptionLabel(channel: RxChannel | undefined): string {
+function subscriptionLabel(channel: AudioRxChannel | undefined): string {
 	if (!channel?.sourceDevice && !channel?.sourceChannel) return '-'
 	return `${channel.sourceDevice ?? '?'} / ${channel.sourceChannel ?? '?'}`
 }
@@ -345,11 +477,11 @@ function subscriptionLabel(channel: RxChannel | undefined): string {
  * The subscription status is included because a route can stop working without its source changing:
  * the transmitter going offline flips the status while the names stay put.
  */
-function logRouteChanges(self: DanteInstance, deviceIp: string, incoming: RxChannels | undefined): void {
+function logRouteChanges(self: DanteInstance, deviceIp: string, incoming: AudioRxChannels | undefined): void {
 	if (!incoming) return
 
 	const deviceName = self.devicesData[deviceIp]?.name ?? deviceIp
-	const known = self.devicesData[deviceIp]?.rx
+	const known = self.devicesData[deviceIp]?.audioRx
 
 	for (const key of Object.keys(incoming)) {
 		// `count` shares the object with the numbered channels, so index by number to skip it
@@ -428,11 +560,22 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 				deviceData[deviceIp] = parseChannelCount(reply)
 				const currDevice = deviceData[deviceIp]
 
+				logger.info(
+					`${deviceLabel(self, deviceIp)} : audio channels - rx ${currDevice.audioRx?.count ?? 0}, ` +
+						`tx ${currDevice.audioTx?.count ?? 0}`,
+				)
+
 				// if channel count has changed, retrieve channel names
-				if ((currDevice.rx?.count ?? 0) > 0 && currDevice.rx?.count != self.devicesData[deviceIp]?.rx?.count) {
+				if (
+					(currDevice.audioRx?.count ?? 0) > 0 &&
+					currDevice.audioRx?.count != self.devicesData[deviceIp]?.audioRx?.count
+				) {
 					updateFlags.push('rxCount')
 				}
-				if ((currDevice.tx?.count ?? 0) > 0 && currDevice.tx?.count != self.devicesData[deviceIp]?.tx?.count) {
+				if (
+					(currDevice.audioTx?.count ?? 0) > 0 &&
+					currDevice.audioTx?.count != self.devicesData[deviceIp]?.audioTx?.count
+				) {
 					updateFlags.push('txCount')
 				}
 				// This reply also carries the channel counts and the lock flag, which are device
@@ -460,7 +603,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY: {
 				deviceData[deviceIp] = parseRxChannels(reply)
 				// must run before the merge below, which is what makes the incoming state the current one
-				logRouteChanges(self, deviceIp, deviceData[deviceIp].rx)
+				logRouteChanges(self, deviceIp, deviceData[deviceIp].audioRx)
 				updateFlags.push('rx')
 				break
 			}
@@ -513,6 +656,72 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 			}
 		}
 	}
+}
+
+/**
+ * Handles an incoming ARC socket message under the `AV_EXTENDED` protocol - the second protocol
+ * some devices (so far, AV-X-capable ones) speak on the same socket/port as `CONTROL`. Parses
+ * video channel-directory replies into `devicesData`; anything else under this protocol (crosspoint
+ * and rename acknowledgements) carries nothing worth storing.
+ *
+ * Registered alongside {@link parseReply} on the same socket, and independent of it: each checks
+ * its own protocol tag and returns immediately if the message is not its kind, so one socket can
+ * carry both protocols without either parser needing to know about the other.
+ */
+export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
+	const deviceIp = rinfo.address
+	const replySize = rinfo.size
+
+	// Short enough that a corrupt or truncated packet cannot make any of the reads below throw.
+	if (reply.length < 8) return
+	if (
+		(bufferToInt(reply, 0) & DANTE_CONST.AV_EXTENDED_MASK) !==
+		(DANTE_CONST.PROTOCOL.AV_EXTENDED & DANTE_CONST.AV_EXTENDED_MASK)
+	)
+		return
+	if (replySize !== bufferToInt(reply, 2)) return
+
+	if (self.debug) {
+		logger.debug(`ARC (AV) : Rx (${reply.length}): ${reply.toString('hex')}`)
+	}
+
+	// As in parseReply: mDNS discovery is the source of truth for a device's existence, so traffic
+	// from one not yet registered is ignored rather than allowed to stub in a devicesData entry.
+	if (!self.devicesData[deviceIp]) return
+
+	const commandId = bufferToInt(reply, 6)
+	let deviceData: Partial<DeviceData> | undefined
+	let channelDirection: 'rx' | 'tx' | undefined
+
+	switch (commandId) {
+		case DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY:
+			deviceData = parseVideoRxChannels(reply)
+			channelDirection = 'rx'
+			break
+		case DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_TX_CHANNEL_QUERY:
+			deviceData = parseVideoTxChannels(reply)
+			channelDirection = 'tx'
+			break
+	}
+
+	if (!deviceData) return
+
+	self.devicesData = merge(self.devicesData, { [deviceIp]: deviceData })
+
+	if (channelDirection === 'rx') {
+		logger.info(`${deviceLabel(self, deviceIp)} : video rx channels - ${deviceData.videoRx?.count ?? 0}`)
+	} else if (channelDirection === 'tx') {
+		logger.info(`${deviceLabel(self, deviceIp)} : video tx channels - ${deviceData.videoTx?.count ?? 0}`)
+	}
+
+	if (channelDirection) updateVideoChannelChoices(self, deviceIp, channelDirection)
+
+	if (channelDirection === 'rx') {
+		scheduleCheckVariables(self, deviceIp, 'rx_video', 'rx_names_video')
+	} else if (channelDirection === 'tx') {
+		scheduleCheckVariables(self, deviceIp, 'tx_video', 'tx_names_video')
+	}
+	scheduleCheckFeedbacks(self, deviceIp)
 }
 
 /**
@@ -727,14 +936,26 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 				break
 			}
 
+			// These change notifications are how the module learns about anything it did not do
+			// itself - a route or rename made in Dante Controller, or from another Companion. They
+			// arrive on the SETTINGS multicast group and carry no state of their own, so each one is
+			// answered by re-reading the affected directory.
+			//
+			// Video rides the same notifications: a video crosspoint or rename on an AV-X device
+			// raises exactly these two message types, confirmed live against an encoder/decoder pair
+			// (and confirmed silent when nothing changes, so this costs nothing at idle). The video
+			// directories live under a different protocol, hence the extra queries rather than the
+			// audio ones covering both.
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_CHANGE: {
 				getRxChannels(self, deviceIp)
+				getVideoRxChannels(self, deviceIp)
 				break
 			}
 
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_CHANGE: {
 				getTxChannels(self, deviceIp)
 				getTxChannelFriendlyNames(self, deviceIp)
+				getVideoTxChannels(self, deviceIp)
 				break
 			}
 
@@ -863,6 +1084,33 @@ export function makeSettingCommand(
 		Buffer.from('0000', 'hex'),
 		DANTE_CONST.AUDINATE_BUFFER,
 		intToBuffer(commandType),
+		commandArguments,
+	])
+
+	incrementBE(self.counter)
+
+	return payload
+}
+
+/**
+ * Builds an `AV_EXTENDED`-protocol Dante command message and advances the message counter.
+ *
+ * Simpler framing than {@link makeCommand}: no separate request-flag byte or trailing NUL, matching
+ * what real `AV_EXTENDED` traffic was captured sending - `[proto][len][counter][commandType][0000][args]`.
+ */
+export function makeAvCommand(
+	self: DanteInstance,
+	commandType: number,
+	commandArguments: Buffer = Buffer.alloc(0),
+): Buffer {
+	const commandLength = intToBuffer(commandArguments.length + 10)
+
+	const payload = Buffer.concat([
+		intToBuffer(DANTE_CONST.PROTOCOL.AV_EXTENDED),
+		commandLength,
+		self.counter,
+		intToBuffer(commandType),
+		intToBuffer(0),
 		commandArguments,
 	])
 

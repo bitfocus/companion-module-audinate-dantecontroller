@@ -23,10 +23,14 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 		if (!device.name) continue
 		variables[`${device.name}_ip`] = { name: 'Ip address of ' + device.name }
 		variables[`${device.name}_locked`] = { name: 'Device lock state of ' + device.name }
-		variables[`${device.name}_tx`] = { name: 'Number of outputs for ' + device.name }
-		variables[`${device.name}_tx_names`] = { name: 'Output names for ' + device.name }
-		variables[`${device.name}_rx`] = { name: 'Number of inputs for ' + device.name }
-		variables[`${device.name}_rx_names`] = { name: ' Input names for ' + device.name }
+		variables[`${device.name}_tx`] = { name: 'Number of audio outputs for ' + device.name }
+		variables[`${device.name}_tx_names`] = { name: 'Audio output names for ' + device.name }
+		variables[`${device.name}_rx`] = { name: 'Number of audio inputs for ' + device.name }
+		variables[`${device.name}_rx_names`] = { name: 'Audio input names for ' + device.name }
+		variables[`${device.name}_tx_video`] = { name: 'Number of video outputs for ' + device.name }
+		variables[`${device.name}_tx_names_video`] = { name: 'Video output names for ' + device.name }
+		variables[`${device.name}_rx_video`] = { name: 'Number of video inputs for ' + device.name }
+		variables[`${device.name}_rx_names_video`] = { name: 'Video input names for ' + device.name }
 		variables[`${device.name}_sr`] = { name: 'Sample rate of ' + device.name }
 		variables[`${device.name}_pullup`] = { name: 'Sample rate pullup of ' + device.name }
 		variables[`${device.name}_latency`] = { name: 'Latency of ' + device.name + ' (in ms)' }
@@ -62,6 +66,10 @@ export const ALL_VARIABLE_TYPES = [
 	'tx',
 	'rx_names',
 	'tx_names',
+	'rx_video',
+	'tx_video',
+	'rx_names_video',
+	'tx_names_video',
 	'sr',
 	'latency',
 	'encoding',
@@ -117,6 +125,16 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 
 						case 'rx_names':
 						case 'tx_names':
+							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							break
+
+						case 'rx_video':
+						case 'tx_video':
+							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							break
+
+						case 'rx_names_video':
+						case 'tx_names_video':
 							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 

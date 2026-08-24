@@ -30,15 +30,15 @@ function devicesData(): DevicesData {
 		'10.0.0.5': {
 			name: 'DeviceA',
 			ports: { ARC: 4440 },
-			rx: channels(4, 'In'),
-			tx: channels(4, 'Out'),
+			audioRx: channels(4, 'In'),
+			audioTx: channels(4, 'Out'),
 			...settingsOptions,
 		},
 		'10.0.0.6': {
 			name: 'DeviceB',
 			ports: { ARC: 4440 },
-			rx: channels(2, 'In'),
-			tx: channels(2, 'Out'),
+			audioRx: channels(2, 'In'),
+			audioTx: channels(2, 'Out'),
 			...settingsOptions,
 		},
 	} as unknown as DevicesData
@@ -450,7 +450,7 @@ describe('dropdown defaults', () => {
 	it('holds when a filter excludes the first device overall', () => {
 		// DeviceA has no tx channels, so any tx-filtered dropdown must not default to it
 		const self = mockInstance()
-		;(self.devicesData['10.0.0.5'] as { tx?: unknown }).tx = undefined
+		;(self.devicesData['10.0.0.5'] as { audioTx?: unknown }).audioTx = undefined
 		UpdateActions(self)
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 

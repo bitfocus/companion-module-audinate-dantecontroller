@@ -16,7 +16,7 @@ import {
 	clearDeviceTimeouts,
 	resolveDeviceIp,
 } from './devices.js'
-import { parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
+import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
 
 const logger = createModuleLogger('api:connection')
@@ -236,6 +236,8 @@ export function initConnection(self: DanteInstance): void {
 	self.devicesChoices = []
 	self.txChannelsChoices = {}
 	self.rxChannelsChoices = {}
+	self.videoTxChannelsChoices = {}
+	self.videoRxChannelsChoices = {}
 	self.txFriendlyNameRefreshCounter = 0
 
 	// Resolve the configured network card. Matching by MAC as well as by address means a link-local
@@ -269,7 +271,10 @@ export function initConnection(self: DanteInstance): void {
 	self.sockets.ARC = dgram.createSocket({ type: 'udp4', reuseAddr: true, ...REUSE_PORT_OPTION })
 	const arcSocket = self.sockets.ARC
 
-	arcSocket.on('message', (reply, rinfo) => parseReply(self, reply, rinfo))
+	arcSocket.on('message', (reply, rinfo) => {
+		parseReply(self, reply, rinfo)
+		parseAvReply(self, reply, rinfo)
+	})
 	arcSocket.on('error', (error) => {
 		logger.error(`ARC socket : ${error.message}`)
 		self.activeConnections.ARC = false

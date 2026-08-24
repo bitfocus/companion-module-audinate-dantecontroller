@@ -114,7 +114,7 @@ describe('channel renames', () => {
 	function withChannels(names: string[]) {
 		const rx: Record<string | number, unknown> = { count: names.length }
 		names.forEach((name, index) => (rx[index + 1] = { number: index + 1, name }))
-		return { '10.0.0.5': { name: 'DeviceA', rx } } as unknown as DevicesData
+		return { '10.0.0.5': { name: 'DeviceA', audioRx: rx } } as unknown as DevicesData
 	}
 
 	it('reports a renamed channel at info, naming both labels', () => {
@@ -122,7 +122,7 @@ describe('channel renames', () => {
 		updateChannelChoices(self, '10.0.0.5', 'rx')
 
 		captured.length = 0
-		self.devicesData['10.0.0.5'].rx![2].name = 'Talkback'
+		self.devicesData['10.0.0.5'].audioRx![2].name = 'Talkback'
 		updateChannelChoices(self, '10.0.0.5', 'rx')
 
 		const line = at('info').find((text) => text.includes('renamed'))
@@ -259,7 +259,7 @@ describe('route changes', () => {
 		const self = instance({ [IP]: { name: 'DeviceA', ports: { ARC: 4440 } } })
 		deliver(self, [{ number: 1, name: 'In 1', source: 'DeviceB', channel: 'Out 1', status: 9 }])
 
-		expect(self.devicesData[IP].rx?.[1]).toMatchObject({
+		expect(self.devicesData[IP].audioRx?.[1]).toMatchObject({
 			name: 'In 1',
 			sourceDevice: 'DeviceB',
 			sourceChannel: 'Out 1',

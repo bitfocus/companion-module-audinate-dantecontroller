@@ -9,7 +9,7 @@ import type DanteInstance from '../main.js'
 import type { MdnsResponsePacket, ServiceName } from './types.js'
 import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
-import { getChannelCount, getSettings, getSettingsPort } from './queries.js'
+import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 
 const logger = createModuleLogger('api:discovery')
 
@@ -88,6 +88,12 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 							case 'ARC':
 								getChannelCount(self, deviceIp)
 								getSettings(self, deviceIp)
+								// Video channels arrive over the same ARC socket under a second protocol tag, so
+								// they are queried here too - otherwise a device's video routes/names stay unknown
+								// until someone runs the Refresh action, and any per-device video option field
+								// (which only appears once channels are known) never shows up in the meantime.
+								getVideoRxChannels(self, deviceIp)
+								getVideoTxChannels(self, deviceIp)
 								break
 
 							case 'CMC':

@@ -27,8 +27,8 @@ function devicesData(): DevicesData {
 			encoding: 'PCM24',
 			encodingOptions: ['16', '24'],
 			output_levels: ['+18dBu', '+4dBu'],
-			rx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
-			tx: {
+			audioRx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
+			audioTx: {
 				count: 3,
 				1: { number: 1, name: '01' },
 				2: { number: 2, name: '02' },
@@ -41,13 +41,13 @@ function devicesData(): DevicesData {
 			latency: 5,
 			sr: 96000,
 			srOptions: ['48000', '96000'],
-			rx: {
+			audioRx: {
 				count: 2,
 				1: { number: 1, name: 'In 1' },
 				// routed from DeviceA's channel 3, which the device reports by its label
 				2: { number: 2, name: 'In 2', sourceDevice: 'DeviceA', sourceChannel: 'Talkback' },
 			},
-			tx: { count: 1, 1: { number: 1, name: '01' } },
+			audioTx: { count: 1, 1: { number: 1, name: '01' } },
 		},
 	}
 }
@@ -56,7 +56,8 @@ function devicesData(): DevicesData {
 function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
 	const byDevice: Record<string, { id: number; label: string }[]> = {}
 	for (const device of Object.values(data)) {
-		const io = device[channelType] as Record<string, { number?: number; name?: string }> | undefined
+		const io = (channelType === 'rx' ? device.audioRx : device.audioTx) as
+			Record<string, { number?: number; name?: string }> | undefined
 		if (!device.name || !io) continue
 		byDevice[device.name] = Object.entries(io)
 			.filter(([key]) => !isNaN(Number(key)))
@@ -125,7 +126,7 @@ describe('makeCrosspoint learn', () => {
 
 	it('resolves a self-route to the device its own name', async () => {
 		const data = devicesData()
-		;(data[A].rx as Record<number, unknown>)[1] = {
+		;(data[A].audioRx as Record<number, unknown>)[1] = {
 			number: 1,
 			name: 'In 1',
 			sourceDevice: '.',
@@ -164,7 +165,7 @@ describe('makeCrosspointDropDown learn', () => {
 
 	it('declines when the source device is not on the network', async () => {
 		const data = devicesData()
-		;(data[B].rx as Record<number, { sourceDevice: string }>)[2].sourceDevice = 'AbsentDevice'
+		;(data[B].audioRx as Record<number, { sourceDevice: string }>)[2].sourceDevice = 'AbsentDevice'
 		expect(
 			await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
 		).toBeUndefined()

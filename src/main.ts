@@ -39,6 +39,8 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	devicesChoices: DropdownChoice<string>[] = []
 	txChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	rxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
+	videoTxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
+	videoRxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	txFriendlyNameRefreshCounter = 0
 
 	debug = false

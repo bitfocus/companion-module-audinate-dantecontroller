@@ -8,11 +8,11 @@ import {
 	parseString,
 	parseStringAtPointer,
 	getChannelSubscriptionName,
-	hasRxChannels,
-	hasTxChannels,
+	hasAudioRxChannels,
+	hasAudioTxChannels,
 	findDeviceIpByName,
-	findTxChannelByName,
-	findRxChannelByName,
+	findAudioTxChannelByName,
+	findAudioRxChannelByName,
 	checkConnections,
 	registerDevice,
 	destroyDevice,
@@ -34,9 +34,9 @@ import {
 	makeCommand,
 	makeSettingCommand,
 	setChannelName,
-	makeCrosspoint,
-	clearCrosspoint,
-	clearAllCrosspoints,
+	makeAudioCrosspoint,
+	clearAudioCrosspoint,
+	clearAllAudioCrosspoints,
 	macForDevice,
 	resolveDeviceIp,
 	deviceByIdentifier,
@@ -229,28 +229,32 @@ describe('getChannelSubscriptionName', () => {
 	})
 })
 
-describe('hasRxChannels / hasTxChannels', () => {
+describe('hasAudioRxChannels / hasAudioTxChannels', () => {
 	it('is true when the device has a positive channel count', () => {
-		expect(hasRxChannels({ rx: { count: 2 } })).toBe(true)
-		expect(hasTxChannels({ tx: { count: 1 } })).toBe(true)
+		expect(hasAudioRxChannels({ audioRx: { count: 2 } })).toBe(true)
+		expect(hasAudioTxChannels({ audioTx: { count: 1 } })).toBe(true)
 	})
 
 	it('is false when the count is zero, missing, or the device is undefined', () => {
-		expect(hasRxChannels({ rx: { count: 0 } })).toBe(false)
-		expect(hasRxChannels({})).toBe(false)
-		expect(hasRxChannels(undefined)).toBe(false)
-		expect(hasTxChannels({})).toBe(false)
+		expect(hasAudioRxChannels({ audioRx: { count: 0 } })).toBe(false)
+		expect(hasAudioRxChannels({})).toBe(false)
+		expect(hasAudioRxChannels(undefined)).toBe(false)
+		expect(hasAudioTxChannels({})).toBe(false)
 	})
 })
 
-describe('findDeviceIpByName / findTxChannelByName / findRxChannelByName', () => {
+describe('findDeviceIpByName / findAudioTxChannelByName / findAudioRxChannelByName', () => {
 	function createSelfWithDevice(): DanteInstance {
 		return createMockInstance({
 			devicesData: {
 				'10.0.0.5': {
 					name: 'MyDevice',
-					tx: { 1: { number: 1, name: 'Input 1' }, 2: { number: 2, name: 'Input 2', friendlyName: 'Mic 2' }, count: 2 },
-					rx: { 1: { number: 1, name: 'Output 1' }, count: 1 },
+					audioTx: {
+						1: { number: 1, name: 'Input 1' },
+						2: { number: 2, name: 'Input 2', friendlyName: 'Mic 2' },
+						count: 2,
+					},
+					audioRx: { 1: { number: 1, name: 'Output 1' }, count: 1 },
 				},
 			},
 		})
@@ -265,19 +269,19 @@ describe('findDeviceIpByName / findTxChannelByName / findRxChannelByName', () =>
 	})
 
 	it('finds a tx channel by name, identified by ip', () => {
-		expect(findTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Input 1')?.number).toBe(1)
+		expect(findAudioTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Input 1')?.number).toBe(1)
 	})
 
 	it('finds a tx channel by friendly name, identified by device name', () => {
-		expect(findTxChannelByName(createSelfWithDevice(), 'MyDevice', 'Mic 2')?.number).toBe(2)
+		expect(findAudioTxChannelByName(createSelfWithDevice(), 'MyDevice', 'Mic 2')?.number).toBe(2)
 	})
 
 	it('finds an rx channel by name', () => {
-		expect(findRxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Output 1')?.number).toBe(1)
+		expect(findAudioRxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Output 1')?.number).toBe(1)
 	})
 
 	it('does not mistake the count property for a channel', () => {
-		expect(findTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Nonexistent')).toBeUndefined()
+		expect(findAudioTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Nonexistent')).toBeUndefined()
 	})
 })
 
@@ -591,8 +595,8 @@ describe('scheduleCheckVariables', () => {
 	function twoDevices() {
 		return createMockInstance({
 			devicesData: {
-				'10.0.0.5': { name: 'DeviceA', ports: {}, rx: { count: 1, 1: { number: 1, name: 'In 1' } } },
-				'10.0.0.6': { name: 'DeviceB', ports: {}, rx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+				'10.0.0.5': { name: 'DeviceA', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+				'10.0.0.6': { name: 'DeviceB', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
 			},
 		})
 	}
@@ -878,7 +882,9 @@ describe('channel query paging', () => {
 	function withCounts(rx: number, tx: number) {
 		const send = vi.fn()
 		const self = createMockInstance({
-			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, rx: { count: rx }, tx: { count: tx } } },
+			devicesData: {
+				'10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count: rx }, audioTx: { count: tx } },
+			},
 			sockets: { ARC: { send } as unknown as dgram.Socket },
 			counter: Buffer.from('0001', 'hex'),
 		})
@@ -1055,8 +1061,9 @@ describe('updateChannelChoices', () => {
 	function withChannels(channelType: 'rx' | 'tx', count: number) {
 		const io: Record<string | number, unknown> = { count }
 		for (let i = 1; i <= count; i++) io[i] = { number: i, name: `Ch ${i}` }
+		const field = channelType === 'rx' ? 'audioRx' : 'audioTx'
 		return createMockInstance({
-			devicesData: { '10.0.0.5': { name: 'Dev', ports: {}, [channelType]: io } },
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: {}, [field]: io } },
 		})
 	}
 
@@ -1093,7 +1100,7 @@ describe('updateChannelChoices', () => {
 	it('rebuilds when a channel is renamed', () => {
 		const self = withChannels('rx', 2)
 		updateChannelChoices(self, '10.0.0.5', 'rx')
-		;(self.devicesData['10.0.0.5'].rx as Record<number, { name: string }>)[2].name = 'Renamed'
+		;(self.devicesData['10.0.0.5'].audioRx as Record<number, { name: string }>)[2].name = 'Renamed'
 		updateChannelChoices(self, '10.0.0.5', 'rx')
 		expect(self.rxChannelsChoices.Dev[1].label).toBe('Renamed')
 	})
@@ -1101,7 +1108,7 @@ describe('updateChannelChoices', () => {
 	it('rebuilds when the channel count shrinks', () => {
 		const self = withChannels('rx', 3)
 		updateChannelChoices(self, '10.0.0.5', 'rx')
-		const io = self.devicesData['10.0.0.5'].rx as { count: number }
+		const io = self.devicesData['10.0.0.5'].audioRx as { count: number }
 		io.count = 1
 		updateChannelChoices(self, '10.0.0.5', 'rx')
 		expect(self.rxChannelsChoices.Dev).toHaveLength(1)
@@ -1232,37 +1239,37 @@ describe('setChannelName', () => {
 	})
 })
 
-describe('makeCrosspoint / clearCrosspoint', () => {
-	it('makeCrosspoint logs an error and sends nothing when the destination device cannot be resolved', () => {
+describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
+	it('makeAudioCrosspoint logs an error and sends nothing when the destination device cannot be resolved', () => {
 		const send = vi.fn()
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
-		makeCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')
+		makeAudioCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')
 		expect(send).not.toHaveBeenCalled()
 		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
 	})
 
-	it('makeCrosspoint resolves an IP-address destination directly, without a name lookup', () => {
+	it('makeAudioCrosspoint resolves an IP-address destination directly, without a name lookup', () => {
 		const send = vi.fn()
 		const self = createMockInstance({
 			devicesData: { '10.0.0.5': { name: 'Dest', ports: { ARC: 4440 } } },
 			sockets: { ARC: { send } as unknown as dgram.Socket },
 		})
-		makeCrosspoint(self, '10.0.0.5', 'Input 1', 'SourceDevice', '1')
+		makeAudioCrosspoint(self, '10.0.0.5', 'Input 1', 'SourceDevice', '1')
 		expect(send).toHaveBeenCalledWith(expect.any(Buffer), 0, expect.any(Number), 4440, '10.0.0.5')
 	})
 
-	it('clearCrosspoint logs an error when the destination device cannot be resolved', () => {
+	it('clearAudioCrosspoint logs an error when the destination device cannot be resolved', () => {
 		const self = createMockInstance()
-		clearCrosspoint(self, 'UnknownDevice', '1')
+		clearAudioCrosspoint(self, 'UnknownDevice', '1')
 		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
 	})
 })
 
-describe('clearAllCrosspoints', () => {
+describe('clearAllAudioCrosspoints', () => {
 	function withRx(count: number) {
 		const send = vi.fn()
 		const self = createMockInstance({
-			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, rx: { count } } },
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count } } },
 			sockets: { ARC: { send } as unknown as dgram.Socket },
 			counter: Buffer.from('4242', 'hex'),
 		})
@@ -1271,13 +1278,13 @@ describe('clearAllCrosspoints', () => {
 
 	it('clears a whole device in a single packet', () => {
 		const { self, send } = withRx(8)
-		clearAllCrosspoints(self, '10.0.0.5')
+		clearAllAudioCrosspoints(self, '10.0.0.5')
 		expect(send).toHaveBeenCalledTimes(1)
 	})
 
 	it('emits the byte layout the device accepts', () => {
 		const { self, send } = withRx(2)
-		clearAllCrosspoints(self, '10.0.0.5')
+		clearAllAudioCrosspoints(self, '10.0.0.5')
 
 		// protocol, length, counter, opcode 0x3014, then [count u32][channel u32...] and a trailing 0.
 		// The count's high half comes from makeCommand's two zero request-flag bytes.
@@ -1286,7 +1293,7 @@ describe('clearAllCrosspoints', () => {
 
 	it('splits a high channel count across packets rather than one huge datagram', () => {
 		const { self, send } = withRx(40)
-		clearAllCrosspoints(self, '10.0.0.5')
+		clearAllAudioCrosspoints(self, '10.0.0.5')
 		expect(send).toHaveBeenCalledTimes(3) // 16 + 16 + 8
 
 		const channelsIn = (call: number) => {
@@ -1299,7 +1306,7 @@ describe('clearAllCrosspoints', () => {
 
 	it('covers every channel exactly once across the batches', () => {
 		const { self, send } = withRx(40)
-		clearAllCrosspoints(self, '10.0.0.5')
+		clearAllAudioCrosspoints(self, '10.0.0.5')
 
 		const seen: number[] = []
 		for (const [packet] of send.mock.calls as [Buffer][]) {
@@ -1311,19 +1318,19 @@ describe('clearAllCrosspoints', () => {
 
 	it('sends nothing when the device has no known receive channels', () => {
 		const { self, send } = withRx(0)
-		clearAllCrosspoints(self, '10.0.0.5')
+		clearAllAudioCrosspoints(self, '10.0.0.5')
 		expect(send).not.toHaveBeenCalled()
 	})
 
 	it('resolves a device name as well as an IP', () => {
 		const { self, send } = withRx(4)
-		clearAllCrosspoints(self, 'Dev')
+		clearAllAudioCrosspoints(self, 'Dev')
 		expect(send).toHaveBeenCalledTimes(1)
 	})
 
 	it('logs an error for an unknown device', () => {
 		const { self, send } = withRx(4)
-		clearAllCrosspoints(self, 'NoSuchDevice')
+		clearAllAudioCrosspoints(self, 'NoSuchDevice')
 		expect(send).not.toHaveBeenCalled()
 		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining('NoSuchDevice'))
 	})
@@ -1422,7 +1429,7 @@ describe('parseReply (ARC) - malformed packet handling', () => {
 		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
 		const self = registered()
 		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
-		expect(self.devicesData[IP]?.tx?.[1]?.sampleRate).toBeUndefined()
+		expect(self.devicesData[IP]?.audioTx?.[1]?.sampleRate).toBeUndefined()
 	})
 
 	it('survives a tx reply whose sample-rate pointer lands within 4 bytes of the end', () => {
@@ -1480,7 +1487,7 @@ describe('parseReply (ARC) - malformed packet handling', () => {
 		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 1, record)
 		const self = registered()
 		parseReply(self, reply, makeRinfo(IP, reply.length))
-		expect(self.devicesData[IP]?.rx?.[1]?.subscriptionStatus).toBe(10)
+		expect(self.devicesData[IP]?.audioRx?.[1]?.subscriptionStatus).toBe(10)
 	})
 })
 
@@ -1499,8 +1506,8 @@ describe('parseReply (ARC) - channel count', () => {
 		const self = registered()
 		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
 		parseReply(self, reply, makeRinfo(IP, reply.length))
-		expect(self.devicesData[IP]?.tx?.count).toBe(8)
-		expect(self.devicesData[IP]?.rx?.count).toBe(8)
+		expect(self.devicesData[IP]?.audioTx?.count).toBe(8)
+		expect(self.devicesData[IP]?.audioRx?.count).toBe(8)
 	})
 
 	it('reports an unlocked device as unlocked', () => {
@@ -1540,5 +1547,59 @@ describe('parseSettingsReply', () => {
 		const reply = Buffer.from(REAL_SETTINGS_HEX, 'hex')
 		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
 		expect(self.devicesData[REAL_DEVICE_IP]).toBeUndefined()
+	})
+
+	/**
+	 * A real change notification, captured from a decoder the moment a video crosspoint was set.
+	 *
+	 * Devices multicast these on the SETTINGS group whenever their channels change, whoever made the
+	 * change - Dante Controller, another Companion, or this module. They carry no state, so the
+	 * module answers them by re-reading the affected directory; this is the only thing that keeps it
+	 * in step with routing it did not perform itself.
+	 */
+	const REAL_RX_CHANNEL_CHANGE_HEX =
+		'ffff004102150000186696fffe110910417564696e6174650738010200000000000000000000000100000000' +
+		'0000000000000000000000000000000000000000000000000000'
+
+	function changeNotification(commandId: number): Buffer {
+		const reply = Buffer.from(REAL_RX_CHANNEL_CHANGE_HEX, 'hex')
+		reply.writeUInt16BE(commandId, 26) // payload starts at 24, command id is 2 bytes in
+		reply.writeUInt16BE(reply.length, 2) // keep the declared length honest
+		return reply
+	}
+
+	/** The opcodes of every command the module sent while handling a reply. */
+	function sentOpcodes(send: ReturnType<typeof vi.fn>): number[] {
+		return send.mock.calls.map((call) => (call[0] as Buffer).readUInt16BE(6))
+	}
+
+	function withSocket() {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { [REAL_DEVICE_IP]: { name: 'Decoder-001', ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('0000', 'hex'),
+		})
+		return { self, send }
+	}
+
+	it('re-reads both the audio and the video rx directory on an rx channel change', () => {
+		// A video crosspoint change raises this same audio-named notification - confirmed live - so
+		// re-reading only the audio directory left every video feedback and variable stale.
+		const { self, send } = withSocket()
+		const reply = changeNotification(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_CHANGE)
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY)
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY)
+	})
+
+	it('re-reads both the audio and the video tx directory on a tx channel change', () => {
+		const { self, send } = withSocket()
+		const reply = changeNotification(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_CHANGE)
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY)
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_TX_CHANNEL_QUERY)
 	})
 })

@@ -1,6 +1,7 @@
 import {
 	FixupNumericOrVariablesValueToExpressions,
 	type CompanionMigrationAction,
+	type CompanionMigrationFeedback,
 	type CompanionStaticUpgradeScript,
 	type CompanionStaticUpgradeResult,
 	type CompanionUpgradeContext,
@@ -39,6 +40,23 @@ function numericToStringOptionIds(action: CompanionMigrationAction): string[] {
 
 /** Actions which gained the `clearAll` checkbox, and so need it present rather than undefined. */
 const clearAllActionIds = ['clearCrosspoint', 'clearCrosspointDropDown']
+
+/**
+ * Actions and feedbacks which gained a `channelType` (Audio/Video) option, and so need it present
+ * rather than undefined - every crosspoint- and channel-name-related one, all of which predate
+ * video and so were implicitly audio-only.
+ */
+const channelTypeActionIds = [
+	'makeCrosspoint',
+	'makeCrosspointDropDown',
+	'clearCrosspoint',
+	'clearCrosspointDropDown',
+	'setRxChannelName',
+	'resetRxChannelName',
+	'setTxChannelName',
+	'resetTxChannelName',
+]
+const channelTypeFeedbackIds = ['routing_bg', 'routing_bg_manual', 'channel_subscription']
 
 export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 	function (
@@ -205,6 +223,35 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedConfig: null,
 			updatedActions: changedActions,
 			updatedFeedbacks: [],
+		}
+	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// The crosspoint and channel-name actions/feedbacks gained a channelType (Audio/Video) option.
+		// Every one saved before that predates video and so was implicitly audio - give it that value
+		// explicitly, rather than leaving it undefined for a dropdown that requires a value to parse.
+		const changedActions: CompanionMigrationAction[] = []
+		for (const action of props.actions) {
+			if (!channelTypeActionIds.includes(action.actionId) || action.options.channelType !== undefined) continue
+
+			action.options.channelType = { value: 'audio', isExpression: false }
+			changedActions.push(action)
+		}
+
+		const changedFeedbacks: CompanionMigrationFeedback[] = []
+		for (const feedback of props.feedbacks) {
+			if (!channelTypeFeedbackIds.includes(feedback.feedbackId) || feedback.options.channelType !== undefined) continue
+
+			feedback.options.channelType = { value: 'audio', isExpression: false }
+			changedFeedbacks.push(feedback)
+		}
+
+		return {
+			updatedConfig: null,
+			updatedActions: changedActions,
+			updatedFeedbacks: changedFeedbacks,
 		}
 	},
 ]

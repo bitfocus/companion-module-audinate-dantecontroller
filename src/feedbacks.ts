@@ -1,28 +1,34 @@
 import {
 	combineRgb,
+	createModuleLogger,
 	Regex,
 	type CompanionBooleanFeedbackDefinition,
 	type CompanionFeedbackDefinitions,
 	type CompanionValueFeedbackDefinition,
-	type SomeCompanionFeedbackInputField,
 } from '@companion-module/base'
 import {
-	channelChoices,
-	channelRangeDescription,
+	channelOptionPrefix,
+	channelTypeOption,
+	CHANNEL_MEDIA_TYPE_LABELS,
 	deviceByIdentifier,
 	deviceOptionValue,
-	deviceSelectedExpression,
 	findDeviceIpByName,
-	findRxChannelByName,
-	findTxChannelByName,
+	findAudioRxChannelByName,
+	findAudioTxChannelByName,
+	findVideoRxChannelByName,
+	findVideoTxChannelByName,
 	firstChoiceId,
 	getChannelSubscriptionName,
-	getRxChannelSource,
+	getAudioRxChannelSource,
+	getVideoRxChannelSource,
 	isSubscriptionConnected,
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,
 	deviceProperty,
 	orPlaceholder,
+	perDeviceChannelFields,
+	perDeviceMissingChannelWarnings,
+	type ChannelMediaType,
 	type DeviceProperty,
 	resolveDeviceIp,
 	rxDeviceChoices,
@@ -32,13 +38,19 @@ import {
 } from './api/index.js'
 import type DanteInstance from './main.js'
 
+const logger = createModuleLogger('feedbacks')
+
 type RoutingBgOptions = {
+	channelType: ChannelMediaType
 	destinationDevice: string
 	sourceDevice: string
 } & Record<`destinationChannel_${string}`, number> &
-	Record<`sourceChannel_${string}`, number>
+	Record<`destinationChannelVideo_${string}`, number> &
+	Record<`sourceChannel_${string}`, number> &
+	Record<`sourceChannelVideo_${string}`, number>
 
 type RoutingBgManualOptions = {
+	channelType: ChannelMediaType
 	sourceChannelName: string
 	sourceDeviceName: string
 	destinationChannelId: string
@@ -51,8 +63,10 @@ type DevicePropertyOptions = {
 }
 
 type ChannelSubscriptionOptions = {
+	channelType: ChannelMediaType
 	device: string
-} & Record<`channel_${string}`, number>
+} & Record<`channel_${string}`, number> &
+	Record<`channelVideo_${string}`, number>
 
 /**
  * What a receive channel is subscribed to.
@@ -98,6 +112,46 @@ function normalizeName(name: string | number | undefined | null): string {
 }
 
 /**
+ * Whether a destination channel's reported source matches a selected source device/channel.
+ *
+ * Shared by `routing_bg`, its custom variant, and effectively by `channel_subscription` (which just
+ * reads the same fields rather than comparing them) - the destination-channel shape is common to
+ * both the legacy `RxChannel` (audio) and `VideoRxChannel`, so this works for either without
+ * needing to know which one it was given.
+ */
+function sourceMatches(
+	destinationChannel: { sourceChannel?: string; sourceDevice?: string } | undefined,
+	selectedSourceChannel: number | string,
+	sourceChannel: { number?: number; name?: string; friendlyName?: string } | undefined,
+	selectedSourceDeviceName: string | undefined,
+	/** True when the destination and source device selections are the same device - see the '.' self-route shorthand below. */
+	sameDeviceSelected: boolean,
+): boolean {
+	const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel)
+	const sourceChannelCandidates = [
+		selectedSourceChannel,
+		getChannelSubscriptionName(sourceChannel),
+		sourceChannel?.name,
+		sourceChannel?.friendlyName,
+	]
+		.filter(Boolean)
+		.map((name) => normalizeName(name))
+	if (sourceChannel?.number != undefined && !isNaN(sourceChannel.number)) {
+		sourceChannelCandidates.push(String(sourceChannel.number), String(sourceChannel.number).padStart(2, '0'))
+	}
+	const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName)
+
+	const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice)
+	// A self-route is reported as '.' rather than the device's own name - not confirmed for video
+	// specifically, but harmless to check regardless: it only ever matches when it is a self-route.
+	const sourceDeviceMatches =
+		destinationSourceDeviceName == normalizeName(selectedSourceDeviceName) ||
+		(destinationSourceDeviceName == '.' && sameDeviceSelected)
+
+	return sourceDeviceMatches && sourceChannelMatches
+}
+
+/**
  * Builds and registers this instance's feedback definitions, including one
  * per-device dropdown option (and its visibility expression) for each known Dante device.
  */
@@ -114,6 +168,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			bgcolor: combineRgb(255, 255, 0),
 		},
 		options: [
+			channelTypeOption('channelType'),
 			{
 				type: 'dropdown',
 				label: 'Destination Device',
@@ -124,20 +179,14 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				// see actions.ts: a legacy address must remain a selectable value
 				allowCustom: true,
 			},
-			...Object.entries(self.devicesData)
-				.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
-					type: 'dropdown',
-					label: 'Destination channel',
-					id: `destinationChannel_${device.name}`,
-					choices: channelChoices(self, device, 'rx'),
-					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-					expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-					// allowCustom keeps actions still holding it parseable rather than failing outright
-					allowCustom: true,
-					isVisibleExpression: deviceSelectedExpression('destinationDevice', device.name ?? '', ip),
-				})),
+			...perDeviceChannelFields<keyof RoutingBgOptions>(
+				self,
+				'destinationDevice',
+				'destinationChannel',
+				'rx',
+				'Destination channel',
+			),
+			...perDeviceMissingChannelWarnings(self, 'destinationDevice', 'rx'),
 			{
 				type: 'dropdown',
 				label: 'Source Device',
@@ -148,24 +197,13 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				// see actions.ts: a legacy address must remain a selectable value
 				allowCustom: true,
 			},
-			...Object.entries(self.devicesData)
-				.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof RoutingBgOptions> => ({
-					type: 'dropdown',
-					label: 'Source channel',
-					id: `sourceChannel_${device.name}`,
-					choices: channelChoices(self, device, 'tx'),
-					default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
-					expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
-					// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-					// allowCustom keeps actions still holding it parseable rather than failing outright
-					allowCustom: true,
-					isVisibleExpression: deviceSelectedExpression('sourceDevice', device.name ?? '', ip),
-				})),
+			...perDeviceChannelFields<keyof RoutingBgOptions>(self, 'sourceDevice', 'sourceChannel', 'tx', 'Source channel'),
+			...perDeviceMissingChannelWarnings(self, 'sourceDevice', 'tx'),
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: (feedback) => {
 			const opt = feedback.options
+			const isVideo = opt.channelType === 'video'
 			// Both dropdown ids are device IPs, so this instance's dependencies are known exactly.
 			trackFeedbackDevices(self, feedback.id, [
 				resolveDeviceIp(self, opt.destinationDevice),
@@ -174,38 +212,59 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// Pickers store the device name; actions saved before that store an address. Both resolve.
 			const destinationDevice = deviceByIdentifier(self, opt.destinationDevice)
 			const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
-			if (opt.destinationDevice && destinationDevice?.rx && opt.sourceDevice) {
-				const destinationChannel =
-					destinationDevice.rx?.[deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0)]
-				const selectedSourceChannel = deviceOptionValue<number>(self, opt, 'sourceChannel', opt.sourceDevice, 0)
+			if (!opt.destinationDevice || !opt.sourceDevice) return false
+
+			const destinationChannelNumber = deviceOptionValue<number | undefined>(
+				self,
+				opt,
+				channelOptionPrefix('destinationChannel', opt.channelType),
+				opt.destinationDevice,
+				undefined,
+			)
+			const selectedSourceChannel = deviceOptionValue<number | undefined>(
+				self,
+				opt,
+				channelOptionPrefix('sourceChannel', opt.channelType),
+				opt.sourceDevice,
+				undefined,
+			)
+			// A missing value means the field was never rendered - the device has no channels of this
+			// type - so there is nothing to check the feedback against, not merely "not connected".
+			if (destinationChannelNumber === undefined || selectedSourceChannel === undefined) return false
+
+			if (isVideo) {
+				if (!destinationDevice?.videoRx) return false
+				const destinationChannel = destinationDevice.videoRx[destinationChannelNumber]
 				const sourceChannel =
-					sourceDevice?.tx?.[selectedSourceChannel] ??
-					findTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
-				const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel)
-				const sourceChannelCandidates = [
+					sourceDevice?.videoTx?.[selectedSourceChannel] ??
+					findVideoTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
+				// No separate "connected" status for video (see VideoRxChannelSource) - a matching,
+				// reported source is itself the connected state.
+				return sourceMatches(
+					destinationChannel,
 					selectedSourceChannel,
-					getChannelSubscriptionName(sourceChannel),
-					sourceChannel?.name,
-					sourceChannel?.friendlyName,
-				]
-					.filter(Boolean)
-					.map((name) => normalizeName(name))
-				if (sourceChannel?.number != undefined) {
-					const number = sourceChannel.number
-					if (!isNaN(number)) {
-						sourceChannelCandidates.push(String(number), String(number).padStart(2, '0'))
-					}
-				}
-				const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName)
-				const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice)
-				const selectedSourceDeviceName = normalizeName(sourceDevice?.name)
-				const sourceDeviceMatches =
-					destinationSourceDeviceName == selectedSourceDeviceName ||
-					(destinationSourceDeviceName == '.' && opt.destinationDevice == opt.sourceDevice)
-				const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
-				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk
+					sourceChannel,
+					sourceDevice?.name,
+					opt.destinationDevice == opt.sourceDevice,
+				)
 			}
-			return false
+
+			if (!destinationDevice?.audioRx) return false
+			const destinationChannel = destinationDevice.audioRx[destinationChannelNumber]
+			const sourceChannel =
+				sourceDevice?.audioTx?.[selectedSourceChannel] ??
+				findAudioTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
+			const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
+			return (
+				subscriptionOk &&
+				sourceMatches(
+					destinationChannel,
+					selectedSourceChannel,
+					sourceChannel,
+					sourceDevice?.name,
+					opt.destinationDevice == opt.sourceDevice,
+				)
+			)
 		},
 	}
 
@@ -218,6 +277,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			bgcolor: combineRgb(255, 255, 0),
 		},
 		options: [
+			channelTypeOption('channelType'),
 			{
 				type: 'textinput',
 				label: 'Source Channel Name',
@@ -252,6 +312,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: async (feedback) => {
 			const opt = feedback.options
+			const isVideo = opt.channelType === 'video'
 			const sourceChannelName = opt.sourceChannelName
 			const sourceDeviceName = opt.sourceDeviceName
 			const destinationChannelId = opt.destinationChannelId
@@ -268,41 +329,32 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// entry registers this feedback as a wildcard so it keeps being checked regardless.
 			trackFeedbackDevices(self, feedback.id, [destinationDeviceIp, findDeviceIpByName(self, sourceDeviceName)])
 
-			if (destinationDeviceIp && sourceDeviceName && self.devicesData[destinationDeviceIp]?.rx) {
+			if (!destinationDeviceIp || !sourceDeviceName) return false
+			const sameDeviceSelected = self.devicesData[destinationDeviceIp]?.name == sourceDeviceName
+
+			if (isVideo) {
+				if (!self.devicesData[destinationDeviceIp]?.videoRx) return false
 				const destinationChannel =
-					findRxChannelByName(self, destinationDeviceIp, destinationChannelId) ??
-					self.devicesData[destinationDeviceIp].rx?.[Number(destinationChannelId)]
-				if (destinationChannel == undefined) {
-					return false
-				}
+					findVideoRxChannelByName(self, destinationDeviceIp, destinationChannelId) ??
+					self.devicesData[destinationDeviceIp].videoRx?.[Number(destinationChannelId)]
+				if (destinationChannel == undefined) return false
 
-				const sourceChannel = findTxChannelByName(self, sourceDeviceName, sourceChannelName)
-				const destinationSourceChannelName = normalizeName(destinationChannel?.sourceChannel)
-				const sourceChannelCandidates = [
-					sourceChannelName,
-					getChannelSubscriptionName(sourceChannel),
-					sourceChannel?.name,
-					sourceChannel?.friendlyName,
-				]
-					.filter(Boolean)
-					.map((name) => normalizeName(name))
-				if (sourceChannel?.number != undefined) {
-					const number = sourceChannel.number
-					if (!isNaN(number)) {
-						sourceChannelCandidates.push(String(number), String(number).padStart(2, '0'))
-					}
-				}
-
-				const sourceChannelMatches = sourceChannelCandidates.includes(destinationSourceChannelName)
-				const destinationSourceDeviceName = normalizeName(destinationChannel?.sourceDevice)
-				const selectedSourceDeviceName = normalizeName(sourceDeviceName)
-				const sourceDeviceMatches =
-					destinationSourceDeviceName == selectedSourceDeviceName ||
-					(destinationSourceDeviceName == '.' && self.devicesData[destinationDeviceIp].name == sourceDeviceName)
-				const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
-				return sourceDeviceMatches && sourceChannelMatches && subscriptionOk
+				const sourceChannel = findVideoTxChannelByName(self, sourceDeviceName, sourceChannelName)
+				return sourceMatches(destinationChannel, sourceChannelName, sourceChannel, sourceDeviceName, sameDeviceSelected)
 			}
-			return false
+
+			if (!self.devicesData[destinationDeviceIp]?.audioRx) return false
+			const destinationChannel =
+				findAudioRxChannelByName(self, destinationDeviceIp, destinationChannelId) ??
+				self.devicesData[destinationDeviceIp].audioRx?.[Number(destinationChannelId)]
+			if (destinationChannel == undefined) return false
+
+			const sourceChannel = findAudioTxChannelByName(self, sourceDeviceName, sourceChannelName)
+			const subscriptionOk = isSubscriptionConnected(destinationChannel?.subscriptionStatus)
+			return (
+				subscriptionOk &&
+				sourceMatches(destinationChannel, sourceChannelName, sourceChannel, sourceDeviceName, sameDeviceSelected)
+			)
 		},
 	}
 
@@ -358,6 +410,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 		name: 'Channel - Subscription',
 		description: 'Returns the channel a destination is subscribed to',
 		options: [
+			channelTypeOption('channelType'),
 			{
 				type: 'dropdown',
 				label: 'Device',
@@ -368,24 +421,50 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				// see actions.ts: a legacy address must remain a selectable value
 				allowCustom: true,
 			},
-			...Object.entries(self.devicesData)
-				.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-				.map(([ip, device]): SomeCompanionFeedbackInputField<keyof ChannelSubscriptionOptions> => ({
-					type: 'dropdown',
-					label: 'Channel',
-					id: `channel_${device.name}`,
-					choices: channelChoices(self, device, 'rx'),
-					default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-					expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-					allowCustom: true,
-					isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-				})),
+			...perDeviceChannelFields<keyof ChannelSubscriptionOptions>(self, 'device', 'channel', 'rx', 'Channel'),
+			...perDeviceMissingChannelWarnings(self, 'device', 'rx'),
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
 		callback: (feedback) => {
 			const opt = feedback.options
-			const channelNumber = deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
-			const source = getRxChannelSource(self, opt.device, channelNumber)
+			const isVideo = opt.channelType === 'video'
+			const channelNumber = deviceOptionValue<number | undefined>(
+				self,
+				opt,
+				channelOptionPrefix('channel', opt.channelType),
+				opt.device,
+				undefined,
+			)
+			if (channelNumber === undefined) {
+				logger.error(
+					`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} channel available on '${opt.device}' - it may ` +
+						`have no ${opt.channelType} receive channels`,
+				)
+				trackFeedbackDevices(self, feedback.id, [resolveDeviceIp(self, opt.device)])
+				return { ...NO_SUBSCRIPTION }
+			}
+
+			if (isVideo) {
+				const source = getVideoRxChannelSource(self, opt.device, channelNumber)
+				trackFeedbackDevices(
+					self,
+					feedback.id,
+					source
+						? [resolveDeviceIp(self, opt.device), resolveDeviceIp(self, source.deviceName)]
+						: [resolveDeviceIp(self, opt.device)],
+				)
+				if (!source) return { ...NO_SUBSCRIPTION }
+
+				// No separate "connected" status for video - see VideoRxChannelSource.
+				const sourceChannel = findVideoTxChannelByName(self, source.deviceName, source.channelName)
+				return {
+					connected: true,
+					device: { name: source.deviceName, ip: resolveDeviceIp(self, source.deviceName) ?? '' },
+					channel: { name: source.channelName, number: sourceChannel?.number ?? 0 },
+				}
+			}
+
+			const source = getAudioRxChannelSource(self, opt.device, channelNumber)
 
 			// Depends on the destination (which reports the subscription) and on the source (whose
 			// transmit channels give the number), so a change to either must re-check this feedback -
@@ -407,7 +486,7 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 
 			// The name is the one the destination reports, which is the subscription as it stands - a
 			// source renamed since it was made still reports the name the subscription was built with.
-			const sourceChannel = findTxChannelByName(self, source.deviceName, source.channelName)
+			const sourceChannel = findAudioTxChannelByName(self, source.deviceName, source.channelName)
 			return {
 				connected: source.connected,
 				device: { name: source.deviceName, ip: resolveDeviceIp(self, source.deviceName) ?? '' },

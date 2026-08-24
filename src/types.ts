@@ -20,6 +20,14 @@ export interface DanteDeviceVariables {
 	rx_names: string[]
 	/** Transmit channel names, indexed by channel number - 1. */
 	tx_names: string[]
+	/** Number of video receive (input) channels. */
+	rx_video: number
+	/** Number of video transmit (output) channels. */
+	tx_video: number
+	/** Video receive channel names, indexed by channel number - 1. */
+	rx_names_video: string[]
+	/** Video transmit channel names, indexed by channel number - 1. */
+	tx_names_video: string[]
 	/** True when the device is locked and refusing configuration changes. */
 	locked: boolean
 	/** Sample rate in Hz. */

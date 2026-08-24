@@ -43,8 +43,10 @@ function devicesData(): DevicesData {
 			hardwareVersionMajor: 4,
 			hardwareVersionMinor: 2,
 			hardwareVersionPatch: 3,
-			rx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
-			tx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
+			audioRx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
+			audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
+			videoRx: { count: 1, 1: { number: 1, name: 'Video In 1' } },
+			videoTx: { count: 2, 1: { number: 1, name: 'Cam 1' }, 2: { number: 2, name: 'Cam 2' } },
 		},
 	}
 }
@@ -143,6 +145,8 @@ describe('Device Property feedback', () => {
 		['encoding', 'PCM24'],
 		['rx', 2],
 		['tx', 2],
+		['rx_video', 1],
+		['tx_video', 2],
 		['locked', false],
 	])('reports %s', (property, expected) => {
 		expect(read(property)).toEqual(expected)
@@ -193,6 +197,11 @@ describe('Device Property feedback', () => {
 		expect(read('rx_names')).toEqual(['In 1', 'In 2'])
 		// tx uses the channel label where there is one, matching getChannelSubscriptionName
 		expect(read('tx_names')).toEqual(['01', 'Talkback'])
+	})
+
+	it('reports video channel names separately from audio', () => {
+		expect(read('rx_names_video')).toEqual(['Video In 1'])
+		expect(read('tx_names_video')).toEqual(['Cam 1', 'Cam 2'])
 	})
 
 	it('accepts a device stored by address, as older configurations hold it', () => {

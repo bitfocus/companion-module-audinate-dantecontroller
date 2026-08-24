@@ -5,49 +5,66 @@ import {
 } from '@companion-module/base'
 import {
 	array2choices,
+	audioChannelChoices,
 	audioDeviceChoices,
-	channelChoices,
+	channelOptionPrefix,
 	channelRangeDescription,
-	clearAllCrosspoints,
-	clearCrosspoint,
+	channelTypeOption,
+	CHANNEL_MEDIA_TYPE_LABELS,
+	clearAllAudioCrosspoints,
+	clearAllVideoCrosspoints,
+	clearAudioCrosspoint,
+	clearVideoCrosspoint,
 	currentChoiceId,
 	DANTE_CONST,
 	deviceByIdentifier,
 	deviceOptionValue,
 	deviceSelectedExpression,
 	devicesWithOptions,
+	findAudioRxChannelByName,
+	findAudioTxChannelByName,
 	findDeviceIpByName,
-	findRxChannelByName,
-	findTxChannelByName,
+	findVideoRxChannelByName,
+	findVideoTxChannelByName,
 	firstChoiceId,
+	getAudioRxChannelSource,
 	getChannelSubscriptionName,
-	getRxChannelSource,
-	makeCrosspoint,
+	getVideoRxChannelSource,
+	makeAudioCrosspoint,
+	makeVideoCrosspoint,
 	object2choices,
 	object2PartialChoices,
 	orPlaceholder,
+	perDeviceChannelFields,
+	perDeviceMissingChannelWarnings,
 	refreshArc,
 	refreshSettings,
 	resolveDeviceIp,
+	resetAudioRxChannelName,
+	resetAudioTxChannelName,
 	resetDeviceName,
-	resetRxChannelName,
-	resetTxChannelName,
+	resetVideoRxChannelName,
+	resetVideoTxChannelName,
 	rxDeviceChoices,
+	setAudioRxChannelName,
+	setAudioTxChannelName,
 	setDeviceName,
 	setEncoding,
 	setLatency,
 	setLevel,
 	setPullup,
-	setRxChannelName,
 	setSampleRate,
-	setTxChannelName,
+	setVideoRxChannelName,
+	setVideoTxChannelName,
 	txDeviceChoices,
+	type ChannelMediaType,
 } from './api/index.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('actions')
 
 type MakeCrosspointOptions = {
+	channelType: ChannelMediaType
 	sourceChannelName: string
 	sourceDeviceName: string
 	destinationChannelNumber: string
@@ -55,21 +72,27 @@ type MakeCrosspointOptions = {
 }
 
 type MakeCrosspointDropDownOptions = {
+	channelType: ChannelMediaType
 	destinationDevice: string
 	sourceDevice: string
 } & Record<`destinationChannel_${string}`, number> &
-	Record<`sourceChannel_${string}`, number>
+	Record<`destinationChannelVideo_${string}`, number> &
+	Record<`sourceChannel_${string}`, number> &
+	Record<`sourceChannelVideo_${string}`, number>
 
 type ClearCrosspointOptions = {
+	channelType: ChannelMediaType
 	destinationChannelNumber: string
 	destinationDeviceAdddress: string
 	clearAll: boolean
 }
 
 type ClearCrosspointDropDownOptions = {
+	channelType: ChannelMediaType
 	destinationDevice: string
 	clearAll: boolean
-} & Record<`destinationChannel_${string}`, number>
+} & Record<`destinationChannel_${string}`, number> &
+	Record<`destinationChannelVideo_${string}`, number>
 
 type SetDeviceNameOptions = {
 	device: string
@@ -81,13 +104,17 @@ type ResetDeviceNameOptions = {
 }
 
 type SetChannelNameOptions = {
+	channelType: ChannelMediaType
 	device: string
 	newName: string
-} & Record<`channel_${string}`, number>
+} & Record<`channel_${string}`, number> &
+	Record<`channelVideo_${string}`, number>
 
 type ResetChannelNameOptions = {
+	channelType: ChannelMediaType
 	device: string
-} & Record<`channel_${string}`, number>
+} & Record<`channel_${string}`, number> &
+	Record<`channelVideo_${string}`, number>
 
 type SetLatencyOptions = {
 	destinationDevice: string
@@ -163,6 +190,7 @@ export function UpdateActions(self: DanteInstance): void {
 		makeCrosspoint: {
 			name: 'Crosspoint - Make (custom)',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'textinput',
 					label: 'Source Channel Name',
@@ -199,18 +227,39 @@ export function UpdateActions(self: DanteInstance): void {
 			// as well would overwrite any expression the user has entered in them.
 			learn: (action) => {
 				const opt = action.options
-				const channel = findRxChannelByName(self, opt.destinationDeviceAddress, opt.destinationChannelNumber)
+				if (opt.channelType === 'video') {
+					const channel = findVideoRxChannelByName(self, opt.destinationDeviceAddress, opt.destinationChannelNumber)
+					const channelNumber = channel?.number ?? Number(opt.destinationChannelNumber)
+					if (!Number.isFinite(channelNumber)) return undefined
+
+					const source = getVideoRxChannelSource(self, opt.destinationDeviceAddress, channelNumber)
+					if (!source) return undefined
+
+					return { sourceChannelName: source.channelName, sourceDeviceName: source.deviceName }
+				}
+
+				const channel = findAudioRxChannelByName(self, opt.destinationDeviceAddress, opt.destinationChannelNumber)
 				const channelNumber = channel?.number ?? Number(opt.destinationChannelNumber)
 				if (!Number.isFinite(channelNumber)) return undefined
 
-				const source = getRxChannelSource(self, opt.destinationDeviceAddress, channelNumber)
+				const source = getAudioRxChannelSource(self, opt.destinationDeviceAddress, channelNumber)
 				if (!source) return undefined
 
 				return { sourceChannelName: source.channelName, sourceDeviceName: source.deviceName }
 			},
 			callback: async (action) => {
 				const opt = action.options
-				makeCrosspoint(
+				if (opt.channelType === 'video') {
+					makeVideoCrosspoint(
+						self,
+						opt.destinationDeviceAddress,
+						opt.sourceChannelName,
+						opt.sourceDeviceName,
+						opt.destinationChannelNumber,
+					)
+					return
+				}
+				makeAudioCrosspoint(
 					self,
 					opt.destinationDeviceAddress,
 					opt.sourceChannelName,
@@ -223,6 +272,7 @@ export function UpdateActions(self: DanteInstance): void {
 		makeCrosspointDropDown: {
 			name: 'Crosspoint - Make',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Destination Device',
@@ -234,20 +284,14 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
-						type: 'dropdown',
-						label: 'Destination channel',
-						id: `destinationChannel_${device.name}`,
-						choices: channelChoices(self, device, 'rx'),
-						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('destinationDevice', device.name ?? '', ip),
-					})),
+				...perDeviceChannelFields<keyof MakeCrosspointDropDownOptions>(
+					self,
+					'destinationDevice',
+					'destinationChannel',
+					'rx',
+					'Destination channel',
+				),
+				...perDeviceMissingChannelWarnings(self, 'destinationDevice', 'rx'),
 				{
 					type: 'dropdown',
 					label: 'Source Device',
@@ -259,62 +303,121 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof MakeCrosspointDropDownOptions> => ({
-						type: 'dropdown',
-						label: 'Source channel',
-						id: `sourceChannel_${device.name}`,
-						// The one channel dropdown where "None" means something: routing a destination to
-						// no source is how a crosspoint is cleared, so this action can both make and break
-						// a route. The default is still the first real channel, not None.
-						choices: [{ id: 0, label: 'None (clear the crosspoint)' }, ...channelChoices(self, device, 'tx')],
-						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? '', true),
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('sourceDevice', device.name ?? '', ip),
-					})),
+				// The one channel dropdown where "None" means something: routing a destination to no
+				// source is how a crosspoint is cleared, so this action can both make and break a route.
+				...perDeviceChannelFields<keyof MakeCrosspointDropDownOptions>(
+					self,
+					'sourceDevice',
+					'sourceChannel',
+					'tx',
+					'Source channel',
+					{ id: 0, label: 'None (clear the crosspoint)' },
+				),
+				...perDeviceMissingChannelWarnings(self, 'sourceDevice', 'tx'),
 			],
 			// Learn the source device and channel from the destination's current subscription. The
 			// source channel option id is per-device, so the learnt device decides which key to return.
 			learn: (action) => {
 				const opt = action.options
-				const source = getRxChannelSource(
+				const isVideo = opt.channelType === 'video'
+				const destinationChannelNumber = deviceOptionValue<number | undefined>(
 					self,
+					opt,
+					channelOptionPrefix('destinationChannel', opt.channelType),
 					opt.destinationDevice,
-					deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0),
+					undefined,
 				)
+				if (destinationChannelNumber === undefined) return undefined
+
+				const source = isVideo
+					? getVideoRxChannelSource(self, opt.destinationDevice, destinationChannelNumber)
+					: getAudioRxChannelSource(self, opt.destinationDevice, destinationChannelNumber)
 				if (!source) return undefined
 
 				// The device the route names must be one the picker offers, which is keyed by name.
 				const sourceIp = findDeviceIpByName(self, source.deviceName)
 				if (!sourceIp) return undefined
 
-				const sourceChannel = findTxChannelByName(self, sourceIp, source.channelName)
-				if (sourceChannel?.number === undefined) return undefined
+				const sourceChannelNumber = isVideo
+					? findVideoTxChannelByName(self, sourceIp, source.channelName)?.number
+					: findAudioTxChannelByName(self, sourceIp, source.channelName)?.number
+				if (sourceChannelNumber === undefined) return undefined
 
 				// Built by assignment, not as one literal: TypeScript widens a computed key in an object
-				// literal to `string`, which no longer matches the per-device option key type.
+				// literal to `string`, which no longer matches the per-device option key type. The prefix
+				// is branched explicitly (rather than built via channelOptionPrefix) so the key stays a
+				// literal template TypeScript can check against the option type's per-media-type Records.
 				const learnt: Partial<MakeCrosspointDropDownOptions> = { sourceDevice: source.deviceName }
-				learnt[`sourceChannel_${source.deviceName}`] = sourceChannel.number
+				if (isVideo) {
+					learnt[`sourceChannelVideo_${source.deviceName}`] = sourceChannelNumber
+				} else {
+					learnt[`sourceChannel_${source.deviceName}`] = sourceChannelNumber
+				}
 				return learnt
 			},
 			callback: async (action) => {
 				const opt = action.options
-				const sourceChannelNumber = deviceOptionValue<number>(self, opt, 'sourceChannel', opt.sourceDevice, 0)
-				const destinationChannel = deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0)
+				const isVideo = opt.channelType === 'video'
+				const sourcePrefix = channelOptionPrefix('sourceChannel', opt.channelType)
+				const destinationPrefix = channelOptionPrefix('destinationChannel', opt.channelType)
+
+				const destinationChannel = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					destinationPrefix,
+					opt.destinationDevice,
+					undefined,
+				)
+				if (destinationChannel === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
+							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
+					)
+					return
+				}
+
+				const sourceChannelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					sourcePrefix,
+					opt.sourceDevice,
+					undefined,
+				)
+				if (sourceChannelNumber === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} source channel available on '${opt.sourceDevice}' ` +
+							`- it may have no ${opt.channelType} transmit channels`,
+					)
+					return
+				}
 
 				// No source means no route: clear the destination rather than subscribing it to nothing.
 				if (!sourceChannelNumber) {
-					clearCrosspoint(self, opt.destinationDevice, destinationChannel)
+					if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
+					else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
+					return
+				}
+
+				if (isVideo) {
+					const sourceChannel =
+						deviceByIdentifier(self, opt.sourceDevice)?.videoTx?.[sourceChannelNumber] ??
+						findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
+					const sourceChannelName = sourceChannel?.name || String(sourceChannelNumber)
+					makeVideoCrosspoint(
+						self,
+						opt.destinationDevice,
+						sourceChannelName,
+						deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
+						destinationChannel,
+					)
 					return
 				}
 
 				const sourceChannel =
-					deviceByIdentifier(self, opt.sourceDevice)?.tx?.[sourceChannelNumber] ??
-					findTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
+					deviceByIdentifier(self, opt.sourceDevice)?.audioTx?.[sourceChannelNumber] ??
+					findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
 				const sourceChannelName = getChannelSubscriptionName(sourceChannel) || String(sourceChannelNumber)
-				makeCrosspoint(
+				makeAudioCrosspoint(
 					self,
 					opt.destinationDevice,
 					sourceChannelName,
@@ -327,6 +430,7 @@ export function UpdateActions(self: DanteInstance): void {
 		clearCrosspoint: {
 			name: 'Crosspoint - Clear (custom)',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'textinput',
 					label: 'Destination Device',
@@ -355,17 +459,24 @@ export function UpdateActions(self: DanteInstance): void {
 			],
 			callback: async (action) => {
 				const opt = action.options
+				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					clearAllCrosspoints(self, opt.destinationDeviceAdddress)
+					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
+					else clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
 					return
 				}
-				clearCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+				if (isVideo) {
+					clearVideoCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+					return
+				}
+				clearAudioCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			},
 		},
 
 		clearCrosspointDropDown: {
 			name: 'Crosspoint - Clear',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Destination Device',
@@ -379,38 +490,59 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				{
 					type: 'checkbox',
-					label: 'Clear every channel on the device',
+					// Names the Channel Type explicitly: this clears every channel of the *selected* type,
+					// not every channel outright. It read 'Clear every channel on the device' back when
+					// audio was the only type and that was simply true; the Channel Type toggle narrowed
+					// its meaning without the wording following.
+					label: 'Clear every channel of the selected Channel Type',
 					id: 'clearAll',
 					default: false,
+					tooltip:
+						'Clears every receive channel of the Channel Type selected above. Audio and video are ' +
+						'cleared separately - add a second action to clear the other type.',
 					// required: this option is referenced by an isVisibleExpression below
 					disableAutoExpression: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof ClearCrosspointDropDownOptions> => ({
-						type: 'dropdown',
-						label: 'Destination channel',
-						id: `destinationChannel_${device.name}`,
-						choices: channelChoices(self, device, 'rx'),
-						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: `(${deviceSelectedExpression('destinationDevice', device.name ?? '', ip)}) && !$(options:clearAll)`,
-					})),
+				...perDeviceChannelFields<keyof ClearCrosspointDropDownOptions>(
+					self,
+					'destinationDevice',
+					'destinationChannel',
+					'rx',
+					'Destination channel',
+					undefined,
+					'!$(options:clearAll)',
+				),
+				// Deliberately not hidden by clearAll, unlike the channel picker above: hiding it implied
+				// that clearing everything escapes the Channel Type, when a device with no channels of
+				// that type still has nothing to clear.
+				...perDeviceMissingChannelWarnings(self, 'destinationDevice', 'rx'),
 			],
 			callback: async (action) => {
 				const opt = action.options
+				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					clearAllCrosspoints(self, opt.destinationDevice)
+					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDevice)
+					else clearAllAudioCrosspoints(self, opt.destinationDevice)
 					return
 				}
-				clearCrosspoint(
+
+				const destinationChannel = deviceOptionValue<number | undefined>(
 					self,
+					opt,
+					channelOptionPrefix('destinationChannel', opt.channelType),
 					opt.destinationDevice,
-					deviceOptionValue<number>(self, opt, 'destinationChannel', opt.destinationDevice, 0),
+					undefined,
 				)
+				if (destinationChannel === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
+							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
+					)
+					return
+				}
+
+				if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
+				else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
 			},
 		},
 
@@ -482,6 +614,7 @@ export function UpdateActions(self: DanteInstance): void {
 		setRxChannelName: {
 			name: 'Rx Channel Name - Set',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Device',
@@ -493,20 +626,8 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
-						type: 'dropdown',
-						label: 'Channel',
-						id: `channel_${device.name}`,
-						choices: channelChoices(self, device, 'rx'),
-						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+				...perDeviceChannelFields<keyof SetChannelNameOptions>(self, 'device', 'channel', 'rx', 'Channel'),
+				...perDeviceMissingChannelWarnings(self, 'device', 'rx'),
 				{
 					type: 'textinput',
 					label: 'New name',
@@ -518,20 +639,48 @@ export function UpdateActions(self: DanteInstance): void {
 			// Learn the new-name field from the channel's current name, as a starting point for an edit.
 			learn: (action) => {
 				const opt = action.options
-				const name = deviceByIdentifier(self, opt.device)?.rx?.[
-					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
-				]?.name
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) return undefined
+
+				const device = deviceByIdentifier(self, opt.device)
+				const name =
+					opt.channelType === 'video' ? device?.videoRx?.[channelNumber]?.name : device?.audioRx?.[channelNumber]?.name
 				return name ? { newName: name } : undefined
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setRxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0), opt.newName)
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} channel available on '${opt.device}' - it may ` +
+							`have no ${opt.channelType} receive channels`,
+					)
+					return
+				}
+				if (opt.channelType === 'video') {
+					setVideoRxChannelName(self, opt.device, channelNumber, opt.newName)
+					return
+				}
+				setAudioRxChannelName(self, opt.device, channelNumber, opt.newName)
 			},
 		},
 
 		resetRxChannelName: {
 			name: 'Rx Channel Name - Reset',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Device',
@@ -543,30 +692,37 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
-						type: 'dropdown',
-						label: 'Channel',
-						id: `channel_${device.name}`,
-						choices: channelChoices(self, device, 'rx'),
-						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+				...perDeviceChannelFields<keyof ResetChannelNameOptions>(self, 'device', 'channel', 'rx', 'Channel'),
+				...perDeviceMissingChannelWarnings(self, 'device', 'rx'),
 			],
 			callback: async (action) => {
 				const opt = action.options
-				resetRxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0))
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} channel available on '${opt.device}' - it may ` +
+							`have no ${opt.channelType} receive channels`,
+					)
+					return
+				}
+				if (opt.channelType === 'video') {
+					resetVideoRxChannelName(self, opt.device, channelNumber)
+					return
+				}
+				resetAudioRxChannelName(self, opt.device, channelNumber)
 			},
 		},
 
 		setTxChannelName: {
 			name: 'Tx Channel Name - Set',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Device',
@@ -578,20 +734,8 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetChannelNameOptions> => ({
-						type: 'dropdown',
-						label: 'Channel',
-						id: `channel_${device.name}`,
-						choices: channelChoices(self, device, 'tx'),
-						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+				...perDeviceChannelFields<keyof SetChannelNameOptions>(self, 'device', 'channel', 'tx', 'Channel'),
+				...perDeviceMissingChannelWarnings(self, 'device', 'tx'),
 				{
 					type: 'textinput',
 					label: 'New name',
@@ -603,21 +747,50 @@ export function UpdateActions(self: DanteInstance): void {
 			// Learn from the channel label the device reports, falling back to its canonical name.
 			learn: (action) => {
 				const opt = action.options
-				const channel = deviceByIdentifier(self, opt.device)?.tx?.[
-					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0)
-				]
-				const name = getChannelSubscriptionName(channel)
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) return undefined
+
+				const device = deviceByIdentifier(self, opt.device)
+				const name =
+					opt.channelType === 'video'
+						? device?.videoTx?.[channelNumber]?.name
+						: getChannelSubscriptionName(device?.audioTx?.[channelNumber])
 				return name ? { newName: name } : undefined
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setTxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0), opt.newName)
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} channel available on '${opt.device}' - it may ` +
+							`have no ${opt.channelType} transmit channels`,
+					)
+					return
+				}
+				if (opt.channelType === 'video') {
+					setVideoTxChannelName(self, opt.device, channelNumber, opt.newName)
+					return
+				}
+				setAudioTxChannelName(self, opt.device, channelNumber, opt.newName)
 			},
 		},
 
 		resetTxChannelName: {
 			name: 'Tx Channel Name - Reset',
 			options: [
+				channelTypeOption('channelType'),
 				{
 					type: 'dropdown',
 					label: 'Device',
@@ -629,24 +802,30 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'tx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof ResetChannelNameOptions> => ({
-						type: 'dropdown',
-						label: 'Channel',
-						id: `channel_${device.name}`,
-						choices: channelChoices(self, device, 'tx'),
-						default: firstChoiceId(channelChoices(self, device, 'tx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'tx'), device.name ?? ''),
-						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
-						// allowCustom keeps actions still holding it parseable rather than failing outright
-						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+				...perDeviceChannelFields<keyof ResetChannelNameOptions>(self, 'device', 'channel', 'tx', 'Channel'),
+				...perDeviceMissingChannelWarnings(self, 'device', 'tx'),
 			],
 			callback: async (action) => {
 				const opt = action.options
-				resetTxChannelName(self, opt.device, deviceOptionValue<number>(self, opt, 'channel', opt.device, 0))
+				const channelNumber = deviceOptionValue<number | undefined>(
+					self,
+					opt,
+					channelOptionPrefix('channel', opt.channelType),
+					opt.device,
+					undefined,
+				)
+				if (channelNumber === undefined) {
+					logger.error(
+						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} channel available on '${opt.device}' - it may ` +
+							`have no ${opt.channelType} transmit channels`,
+					)
+					return
+				}
+				if (opt.channelType === 'video') {
+					resetVideoTxChannelName(self, opt.device, channelNumber)
+					return
+				}
+				resetAudioTxChannelName(self, opt.device, channelNumber)
 			},
 		},
 
@@ -866,14 +1045,14 @@ export function UpdateActions(self: DanteInstance): void {
 					allowCustom: true,
 				},
 				...Object.entries(self.devicesData)
-					.filter(([, device]) => channelChoices(self, device, 'rx').length > 0)
+					.filter(([, device]) => audioChannelChoices(self, device, 'rx').length > 0)
 					.map(([ip, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${device.name}`,
-						choices: channelChoices(self, device, 'rx'),
-						default: firstChoiceId(channelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(channelChoices(self, device, 'rx'), device.name ?? ''),
+						choices: audioChannelChoices(self, device, 'rx'),
+						default: firstChoiceId(audioChannelChoices(self, device, 'rx'), 0),
+						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), device.name ?? ''),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,

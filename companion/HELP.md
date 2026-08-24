@@ -1,6 +1,6 @@
 # Audinate Dante Controller
 
-This module controls Dante audio devices and routing in simple local networks.
+This module controls Dante audio and video devices and routing in simple local networks.
 It's based on Chris Ritsen's [Network audio controller](https://github.com/chris-ritsen/network-audio-controller) (Python project)
 
 ## Config
@@ -24,6 +24,12 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 Actions that pick from discovered devices and channels use drop-down menus. Those marked `(custom)`
 take the same selection as free text instead, so it can be typed by hand or driven by a variable or
 expression.
+
+The crosspoint and channel-name actions carry a **Channel Type** option, _Audio_ or _Video_, and act
+on that kind of channel only. Video is supported on Dante AV devices.
+
+_Crosspoint - Clear_'s "clear every channel" option follows the Channel Type as well: it clears every
+channel of the selected type, not both. Use two actions to clear audio and video together.
 
 - Crosspoint - Clear
 - Crosspoint - Clear (custom)
@@ -79,6 +85,10 @@ The same values are available through the Device Property feedback.
 - Software version (`_software_version`)
 - Transmit channel count (`_tx`)
 - Transmit channel names (`_tx_names`)
+- Video receive channel count (`_rx_video`)
+- Video receive channel names (`_rx_names_video`)
+- Video transmit channel count (`_tx_video`)
+- Video transmit channel names (`_tx_names_video`)
 
 ## Feedbacks
 
@@ -86,3 +96,6 @@ The same values are available through the Device Property feedback.
 - Crosspoint - Connected (_Boolean_)
 - Crosspoint - Connected (custom) (_Boolean_)
 - Device - Property (_Value_)
+
+_Channel - Subscription_ and both _Crosspoint - Connected_ feedbacks take the same **Channel Type**
+option as the actions, and report on that kind of channel only.

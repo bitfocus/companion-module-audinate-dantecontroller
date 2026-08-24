@@ -47,9 +47,17 @@ export const DANTE_NAME_MAX_LENGTH = 31
  * digits and hyphens only, and no leading or trailing hyphen. Channel names may additionally
  * contain a colon, which separates a channel from its device in subscription strings.
  *
+ * `allowSpace` is for `AV_EXTENDED` video channel names specifically: real hardware ships with
+ * (and accepted, live) names like "Decoder Video Channel" that this rule would otherwise reject -
+ * video channel naming evidently allows spaces even though the netaudio-derived audio rule above
+ * does not, and there is no equivalent reference for it to mirror instead.
+ *
  * An empty name is accepted here because the module uses it to mean "reset to default".
  */
-export function validateDanteName(name: string, options: { allowColon?: boolean } = {}): string | undefined {
+export function validateDanteName(
+	name: string,
+	options: { allowColon?: boolean; allowSpace?: boolean } = {},
+): string | undefined {
 	if (name === '') {
 		return undefined
 	}
@@ -57,11 +65,15 @@ export function validateDanteName(name: string, options: { allowColon?: boolean 
 		return `must be ${DANTE_NAME_MAX_LENGTH} characters or fewer (got ${name.length})`
 	}
 
-	const allowed = options.allowColon ? /^[A-Za-z0-9:-]+$/ : /^[A-Za-z0-9-]+$/
+	const allowedChars = `A-Za-z0-9-${options.allowColon ? ':' : ''}${options.allowSpace ? ' ' : ''}`
+	const allowed = new RegExp(`^[${allowedChars}]+$`)
 	if (!allowed.test(name)) {
-		return options.allowColon
-			? 'may only contain letters, digits, hyphens and colons'
-			: 'may only contain letters, digits and hyphens'
+		// 'letters, digits and hyphens', optionally extended with 'colons'/'spaces' - built rather
+		// than hardcoded per combination so the phrasing stays natural ('X, Y and Z') either way.
+		const extras = [options.allowColon && 'colons', options.allowSpace && 'spaces'].filter(Boolean) as string[]
+		const parts = ['letters', 'digits', ...(extras.length > 0 ? ['hyphens', ...extras] : ['hyphens'])]
+		const last = parts.pop()
+		return `may only contain ${parts.join(', ')} and ${last}`
 	}
 
 	const edges = options.allowColon ? ['-', ':'] : ['-']

@@ -56,9 +56,22 @@ export const DANTE_CONST = {
 		CONTROL: 0x2729,
 		SETTINGS: 0xffff,
 		CMC: 0x1200,
-		AES67_CONFIG: 0x2809,
+		/**
+		 * A second control protocol some devices speak alongside CONTROL, on the same ARC socket -
+		 * confirmed so far as how AV-X-capable devices (`router_info=dante-av-x` in their mDNS TXT
+		 * record) carry video crosspoint control, which has no equivalent under CONTROL.
+		 *
+		 * The low byte varies per controlling application/session (`0x2809` and `0x280c` both
+		 * observed live) rather than being a fixed constant - this module always sends `0x2809` and
+		 * accepts any `0x28xx` reply (see `AV_EXTENDED_MASK`), which real hardware has confirmed
+		 * works regardless of what a concurrent Dante Controller session happens to be using.
+		 */
+		AV_EXTENDED: 0x2809,
 		HEARTBEAT: 0xfffe,
 	},
+
+	/** How an `AV_EXTENDED` reply is told apart from a `CONTROL` one on the same socket. */
+	AV_EXTENDED_MASK: 0xff00,
 
 	COMMANDS: {
 		channelCount: 0x1000,
@@ -75,6 +88,37 @@ export const DANTE_CONST = {
 		setDeviceName: 0x1001,
 		deviceSettings: 0x1100,
 		setDeviceSettings: 0x1101,
+
+		/**
+		 * Sets or clears a crosspoint under `AV_EXTENDED`, sent to the destination (rx) device.
+		 * Covers video (there is no `CONTROL`-protocol equivalent) and, per the wire capture this was
+		 * reverse-engineered from, audio too - though this module keeps using the `CONTROL`-protocol
+		 * `subscription` opcode for audio and reserves this one for video, so as not to disturb a
+		 * working audio path.
+		 */
+		MESSAGE_TYPE_AV_CROSSPOINT_CONTROL: 0x3410,
+		/**
+		 * The rx-side channel directory under `AV_EXTENDED`: names and live subscription source for
+		 * every channel a device has, audio and video together (told apart by each record's media
+		 * type field). This module only reads the video records from it.
+		 */
+		MESSAGE_TYPE_AV_RX_CHANNEL_QUERY: 0x3400,
+		/**
+		 * The tx-side equivalent of {@link MESSAGE_TYPE_AV_RX_CHANNEL_QUERY}.
+		 *
+		 * `0x2600` was used here originally, by analogy with the rx opcode, and is *not* the tx
+		 * directory - it answers with the device's active outbound **flows** (one record per
+		 * subscriber, names reading `"1"`/`"2"` and the subscriber's device name where the source
+		 * name would be), which parses as zero video channels. `0x2400` is the real tx channel
+		 * directory: confirmed live against an encoder (3 records - "Transmit Audio Left",
+		 * "Transmit Audio Right", "Transmit Video Channel"), a decoder (its 2 audio tx channels),
+		 * and a video-less audio-only board (its 2 audio tx channels).
+		 */
+		MESSAGE_TYPE_AV_TX_CHANNEL_QUERY: 0x2400,
+		/** Sets an rx channel's own name under `AV_EXTENDED`. Confirmed for video channels. */
+		MESSAGE_TYPE_AV_RX_CHANNEL_NAME_CONTROL: 0x3401,
+		/** Sets a tx channel's own name under `AV_EXTENDED`. Confirmed for video channels. */
+		MESSAGE_TYPE_AV_TX_CHANNEL_NAME_CONTROL: 0x2438,
 
 		RESPONSE_DANTE_MODEL: 0x0060, //96,
 		REQUEST_DANTE_MODEL: 0x0061, //97,
@@ -190,6 +234,45 @@ export const DANTE_CONST = {
 		 */
 		CONNECTED_UNVERIFIED: 0x000e,
 	},
+
+	/**
+	 * Which kind of channel an `AV_EXTENDED` record or command entry addresses.
+	 *
+	 * Used both by `MESSAGE_TYPE_AV_CROSSPOINT_CONTROL` entries and, at offset 6 of every
+	 * channel-directory record, to tell a reply's mixed audio and video channels apart. That media
+	 * type field is the *only* reliable discriminator: the opaque tag at record offset 0 varies by
+	 * both reply kind and device model (an rx directory uses `0x161e`/`0x161c` for audio/video, an
+	 * AV-X tx directory uses `0x1616` for both, and an audio-only board's tx directory uses
+	 * `0x1414`), so matching on it silently finds nothing on anything but the one device it was
+	 * derived from.
+	 */
+	AV_MEDIA_TYPE: {
+		AUDIO: 0x0003,
+		VIDEO: 0x0004,
+	},
+
+	/**
+	 * The fixed "object" a `MESSAGE_TYPE_AV_CROSSPOINT_CONTROL`/`*_NAME_CONTROL` command addresses,
+	 * at offset 6 (after 6 zero bytes) of its arguments.
+	 */
+	AV_OBJECT_TAG: {
+		CROSSPOINT: 0x0800,
+		NAME: 0x0600,
+	},
+
+	/**
+	 * Fixed argument bytes for `MESSAGE_TYPE_AV_RX_CHANNEL_QUERY`/`MESSAGE_TYPE_AV_TX_CHANNEL_QUERY`.
+	 *
+	 * An empty-argument query is acknowledged (the right opcode comes back, flagged as a reply) but
+	 * always reports zero records, even from a device with real channels - confirmed live against a
+	 * TAV-CHAZY4K-RX decoder that genuinely has a video rx channel. These exact bytes, originally
+	 * captured (session 1) as the request for the superseded per-channel `0x3600` query, turned out
+	 * to work unchanged against `0x3400`/`0x2600` too and elicit the full multi-record directory -
+	 * re-confirmed live against both a decoder (`0x3400`) and an encoder (`0x2600`). The reply
+	 * doesn't vary by channel even though this was captured "for channel 1", so there is apparently
+	 * nothing channel-specific inside it; not reverse-engineered further than "these bytes work".
+	 */
+	AV_CHANNEL_DIRECTORY_QUERY_ARGS: Buffer.from('000000000000000100010001000000000000000000000000', 'hex'),
 
 	/** Encoding codes, as reported by the device. Keys are the codes themselves. */
 	ENCODINGS: {

@@ -5,7 +5,7 @@
 import { createModuleLogger } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
 import type DanteInstance from '../main.js'
-import { incrementBE, intToBuffer, makeCommand, makeSettingCommand } from './protocol.js'
+import { incrementBE, intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import { setEncoding, setSampleRate } from './commands.js'
 import { deviceLabel, macForDevice } from './devices.js'
@@ -43,8 +43,8 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 		return
 	}
 	// clear registered friendly names
-	for (let i = 1; i <= (device.tx?.count ?? 0); i++) {
-		const channel = device.tx?.[i]
+	for (let i = 1; i <= (device.audioTx?.count ?? 0); i++) {
+		const channel = device.audioTx?.[i]
 		if (channel) {
 			delete channel.friendlyName
 		}
@@ -53,7 +53,7 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 		self,
 		ipaddress,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
-		device.tx?.count ?? 0,
+		device.audioTx?.count ?? 0,
 		DANTE_CONST.CHANNELS_PER_PAGE.TX,
 	)
 }
@@ -64,7 +64,7 @@ export function getTxChannels(self: DanteInstance, ipaddress: string): void {
 		self,
 		ipaddress,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY,
-		self.devicesData[ipaddress]?.tx?.count ?? 0,
+		self.devicesData[ipaddress]?.audioTx?.count ?? 0,
 		DANTE_CONST.CHANNELS_PER_PAGE.TX,
 	)
 }
@@ -102,15 +102,51 @@ function sendChannelQuery(
 	}
 }
 
+/**
+ * Queries a device's video rx channels (names and live subscription source) under the
+ * `AV_EXTENDED` protocol, using the fixed {@link DANTE_CONST.AV_CHANNEL_DIRECTORY_QUERY_ARGS}
+ * argument bytes this opcode requires - an empty-argument query is acknowledged but always reports
+ * zero records, even from a device with real channels. Safe to send to any device regardless of
+ * whether it actually has video channels - one that does not, or does not speak `AV_EXTENDED` at
+ * all, answers with an unrecognized-command reply that {@link parseVideoRxChannels} in
+ * `protocol.ts` reads as zero channels rather than an error.
+ */
+export function getVideoRxChannels(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'video rx channels')
+	sendCommand(
+		self,
+		makeAvCommand(
+			self,
+			DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY,
+			DANTE_CONST.AV_CHANNEL_DIRECTORY_QUERY_ARGS,
+		),
+		ipaddress,
+	)
+}
+
+/** Queries a device's video tx channels (names). See {@link getVideoRxChannels}. */
+export function getVideoTxChannels(self: DanteInstance, ipaddress: string): void {
+	logQuery(self, ipaddress, 'video tx channels')
+	sendCommand(
+		self,
+		makeAvCommand(
+			self,
+			DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_TX_CHANNEL_QUERY,
+			DANTE_CONST.AV_CHANNEL_DIRECTORY_QUERY_ARGS,
+		),
+		ipaddress,
+	)
+}
+
 export function getRxChannels(self: DanteInstance, ipaddress: string): void {
-	// rx.count, not tx.count - paging the receive query by the transmit count silently truncates
+	// audioRx.count, not audioTx.count - paging the receive query by the transmit count silently truncates
 	// discovery on any device with more inputs than outputs (a 32x8 DSP would only ever report its
 	// first 16 receive channels)
 	sendChannelQuery(
 		self,
 		ipaddress,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY,
-		self.devicesData[ipaddress]?.rx?.count ?? 0,
+		self.devicesData[ipaddress]?.audioRx?.count ?? 0,
 		DANTE_CONST.CHANNELS_PER_PAGE.RX,
 	)
 }
@@ -242,5 +278,7 @@ export function refreshArc(self: DanteInstance, deviceIp?: string): void {
 		getRxChannels(self, ip)
 		getTxChannels(self, ip)
 		getTxChannelFriendlyNames(self, ip)
+		getVideoRxChannels(self, ip)
+		getVideoTxChannels(self, ip)
 	}
 }

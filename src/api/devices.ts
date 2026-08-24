@@ -10,7 +10,16 @@ import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from '../variables.js'
 import { listNetworkInterfaces, findInterfaceForAddress } from '../config.js'
 import type DanteInstance from '../main.js'
-import type { DeviceData, RxChannelSource, TxChannel, RxChannel } from './types.js'
+import type {
+	DeviceData,
+	AudioRxChannelSource,
+	AudioTxChannel,
+	AudioRxChannel,
+	ChannelMediaType,
+	VideoRxChannelSource,
+	VideoTxChannel,
+	VideoRxChannel,
+} from './types.js'
 import { isSubscriptionConnected } from './protocol-rules.js'
 import type { DanteDeviceVariables } from '../types.js'
 import { insertDeviceChoice } from './choices.js'
@@ -56,11 +65,15 @@ export const DEVICE_PROPERTIES = [
 	'pullup',
 	'rx',
 	'rx_names',
+	'rx_names_video',
+	'rx_video',
 	'software_build',
 	'software_version',
 	'sr',
 	'tx',
 	'tx_names',
+	'tx_names_video',
+	'tx_video',
 ] as const satisfies readonly (keyof DanteDeviceVariables)[]
 
 export type DeviceProperty = (typeof DEVICE_PROPERTIES)[number]
@@ -73,6 +86,10 @@ export const DEVICE_PROPERTY_LABELS: Record<DeviceProperty, string> = {
 	tx: 'Transmit channel count',
 	rx_names: 'Receive channel names',
 	tx_names: 'Transmit channel names',
+	rx_video: 'Video receive channel count',
+	tx_video: 'Video transmit channel count',
+	rx_names_video: 'Video receive channel names',
+	tx_names_video: 'Video transmit channel names',
 	sr: 'Sample rate',
 	latency: 'Latency (ms)',
 	pullup: 'Sample rate pullup',
@@ -91,9 +108,19 @@ export const DEVICE_PROPERTY_LABELS: Record<DeviceProperty, string> = {
 	hardware_build: 'Hardware build',
 }
 
-/** Channel names of one direction, indexed from 0, as the `_rx_names`/`_tx_names` variables hold them. */
-function channelNames(device: DeviceData, channelType: 'rx' | 'tx'): string[] {
-	const io = device[channelType]
+/**
+ * Channel names of one direction, indexed from 0, as the `_rx_names`/`_tx_names` (and their
+ * `_video` counterparts) variables hold them.
+ */
+function channelNames(device: DeviceData, channelType: 'rx' | 'tx', mediaType: ChannelMediaType = 'audio'): string[] {
+	const io =
+		mediaType === 'video'
+			? channelType === 'rx'
+				? device.videoRx
+				: device.videoTx
+			: channelType === 'rx'
+				? device.audioRx
+				: device.audioTx
 	const names: string[] = []
 	for (let i = 0; i < (io?.count ?? 0); i++) {
 		const channel = io?.[i + 1]
@@ -120,8 +147,17 @@ function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceP
 		case 'locked':
 			return device.locked
 		case 'rx':
+			return device.audioRx?.count
 		case 'tx':
-			return device[property]?.count
+			return device.audioTx?.count
+		case 'rx_video':
+			return device.videoRx?.count
+		case 'tx_video':
+			return device.videoTx?.count
+		case 'rx_names_video':
+			return channelNames(device, 'rx', 'video')
+		case 'tx_names_video':
+			return channelNames(device, 'tx', 'video')
 		case 'rx_names':
 			return channelNames(device, 'rx')
 		case 'tx_names':
@@ -179,13 +215,23 @@ export function deviceProperty<Property extends DeviceProperty>(
 	return computeDeviceProperty(device, ip, property) as DanteDeviceVariables[Property] | undefined
 }
 
-export function hasRxChannels(device: DeviceData | undefined): boolean {
-	return (device?.rx?.count ?? 0) > 0
+export function hasAudioRxChannels(device: DeviceData | undefined): boolean {
+	return (device?.audioRx?.count ?? 0) > 0
 }
 
 /** @returns True if the device has at least one tx (source) channel. */
-export function hasTxChannels(device: DeviceData | undefined): boolean {
-	return (device?.tx?.count ?? 0) > 0
+export function hasAudioTxChannels(device: DeviceData | undefined): boolean {
+	return (device?.audioTx?.count ?? 0) > 0
+}
+
+/** @returns True if the device has at least one video rx (destination) channel. */
+export function hasVideoRxChannels(device: DeviceData | undefined): boolean {
+	return (device?.videoRx?.count ?? 0) > 0
+}
+
+/** @returns True if the device has at least one video tx (source) channel. */
+export function hasVideoTxChannels(device: DeviceData | undefined): boolean {
+	return (device?.videoTx?.count ?? 0) > 0
 }
 
 /** @returns The IP address of the device with this name, if known. */
@@ -199,24 +245,24 @@ export function findDeviceIpByName(self: DanteInstance, deviceName: string): str
 }
 
 /** Finds a tx channel by name (or friendly name) on a device, identified by IP or device name. */
-export function findTxChannelByName(
+export function findAudioTxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
-): TxChannel | undefined {
+): AudioTxChannel | undefined {
 	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
 	if (!device) {
 		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
 		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
 	}
-	if (!device?.tx) {
+	if (!device?.audioTx) {
 		return undefined
 	}
-	// `tx`/`rx` also carry a non-numeric `count` property alongside the numeric channel keys,
-	// so Object.entries()'s value type includes it too - the isNaN check filters it out at runtime.
-	for (const [channelNumber, channel] of Object.entries(device.tx)) {
+	// `audioTx`/`audioRx` also carry a non-numeric `count` property alongside the numeric channel
+	// keys, so Object.entries()'s value type includes it too - the isNaN check filters it out.
+	for (const [channelNumber, channel] of Object.entries(device.audioTx)) {
 		if (isNaN(Number(channelNumber))) continue
-		const txChannel = channel as TxChannel
+		const txChannel = channel as AudioTxChannel
 		if (txChannel?.name == channelName || txChannel?.friendlyName == channelName) {
 			return txChannel
 		}
@@ -225,24 +271,72 @@ export function findTxChannelByName(
 }
 
 /** Finds an rx channel by name on a device, identified by IP or device name. */
-export function findRxChannelByName(
+export function findAudioRxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
-): RxChannel | undefined {
+): AudioRxChannel | undefined {
 	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
 	if (!device) {
 		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
 		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
 	}
-	if (!device?.rx) {
+	if (!device?.audioRx) {
 		return undefined
 	}
-	for (const [channelNumber, channel] of Object.entries(device.rx)) {
+	for (const [channelNumber, channel] of Object.entries(device.audioRx)) {
 		if (isNaN(Number(channelNumber))) continue
-		const rxChannel = channel as RxChannel
+		const rxChannel = channel as AudioRxChannel
 		if (rxChannel?.name == channelName) {
 			return rxChannel
+		}
+	}
+	return undefined
+}
+
+/** Finds a video tx channel by name on a device, identified by IP or device name. */
+export function findVideoTxChannelByName(
+	self: DanteInstance,
+	deviceIdentifier: string,
+	channelName: string,
+): VideoTxChannel | undefined {
+	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
+	if (!device) {
+		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
+		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
+	}
+	if (!device?.videoTx) {
+		return undefined
+	}
+	// `videoTx`/`videoRx` also carry a non-numeric `count` property alongside the numeric channel
+	// keys, so Object.entries()'s value type includes it too - the isNaN check filters it out.
+	for (const [channelNumber, channel] of Object.entries(device.videoTx)) {
+		if (isNaN(Number(channelNumber))) continue
+		if ((channel as VideoTxChannel)?.name == channelName) {
+			return channel as VideoTxChannel
+		}
+	}
+	return undefined
+}
+
+/** Finds a video rx channel by name on a device, identified by IP or device name. */
+export function findVideoRxChannelByName(
+	self: DanteInstance,
+	deviceIdentifier: string,
+	channelName: string,
+): VideoRxChannel | undefined {
+	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
+	if (!device) {
+		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
+		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
+	}
+	if (!device?.videoRx) {
+		return undefined
+	}
+	for (const [channelNumber, channel] of Object.entries(device.videoRx)) {
+		if (isNaN(Number(channelNumber))) continue
+		if ((channel as VideoRxChannel)?.name == channelName) {
+			return channel as VideoRxChannel
 		}
 	}
 	return undefined
@@ -271,14 +365,14 @@ export function clearDeviceTimeouts(self: DanteInstance): void {
  * A self-route is reported by the device as the '.' shorthand rather than its own name; that is
  * resolved here so callers always get a name they can match against `devicesChoices`.
  */
-export function getRxChannelSource(
+export function getAudioRxChannelSource(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelNumber: number,
-): RxChannelSource | undefined {
+): AudioRxChannelSource | undefined {
 	const deviceIp = self.devicesData[deviceIdentifier] ? deviceIdentifier : findDeviceIpByName(self, deviceIdentifier)
 	const device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	const channel = device?.rx?.[channelNumber]
+	const channel = device?.audioRx?.[channelNumber]
 	if (!channel?.sourceDevice || !channel.sourceChannel) {
 		return undefined
 	}
@@ -288,6 +382,28 @@ export function getRxChannelSource(
 		channelName: channel.sourceChannel,
 		connected: isSubscriptionConnected(channel.subscriptionStatus),
 	}
+}
+
+/**
+ * Reads what a device's video rx channel is currently subscribed to.
+ *
+ * See {@link getAudioRxChannelSource}, which this mirrors for the `AV_EXTENDED` protocol's video
+ * channels - except there is no '.' self-route shorthand to resolve here, since that has not been
+ * observed on video subscriptions.
+ */
+export function getVideoRxChannelSource(
+	self: DanteInstance,
+	deviceIdentifier: string,
+	channelNumber: number,
+): VideoRxChannelSource | undefined {
+	const deviceIp = self.devicesData[deviceIdentifier] ? deviceIdentifier : findDeviceIpByName(self, deviceIdentifier)
+	const device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
+	const channel = device?.videoRx?.[channelNumber]
+	if (!channel?.sourceDevice || !channel.sourceChannel) {
+		return undefined
+	}
+
+	return { deviceName: channel.sourceDevice, channelName: channel.sourceChannel }
 }
 
 /**
