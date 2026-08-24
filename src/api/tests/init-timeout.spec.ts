@@ -36,7 +36,12 @@ vi.mock('@companion-module/base', async (importOriginal) => ({
 const { initConnection, DanteConnection } = await import('../connection.js')
 
 function instance(interval: number, timeoutInterval: number): DanteInstance {
-	const self = {
+	// Assembled as a plain object and cast once at the end, rather than cast first and then given a
+	// connection: `connection` is readonly on DanteInstance, which the real class satisfies by
+	// building it in the field initialiser from `this`. A test double has the same chicken-and-egg -
+	// DanteConnection needs the instance - so the connection goes on while this is still a plain
+	// object, which is also what the class does, just without the field-initialiser sugar.
+	const self: Record<string, unknown> = {
 		// 'Automatic' - no card to resolve, so nothing here depends on the host's interfaces
 		config: { mac: '', interval, timeoutInterval, variables: true, verbose: false },
 		devicesData: {},
@@ -44,9 +49,9 @@ function instance(interval: number, timeoutInterval: number): DanteInstance {
 		log: vi.fn(),
 		updateStatus: vi.fn(),
 		saveConfig: vi.fn(),
-	} as unknown as DanteInstance
-	self.connection = new DanteConnection(self)
-	return self
+	}
+	self.connection = new DanteConnection(self as unknown as DanteInstance)
+	return self as unknown as DanteInstance
 }
 
 beforeEach(() => {
