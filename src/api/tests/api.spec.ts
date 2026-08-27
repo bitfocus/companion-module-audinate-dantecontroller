@@ -92,6 +92,8 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		devicesChoices: [],
 		txChannelsChoices: {},
 		rxChannelsChoices: {},
+		videoTxChannelsChoices: {},
+		videoRxChannelsChoices: {},
 		txFriendlyNameRefreshCounter: 0,
 		counter: Buffer.from('0000', 'hex'),
 		mac: Buffer.from('aabbccddeeff', 'hex'),
@@ -429,6 +431,7 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		registerDevice(self, '10.0.0.5', 'MyDevice')
 		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
 		self.txChannelsChoices['MyDevice'] = [{ id: 1, label: 'Out 1' }]
+		self.videoRxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video In 1' }]
 
 		// the device changed address: it re-registers straight away, and the record for the old
 		// address is destroyed a timeout later. Both are keyed by name, so destroying the old one
@@ -440,17 +443,25 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		expect(self.devicesChoices).toEqual([{ id: 'MyDevice', label: 'MyDevice' }])
 		expect(self.rxChannelsChoices['MyDevice']).toBeDefined()
 		expect(self.txChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoRxChannelsChoices['MyDevice']).toBeDefined()
 	})
 
 	it('destroying the last address holding a name does clear it', () => {
 		const self = createMockInstance()
 		registerDevice(self, '10.0.0.5', 'MyDevice')
 		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
+		self.txChannelsChoices['MyDevice'] = [{ id: 1, label: 'Out 1' }]
+		self.videoRxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video In 1' }]
+		self.videoTxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video Out 1' }]
 
 		destroyDevice(self, '10.0.0.5')
 
 		expect(self.devicesChoices).toEqual([])
+		// video too: a device's channels must not outlive it in any picker
 		expect(self.rxChannelsChoices['MyDevice']).toBeUndefined()
+		expect(self.txChannelsChoices['MyDevice']).toBeUndefined()
+		expect(self.videoRxChannelsChoices['MyDevice']).toBeUndefined()
+		expect(self.videoTxChannelsChoices['MyDevice']).toBeUndefined()
 	})
 
 	it('clearDeviceTimeouts disarms the pending offline timeout', () => {

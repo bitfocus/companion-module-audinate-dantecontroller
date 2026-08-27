@@ -514,10 +514,14 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 		deviceName !== undefined &&
 		Object.entries(self.devicesData).some(([ip, device]) => ip !== deviceIp && device.name === deviceName)
 
-	// delete channels name choices
+	// delete channels name choices - video included, or a device's video channels stay on offer in
+	// every channel picker after it goes away, and `updateVideoChannelChoices` sees them as unchanged
+	// when it comes back, so no rebuild is scheduled for the ones it re-reads
 	if (deviceName !== undefined && !nameStillOnline) {
 		delete self.rxChannelsChoices[deviceName]
 		delete self.txChannelsChoices[deviceName]
+		delete self.videoRxChannelsChoices[deviceName]
+		delete self.videoTxChannelsChoices[deviceName]
 	}
 
 	// delete device choice, which is keyed by name

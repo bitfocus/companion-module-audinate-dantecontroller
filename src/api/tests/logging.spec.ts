@@ -49,6 +49,8 @@ function instance(devicesData: DevicesData = {}, verbose = false): DanteInstance
 		devicesChoices: [],
 		txChannelsChoices: {},
 		rxChannelsChoices: {},
+		videoTxChannelsChoices: {},
+		videoRxChannelsChoices: {},
 		txFriendlyNameRefreshCounter: 0,
 		counter: Buffer.from('0000', 'hex'),
 		mac: Buffer.from('aabbccddeeff', 'hex'),
