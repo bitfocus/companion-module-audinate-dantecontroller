@@ -665,3 +665,97 @@ describe('the (custom) suffix', () => {
 		}
 	})
 })
+
+/**
+ * Companion identifies an option by its id within its definition, so two options sharing one is
+ * unresolvable - the value saved under that id belongs to both fields at once.
+ *
+ * Every per-device option id ends in the device's *name*, while `devicesData` is keyed by address,
+ * so one name reaching the module from two addresses used to declare each of those options twice.
+ * That is not hypothetical: a device that changes address re-registers under the new one while the
+ * old record waits out its offline timeout, and a Companion host on both a primary and a secondary
+ * Dante network sees one device announce itself from each.
+ */
+describe('option ids are unique within a definition', () => {
+	/** Returns `definitionId.optionId` for every id declared more than once. */
+	function duplicateOptionIds(definitions: Record<string, DefinitionLike>): string[] {
+		const bad: string[] = []
+		for (const [definitionId, definition] of Object.entries(definitions)) {
+			const seen = new Set<string>()
+			for (const option of definition.options ?? []) {
+				if (seen.has(option.id)) bad.push(`${definitionId}.${option.id}`)
+				seen.add(option.id)
+			}
+		}
+		return bad
+	}
+
+	/** Both sets of definitions this module builds, keyed by id. */
+	function allDefinitions(self: DanteInstance): Record<string, DefinitionLike> {
+		UpdateActions(self)
+		UpdateFeedbacks(self)
+		return {
+			...(self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+			...(self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+		}
+	}
+
+	/** DeviceA announcing itself from a second address, as a re-registration or a second network does. */
+	function withSecondAddress(overrides: Record<string, unknown> = {}) {
+		const self = mockInstance()
+		self.devicesData['10.0.0.7'] = { ...self.devicesData['10.0.0.5'], ...overrides }
+		return self
+	}
+
+	it('holds for every action and feedback', () => {
+		expect(duplicateOptionIds(allDefinitions(mockInstance()))).toEqual([])
+	})
+
+	it('holds when one device name arrives from two addresses', () => {
+		expect(duplicateOptionIds(allDefinitions(withSecondAddress()))).toEqual([])
+	})
+
+	it('flags a definition declaring an id twice', () => {
+		expect(duplicateOptionIds({ bad: { options: [{ id: 'channel_A' }, { id: 'channel_A' }] } })).toEqual([
+			'bad.channel_A',
+		])
+	})
+
+	it('still declares the per-device options of a device seen at two addresses', () => {
+		const definitions = allDefinitions(withSecondAddress())
+		const ids = (definitions.setSampleRate?.options ?? []).map((option) => option.id)
+
+		expect(ids).toContain('sr_DeviceA')
+	})
+
+	it('shows the single field for either address, so an action saved against one still resolves', () => {
+		const definitions = allDefinitions(withSecondAddress())
+		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === 'sr_DeviceA')
+
+		expect(field?.isVisibleExpression).toContain("'DeviceA'")
+		expect(field?.isVisibleExpression).toContain("'10.0.0.5'")
+		expect(field?.isVisibleExpression).toContain("'10.0.0.7'")
+	})
+
+	it('takes the field from the address that has the data, not whichever came first', () => {
+		// A device that has just re-registered has no settings replies in its record yet. Letting that
+		// record represent the name would drop a field the device demonstrably supports.
+		const self = mockInstance()
+		// first in iteration order, so a builder taking the first record it meets picks this one
+		self.devicesData = { '10.0.0.4': { name: 'DeviceA', ports: { ARC: 4440 } }, ...self.devicesData }
+		const definitions = allDefinitions(self)
+		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === 'sr_DeviceA')
+
+		expect(field?.choices?.length).toBeGreaterThan(0)
+		expect(field?.isVisibleExpression).toContain("'10.0.0.4'")
+	})
+
+	it('leaves out a name no address has the data for', () => {
+		const self = mockInstance()
+		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
+		const definitions = allDefinitions(self)
+		const ids = (definitions.setSampleRate?.options ?? []).map((option) => option.id)
+
+		expect(ids).not.toContain('sr_AController')
+	})
+})

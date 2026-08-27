@@ -506,14 +506,22 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	const deviceName = self.devicesData[deviceIp]?.name
 	logger.warn(`${deviceName ?? deviceIp} (${deviceIp}) went offline - nothing heard for ${self.timeout}ms`)
 
+	// Everything below is keyed by name, and another address may still be announcing this one - see
+	// `devicesByName`. The common case is a device whose address changed: it re-registers under the
+	// new one immediately, and this fires for the old record a timeout later. Deleting by name then
+	// would strip the channel choices and the dropdown entry of a device that is still online.
+	const nameStillOnline =
+		deviceName !== undefined &&
+		Object.entries(self.devicesData).some(([ip, device]) => ip !== deviceIp && device.name === deviceName)
+
 	// delete channels name choices
-	if (deviceName !== undefined) {
+	if (deviceName !== undefined && !nameStillOnline) {
 		delete self.rxChannelsChoices[deviceName]
 		delete self.txChannelsChoices[deviceName]
 	}
 
 	// delete device choice, which is keyed by name
-	if (deviceName !== undefined) {
+	if (deviceName !== undefined && !nameStillOnline) {
 		const index = self.devicesChoices.findIndex((choice) => choice.id === deviceName)
 		if (index !== -1) {
 			self.devicesChoices.splice(index, 1)

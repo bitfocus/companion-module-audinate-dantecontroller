@@ -20,6 +20,7 @@ import {
 	deviceByIdentifier,
 	deviceOptionValue,
 	deviceSelectedExpression,
+	devicesByName,
 	devicesWithOptions,
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
@@ -900,12 +901,11 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				// A dropdown with no choices can never hold a valid value, and Companion refuses to parse
 				// the whole action when one is present - so only emit these for devices that report options.
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => (device.srOptions?.length ?? 0) > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetSampleRateOptions> => ({
+				...devicesByName(self, (device) => (device.srOptions?.length ?? 0) > 0).map(
+					({ name, device, ips }): SomeCompanionActionInputField<keyof SetSampleRateOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate',
-						id: `sr_${device.name}`,
+						id: `sr_${name}`,
 						choices: array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? [],
 						// open on the rate the device is actually running, not merely the first it supports
 						default: currentChoiceId(
@@ -913,8 +913,9 @@ export function UpdateActions(self: DanteInstance): void {
 							device.sr,
 							'',
 						),
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+						isVisibleExpression: deviceSelectedExpression('device', name, ...ips),
+					}),
+				),
 			],
 			learn: (action) => {
 				const device = deviceByIdentifier(self, action.options.device)
@@ -954,20 +955,20 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				// A dropdown with no choices can never hold a valid value, and Companion refuses to parse
 				// the whole action when one is present - so only emit these for devices that report options.
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => (device.pullupOptions?.length ?? 0) > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetPullupOptions> => ({
+				...devicesByName(self, (device) => (device.pullupOptions?.length ?? 0) > 0).map(
+					({ name, device, ips }): SomeCompanionActionInputField<keyof SetPullupOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate pullup',
-						id: `pullup_${device.name}`,
+						id: `pullup_${name}`,
 						choices: object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
 							device.pullup,
 							'',
 						),
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+						isVisibleExpression: deviceSelectedExpression('device', name, ...ips),
+					}),
+				),
 			],
 			learn: (action) => {
 				const device = deviceByIdentifier(self, action.options.device)
@@ -1008,20 +1009,20 @@ export function UpdateActions(self: DanteInstance): void {
 				},
 				// A dropdown with no choices can never hold a valid value, and Companion refuses to parse
 				// the whole action when one is present - so only emit these for devices that report options.
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => (device.encodingOptions?.length ?? 0) > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetEncodingOptions> => ({
+				...devicesByName(self, (device) => (device.encodingOptions?.length ?? 0) > 0).map(
+					({ name, device, ips }): SomeCompanionActionInputField<keyof SetEncodingOptions> => ({
 						type: 'dropdown',
 						label: 'Encoding',
-						id: `encoding_${device.name}`,
+						id: `encoding_${name}`,
 						choices: object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
 							device.encoding,
 							'',
 						),
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+						isVisibleExpression: deviceSelectedExpression('device', name, ...ips),
+					}),
+				),
 			],
 			callback: async (action) => {
 				const opt = action.options
@@ -1044,20 +1045,20 @@ export function UpdateActions(self: DanteInstance): void {
 					// the choices - allowCustom lets it stay selected instead of failing to parse
 					allowCustom: true,
 				},
-				...Object.entries(self.devicesData)
-					.filter(([, device]) => audioChannelChoices(self, device, 'rx').length > 0)
-					.map(([ip, device]): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
+				...devicesByName(self, (device) => audioChannelChoices(self, device, 'rx').length > 0).map(
+					({ name, device, ips }): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
-						id: `channel_${device.name}`,
+						id: `channel_${name}`,
 						choices: audioChannelChoices(self, device, 'rx'),
 						default: firstChoiceId(audioChannelChoices(self, device, 'rx'), 0),
-						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), device.name ?? ''),
+						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), name),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 						// allowCustom keeps actions still holding it parseable rather than failing outright
 						allowCustom: true,
-						isVisibleExpression: deviceSelectedExpression('device', device.name ?? '', ip),
-					})),
+						isVisibleExpression: deviceSelectedExpression('device', name, ...ips),
+					}),
+				),
 				{
 					type: 'dropdown',
 					label: 'Level',

@@ -248,14 +248,14 @@ export function perDeviceChannelFields<Key extends string>(
 	const fields: CompanionInputFieldDropdown<Key>[] = []
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
-		for (const [ip, device] of Object.entries(self.devicesData)) {
+		for (const { name, device, ips } of devicesByName(self)) {
 			const choices = mediaChannelChoices(self, device, direction, mediaType)
 			if (choices.length === 0) continue
 
 			// deviceSelectedExpression contains `||`, which binds looser than `&&` - bracket it (and, if
 			// there's an extraVisibleCondition too, the whole device+type clause) so a later `&&` can't
 			// silently swallow one arm of the `||`.
-			const deviceAndType = `(${deviceSelectedExpression(devicePickerId, device.name ?? '', ip)}) && $(options:channelType) == '${mediaType}'`
+			const deviceAndType = `(${deviceSelectedExpression(devicePickerId, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
 			const isVisibleExpression = extraVisibleCondition
 				? `(${deviceAndType}) && ${extraVisibleCondition}`
 				: deviceAndType
@@ -263,12 +263,12 @@ export function perDeviceChannelFields<Key extends string>(
 			fields.push({
 				type: 'dropdown',
 				label: mediaType === 'audio' ? label : `${CHANNEL_MEDIA_TYPE_LABELS[mediaType]} ${label.toLowerCase()}`,
-				id: `${channelOptionPrefix(basePrefix, mediaType)}_${device.name}` as Key,
+				id: `${channelOptionPrefix(basePrefix, mediaType)}_${name}` as Key,
 				choices: noneOption ? [noneOption, ...choices] : choices,
 				// The default comes from `choices` alone, never `[noneOption, ...choices]`: None sorts
 				// first, so including it here would make a freshly-added field default to "no route".
 				default: firstChoiceId(choices, 0),
-				expressionDescription: channelRangeDescription(choices, device.name ?? '', noneOption !== undefined),
+				expressionDescription: channelRangeDescription(choices, name, noneOption !== undefined),
 				// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
 				// allowCustom keeps actions still holding it parseable rather than failing outright
 				allowCustom: true,
@@ -313,7 +313,7 @@ export function perDeviceMissingChannelWarnings(
 	const fields: CompanionInputFieldStaticText[] = []
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
-		for (const [ip, device] of Object.entries(self.devicesData)) {
+		for (const { name, device, ips } of devicesByName(self)) {
 			if (mediaChannelChoices(self, device, direction, mediaType).length > 0) continue
 			const offeredAtAll = CHANNEL_MEDIA_TYPES.some(
 				(otherType) => mediaChannelChoices(self, device, direction, otherType).length > 0,
@@ -322,17 +322,17 @@ export function perDeviceMissingChannelWarnings(
 
 			// Bracketed exactly as in perDeviceChannelFields: deviceSelectedExpression contains `||`,
 			// which binds looser than the `&&` joining it to the channel-type test.
-			const isVisibleExpression = `(${deviceSelectedExpression(devicePickerId, device.name ?? '', ip)}) && $(options:channelType) == '${mediaType}'`
+			const isVisibleExpression = `(${deviceSelectedExpression(devicePickerId, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
 
 			const mediaLabel = CHANNEL_MEDIA_TYPE_LABELS[mediaType]
 			fields.push({
 				type: 'static-text',
 				// Not `channelOptionPrefix`: these hold no value, so there is no saved-config
 				// compatibility to preserve and every media type can carry its own name.
-				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${device.name}`,
+				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${name}`,
 				label: `No ${mediaLabel.toLowerCase()} channels`,
 				value:
-					`${device.name} has no ${mediaLabel.toLowerCase()} ${DIRECTION_LABELS[direction]} channels, so there ` +
+					`${name} has no ${mediaLabel.toLowerCase()} ${DIRECTION_LABELS[direction]} channels, so there ` +
 					`is no channel to pick and this will do nothing when run. Choose a different device, or change ` +
 					`Channel Type.`,
 				isVisibleExpression,
@@ -367,9 +367,64 @@ export function channelRangeDescription(
  * actions saved before devices were keyed by name still hold. Without the address arm those actions
  * show no per-device field at all: the option ids are keyed by name, so nothing matches and the
  * channel picker simply never appears.
+ *
+ * Takes any number of addresses because one name can be announced from several - see
+ * {@link devicesByName}. All of them are matched, so an older action holding whichever address it
+ * was saved against still resolves.
  */
-export function deviceSelectedExpression(pickerId: string, deviceName: string, deviceIp: string): string {
-	return `$(options:${pickerId}) == '${deviceName}' || $(options:${pickerId}) == '${deviceIp}'`
+export function deviceSelectedExpression(pickerId: string, deviceName: string, ...deviceIps: string[]): string {
+	return [deviceName, ...deviceIps].map((value) => `$(options:${pickerId}) == '${value}'`).join(' || ')
+}
+
+/** One device, as the per-device option builders see it: a name, its record, and its addresses. */
+export interface NamedDevice {
+	name: string
+	device: DeviceData
+	ips: string[]
+}
+
+/**
+ * The devices to build per-device option fields from: one entry per distinct *name*.
+ *
+ * `devicesData` is keyed by address, and two addresses can carry the same device name - a device
+ * whose address changed re-registers under the new one while the old record waits out its offline
+ * timeout, and a Companion host on both a primary and a secondary Dante network sees one device
+ * announce itself from each. Building fields straight from `Object.entries(devicesData)` then emits
+ * two options with the same `<prefix>_${name}` id, which Companion cannot tell apart.
+ *
+ * Grouping first is enough to make that impossible, and loses nothing: everything a per-device field
+ * needs is keyed by name too (`rxChannelsChoices` and friends), so the duplicate record could only
+ * ever have produced an identical field. Its address is kept in `ips` so the visibility expression
+ * still matches actions saved against it.
+ *
+ * @param include Which records can represent a name, matching the `.filter()` each call site used
+ * to do itself. A name whose records all fail it is left out entirely. Where several share a name,
+ * a passing record is preferred over a failing one - a device that has just re-registered has an
+ * entry with no settings replies in it yet, and that one must not stand in for the entry that has
+ * them. Addresses are still collected from every record, passing or not, so a saved action holding
+ * any of them stays matched.
+ */
+export function devicesByName(
+	self: DanteInstance,
+	include: (device: DeviceData) => boolean = () => true,
+): NamedDevice[] {
+	const byName = new Map<string, NamedDevice>()
+
+	for (const [ip, device] of Object.entries(self.devicesData)) {
+		// An unnamed device has no id to build an option from - `<prefix>_undefined` is nobody's field.
+		if (device.name === undefined) continue
+
+		const existing = byName.get(device.name)
+		if (!existing) {
+			byName.set(device.name, { name: device.name, device, ips: [ip] })
+			continue
+		}
+
+		existing.ips.push(ip)
+		if (include(device) && !include(existing.device)) existing.device = device
+	}
+
+	return [...byName.values()].filter((named) => include(named.device))
 }
 
 /**
@@ -395,6 +450,11 @@ export function insertDeviceChoice(self: DanteInstance, deviceIp: string, device
 	// Make and model are not known yet - they arrive with the settings reply, which logs the fuller
 	// line once it does. See `logDeviceIdentity`.
 	logger.info(`Discovered ${deviceName} at ${deviceIp}`)
+
+	// Choices are keyed by name and one name can reach us from two addresses (see `devicesByName`),
+	// so this can be the second registration of a name already offered - pushing again would put two
+	// entries with the same id in the dropdown. `updateDeviceChoice` guards the same way.
+	if (self.devicesChoices.some((choice) => choice.id === deviceName)) return
 
 	self.devicesChoices.push({ id: deviceName, label: deviceName })
 	self.devicesChoices.sort((deviceA, deviceB) => {

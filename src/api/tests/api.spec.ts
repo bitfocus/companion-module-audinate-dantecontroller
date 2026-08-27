@@ -416,6 +416,43 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		expect(self.devicesChoices).toEqual([])
 	})
 
+	it('registering the same name at a second address offers it once', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		// the device moved, or a second network carries it - either way the name is already offered
+		registerDevice(self, '10.0.0.7', 'MyDevice')
+		expect(self.devicesChoices).toEqual([{ id: 'MyDevice', label: 'MyDevice' }])
+	})
+
+	it('destroying a stale address leaves the name alone while another address still has it', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
+		self.txChannelsChoices['MyDevice'] = [{ id: 1, label: 'Out 1' }]
+
+		// the device changed address: it re-registers straight away, and the record for the old
+		// address is destroyed a timeout later. Both are keyed by name, so destroying the old one
+		// must not take the live device's channel choices or dropdown entry with it.
+		registerDevice(self, '10.0.0.7', 'MyDevice')
+		destroyDevice(self, '10.0.0.5')
+
+		expect(self.devicesData['10.0.0.7']).toBeDefined()
+		expect(self.devicesChoices).toEqual([{ id: 'MyDevice', label: 'MyDevice' }])
+		expect(self.rxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.txChannelsChoices['MyDevice']).toBeDefined()
+	})
+
+	it('destroying the last address holding a name does clear it', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
+
+		destroyDevice(self, '10.0.0.5')
+
+		expect(self.devicesChoices).toEqual([])
+		expect(self.rxChannelsChoices['MyDevice']).toBeUndefined()
+	})
+
 	it('clearDeviceTimeouts disarms the pending offline timeout', () => {
 		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, '10.0.0.5', 'MyDevice')
