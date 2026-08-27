@@ -534,6 +534,7 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 
 	//delete timeout
 	clearTimeout(self.devicesData[deviceIp]?.timeoutArray?.[0])
+	channelSettleDeadlines.get(self)?.delete(deviceIp)
 
 	// delete object from devicesData
 	delete self.devicesData[deviceIp]
@@ -845,6 +846,43 @@ export function scheduleCheckFeedbacks(self: DanteInstance, deviceIp?: string): 
 export function cancelCheckFeedbacks(self: DanteInstance): void {
 	throttledFeedbacks.get(self)?.cancel()
 	pendingFeedbacks.delete(self)
+}
+
+/**
+ * How long after asking a device for its channels its channel list is treated as still filling in.
+ *
+ * Generous next to how long the replies actually take (a burst of pages answered in tens of
+ * milliseconds), and short enough that it is not a meaningful blind spot: the window only opens
+ * when the module itself asks - at discovery, when a channel count changes, and on the Refresh
+ * action - so a rename made by hand at any other time is reported as usual.
+ */
+const CHANNEL_SETTLE_MS = 3000
+
+/** Per instance, when each device's channel list stops being treated as still filling in. */
+const channelSettleDeadlines = new WeakMap<DanteInstance, Map<string, number>>()
+
+/**
+ * Notes that a device has just been asked for its channels, so the replies that follow are its
+ * channel list being filled in rather than changing.
+ *
+ * A device answers a channel query in pages, and its transmit names arrive over two replies (the
+ * channel names, then the friendly names that supersede them where set) - so a list is built up
+ * over several replies, every one of which looks like a change to the one before it. Without this
+ * a 32-channel device logs a rename line per channel per page on discovery, drowning the log at
+ * the exact moment an operator is reading it, and saying nothing: nobody renamed anything.
+ */
+export function markChannelsSettling(self: DanteInstance, deviceIp: string): void {
+	let deadlines = channelSettleDeadlines.get(self)
+	if (!deadlines) {
+		deadlines = new Map()
+		channelSettleDeadlines.set(self, deadlines)
+	}
+	deadlines.set(deviceIp, Date.now() + CHANNEL_SETTLE_MS)
+}
+
+/** Whether {@link markChannelsSettling}'s window is still open for this device. */
+export function channelsAreSettling(self: DanteInstance, deviceIp: string): boolean {
+	return (channelSettleDeadlines.get(self)?.get(deviceIp) ?? 0) > Date.now()
 }
 
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */

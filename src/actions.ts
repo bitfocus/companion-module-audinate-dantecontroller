@@ -7,6 +7,7 @@ import {
 	array2choices,
 	audioChannelChoices,
 	audioDeviceChoices,
+	audioRxDeviceChoices,
 	channelOptionPrefix,
 	channelRangeDescription,
 	channelTypeOption,
@@ -1038,8 +1039,11 @@ export function UpdateActions(self: DanteInstance): void {
 					type: 'dropdown',
 					label: 'Device',
 					id: 'device',
-					choices: rxDeviceChoices(self),
-					default: firstChoiceId(rxDeviceChoices(self), ''),
+					// Audio receive only: an output level belongs to an audio input, so a video-only decoder
+					// has none, and this action has no Channel Type picker for the missing-channel warnings
+					// to hang off - it would just show a device with no Channel field and no explanation.
+					choices: audioRxDeviceChoices(self),
+					default: firstChoiceId(audioRxDeviceChoices(self), ''),
 					disableAutoExpression: true,
 					// a value saved before devices were keyed by name is an address, which is no longer among
 					// the choices - allowCustom lets it stay selected instead of failing to parse

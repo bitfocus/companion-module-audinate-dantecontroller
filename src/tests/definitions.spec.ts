@@ -174,7 +174,14 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 		return found
 	}
 
-	const audioActions = ['setLatency', 'setSampleRate', 'setSampleRateCustom', 'setPullup', 'setEncoding']
+	const audioActions = [
+		'setLatency',
+		'setSampleRate',
+		'setSampleRateCustom',
+		'setPullup',
+		'setEncoding',
+		'setOutputLevel',
+	]
 
 	it.each(audioActions)('%s does not offer a device with no audio channels', (actionId) => {
 		const self = withController()
@@ -193,6 +200,39 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 
 		// the controller sorts first, so an unfiltered default would land on it
 		expect(deviceOption(definitions, actionId)?.default).not.toBe('10.0.0.1')
+	})
+
+	/** A decoder: video receive channels and no audio at all, as an AV-X board reports. */
+	function withVideoOnlyDecoder() {
+		const self = mockInstance()
+		self.devicesData['10.0.0.9'] = {
+			name: 'Decoder',
+			ports: { ARC: 4440 },
+			videoRx: { count: 2, 1: { number: 1, name: 'V In 1' }, 2: { number: 2, name: 'V In 2' } },
+		}
+		self.devicesChoices = [...self.devicesChoices, { id: '10.0.0.9', label: 'Decoder' }]
+		return self
+	}
+
+	it('offers a video-only device as a crosspoint destination, which is the whole point of the shared picker', () => {
+		const self = withVideoOnlyDecoder()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		const ids = deviceOption(definitions, 'makeCrosspointDropDown')?.choices?.map((choice) => choice.id) ?? []
+		expect(ids).toContain('10.0.0.9')
+	})
+
+	it('does not offer a video-only device an output level, which only an audio input has', () => {
+		// the crosspoint pickers explain a media-type mismatch with a warning field; this action has no
+		// Channel Type to hang one off, so a device it cannot serve must not be in the list at all
+		const self = withVideoOnlyDecoder()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		const ids = deviceOption(definitions, 'setOutputLevel')?.choices?.map((choice) => choice.id) ?? []
+		expect(ids).not.toContain('10.0.0.9')
+		expect(ids).toContain('10.0.0.5')
 	})
 
 	it('still offers every device for renaming, including one with no audio channels', () => {

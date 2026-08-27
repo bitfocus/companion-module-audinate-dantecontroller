@@ -146,7 +146,7 @@ const TIMEOUT_WARNING_EXPRESSION = `$(options:timeoutInterval) < $(options:inter
 
 export function GetConfigFields(): SomeCompanionConfigField[] {
 	// "Automatic" rather than "All": the module listens on every interface for discovery, but a
-	// command to a device is sent carrying the address of the one card that reaches it. Nothing acts
+	// command to a device is sent carrying the address of the one interface that reaches it. Nothing acts
 	// on all interfaces at once, so naming it that way invited the wrong expectation.
 	const nicChoices: DropdownChoice<string>[] = [{ id: '', label: 'Automatic (detect per device)' }]
 	for (const nic of listNetworkInterfaces()) {
@@ -164,11 +164,11 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 
 		{
 			type: 'dropdown',
-			label: 'Network card',
+			label: 'Network Interface',
 			id: 'mac',
 			description:
-				'Choose the network card bound to Dante Controller, or leave on Automatic to use whichever ' +
-				'card reaches each device. A chosen card is remembered by its MAC address, so the ' +
+				'Choose the network interface bound to Dante Controller, or leave on Automatic to use whichever ' +
+				'interface reaches each device. A chosen interface is remembered by its MAC address, so the ' +
 				'connection keeps working if its IP changes (link-local or DHCP).',
 			width: 12,
 			choices: nicChoices,
@@ -252,11 +252,11 @@ function toUint32(address: string): number | undefined {
 }
 
 /**
- * The network card whose subnet contains `address`.
+ * The network interface whose subnet contains `address`.
  *
- * Used when the card is chosen automatically rather than explicitly: a command still needs one
- * card's hardware address for its settings commands, and the card that can actually reach a
- * discovered device is the right one. Returns undefined if no card's subnet matches.
+ * Used when the interface is chosen automatically rather than explicitly: a command still needs one
+ * interface's hardware address for its settings commands, and the interface that can actually reach a
+ * discovered device is the right one. Returns undefined if no interface's subnet matches.
  */
 export function findInterfaceForAddress(
 	available: NetworkInterfaceInfo[],

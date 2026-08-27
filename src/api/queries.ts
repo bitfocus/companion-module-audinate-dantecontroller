@@ -8,7 +8,7 @@ import type DanteInstance from '../main.js'
 import { incrementBE, intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import { setEncoding, setSampleRate } from './commands.js'
-import { deviceLabel, macForDevice } from './devices.js'
+import { deviceLabel, macForDevice, markChannelsSettling } from './devices.js'
 
 const logger = createModuleLogger('api:queries')
 
@@ -83,6 +83,9 @@ function sendChannelQuery(
 	channelCount: number,
 	channelsPerPage: number,
 ): void {
+	// the replies to these pages are the channel list filling in, not changing - see the rename logging
+	markChannelsSettling(self, ipaddress)
+
 	const pages = Math.max(1, Math.ceil(channelCount / channelsPerPage))
 	if (self.debug) {
 		logger.debug(
@@ -113,6 +116,7 @@ function sendChannelQuery(
  */
 export function getVideoRxChannels(self: DanteInstance, ipaddress: string): void {
 	logQuery(self, ipaddress, 'video rx channels')
+	markChannelsSettling(self, ipaddress)
 	sendCommand(
 		self,
 		makeAvCommand(
@@ -127,6 +131,7 @@ export function getVideoRxChannels(self: DanteInstance, ipaddress: string): void
 /** Queries a device's video tx channels (names). See {@link getVideoRxChannels}. */
 export function getVideoTxChannels(self: DanteInstance, ipaddress: string): void {
 	logQuery(self, ipaddress, 'video tx channels')
+	markChannelsSettling(self, ipaddress)
 	sendCommand(
 		self,
 		makeAvCommand(

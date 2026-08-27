@@ -474,3 +474,88 @@ describe('getVideoRxChannelSource / findVideoRxChannelByName / findVideoTxChanne
 		expect(findVideoRxChannelByName(self, 'Dest', 'No such channel')).toBeUndefined()
 	})
 })
+
+/**
+ * A device's video channel counts arrive as two replies, one per direction, and every device
+ * answers both - an audio-only board included, whose answers simply hold no video records. Logging
+ * each reply as it landed put two lines in the log per device, one of them meaningless on its own
+ * ("video rx channels - 0"), and three for every audio-only device on the network counting its
+ * audio line.
+ */
+describe('video channel count logging', () => {
+	/** The info lines the module emitted, whatever scope they came from. */
+	function infoLines(): string[] {
+		return loggerSink.mock.calls.filter((call) => call[1] === 'info').map((call) => String(call[2]))
+	}
+
+	function deliver(self: DanteInstance, hex: string) {
+		const reply = Buffer.from(hex, 'hex')
+		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+	}
+
+	/** The same directory reply, re-tagged as the rx-side answer - see REAL_AUDIO_ONLY_TX_DIRECTORY_HEX. */
+	function asRxDirectory(hex: string): string {
+		const reply = Buffer.from(hex, 'hex')
+		reply.writeUInt16BE(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY, 6)
+		return reply.toString('hex')
+	}
+
+	function device() {
+		return createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910', ports: { ARC: 4440 } } } })
+	}
+
+	it('says nothing until the direction that completes the pair arrives', () => {
+		const self = device()
+		deliver(self, REAL_VIDEO_ALL_ROUTED_HEX)
+
+		expect(infoLines().filter((line) => line.includes('video'))).toEqual([])
+	})
+
+	it('reports both directions on one line', () => {
+		const self = device()
+		deliver(self, REAL_VIDEO_ALL_ROUTED_HEX)
+		deliver(self, REAL_VIDEO_TX_DIRECTORY_HEX)
+
+		const lines = infoLines().filter((line) => line.includes('video channels'))
+		expect(lines).toHaveLength(1)
+		expect(lines[0]).toContain('DAV-110910')
+		expect(lines[0]).toContain('rx 1')
+		expect(lines[0]).toContain('tx 1')
+	})
+
+	it('does not repeat itself when a refresh finds the same counts', () => {
+		const self = device()
+		deliver(self, REAL_VIDEO_ALL_ROUTED_HEX)
+		deliver(self, REAL_VIDEO_TX_DIRECTORY_HEX)
+		// what the Refresh action does: ask both directions again
+		deliver(self, REAL_VIDEO_ALL_ROUTED_HEX)
+		deliver(self, REAL_VIDEO_TX_DIRECTORY_HEX)
+
+		expect(infoLines().filter((line) => line.includes('video channels'))).toHaveLength(1)
+	})
+
+	it('keeps quiet about a device that has no video channels at all', () => {
+		// every audio-only device on the network answers both queries this way, and none of it is news
+		const self = device()
+		deliver(self, asRxDirectory(REAL_AUDIO_ONLY_TX_DIRECTORY_HEX))
+		deliver(self, REAL_AUDIO_ONLY_TX_DIRECTORY_HEX)
+
+		expect(self.devicesData[REAL_DEVICE_IP]?.videoRx?.count).toBe(0)
+		expect(self.devicesData[REAL_DEVICE_IP]?.videoTx?.count).toBe(0)
+		expect(infoLines().filter((line) => line.includes('video'))).toEqual([])
+	})
+
+	it('reports a count that changes later, still on one line', () => {
+		const self = device()
+		deliver(self, asRxDirectory(REAL_AUDIO_ONLY_TX_DIRECTORY_HEX))
+		deliver(self, REAL_AUDIO_ONLY_TX_DIRECTORY_HEX)
+		loggerSink.mockClear()
+
+		deliver(self, REAL_VIDEO_TX_DIRECTORY_HEX)
+
+		const lines = infoLines().filter((line) => line.includes('video channels'))
+		expect(lines).toHaveLength(1)
+		expect(lines[0]).toContain('rx 0')
+		expect(lines[0]).toContain('tx 1')
+	})
+})

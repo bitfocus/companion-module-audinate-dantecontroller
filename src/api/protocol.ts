@@ -706,13 +706,12 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
 
 	if (!deviceData) return
 
+	const countBefore =
+		channelDirection === 'rx' ? self.devicesData[deviceIp]?.videoRx?.count : self.devicesData[deviceIp]?.videoTx?.count
+
 	self.devicesData = merge(self.devicesData, { [deviceIp]: deviceData })
 
-	if (channelDirection === 'rx') {
-		logger.info(`${deviceLabel(self, deviceIp)} : video rx channels - ${deviceData.videoRx?.count ?? 0}`)
-	} else if (channelDirection === 'tx') {
-		logger.info(`${deviceLabel(self, deviceIp)} : video tx channels - ${deviceData.videoTx?.count ?? 0}`)
-	}
+	logVideoChannelCounts(self, deviceIp, channelDirection, countBefore)
 
 	if (channelDirection) updateVideoChannelChoices(self, deviceIp, channelDirection)
 
@@ -722,6 +721,40 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
 		scheduleCheckVariables(self, deviceIp, 'tx_video', 'tx_names_video')
 	}
 	scheduleCheckFeedbacks(self, deviceIp)
+}
+
+/**
+ * Reports a device's video channel counts on one line, the way the audio counts are reported.
+ *
+ * The two directions arrive in separate replies, so this waits for the one that completes the pair
+ * rather than logging each on its own - a device is one device, and "video rx channels - 0" on a
+ * line of its own tells nobody anything until the transmit side turns up too. Waiting costs
+ * nothing: the module always asks for both directions together, and every device answers both -
+ * one that has no video, or does not speak `AV_EXTENDED` at all, answers with a reply the parsers
+ * read as zero channels.
+ *
+ * Which is why zero/zero stays at debug: every audio-only Dante device on the network reports it,
+ * and it is not news about any of them. The rest is logged only when this reply actually changed a
+ * count, so a Refresh over an unchanged network says nothing at all.
+ */
+function logVideoChannelCounts(
+	self: DanteInstance,
+	deviceIp: string,
+	channelDirection: 'rx' | 'tx' | undefined,
+	countBefore: number | undefined,
+): void {
+	const device = self.devicesData[deviceIp]
+	const rx = device?.videoRx
+	const tx = device?.videoTx
+	// not yet the reply that completes the pair
+	if (!channelDirection || !rx || !tx) return
+
+	const countAfter = channelDirection === 'rx' ? rx.count : tx.count
+	if (countAfter === countBefore) return
+
+	const line = `${deviceLabel(self, deviceIp)} : video channels - rx ${rx.count ?? 0}, tx ${tx.count ?? 0}`
+	if ((rx.count ?? 0) === 0 && (tx.count ?? 0) === 0) logger.debug(line)
+	else logger.info(line)
 }
 
 /**

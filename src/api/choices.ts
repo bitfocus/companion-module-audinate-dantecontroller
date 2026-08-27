@@ -11,6 +11,7 @@ import {
 import type DanteInstance from '../main.js'
 import { CHANNEL_MEDIA_TYPE_LABELS, CHANNEL_MEDIA_TYPES, type ChannelMediaType, type DeviceData } from './types.js'
 import {
+	channelsAreSettling,
 	deviceByIdentifier,
 	getChannelSubscriptionName,
 	hasAudioRxChannels,
@@ -97,6 +98,21 @@ export function txDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
 			return hasAudioTxChannels(device) || hasVideoTxChannels(device)
 		}),
 		'No devices with transmit channels found',
+	)
+}
+
+/**
+ * Devices with audio receive channels, as dropdown choices.
+ *
+ * Narrower than both lists above, for the settings that exist per audio input and nowhere else -
+ * output level is the one. {@link rxDeviceChoices} would offer a decoder whose only inputs are
+ * video, and {@link audioDeviceChoices} a transmit-only device: either leaves a picker with a
+ * device selected, no channel to pick, and nothing saying why.
+ */
+export function audioRxDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
+	return orPlaceholder(
+		self.devicesChoices.filter((choice) => hasAudioRxChannels(deviceByIdentifier(self, String(choice.id)))),
+		'No devices with audio receive channels found',
 	)
 }
 
@@ -521,7 +537,7 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 		existing.length !== channelChoice.length ||
 		channelChoice.some((choice, index) => choice.label !== existing[index]?.label)
 	if (changed) {
-		logChannelNameChanges(deviceName, channelType, existing, channelChoice)
+		logChannelNameChanges(deviceName, channelType, existing, channelChoice, channelsAreSettling(self, deviceIp))
 		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
 	}
@@ -560,25 +576,44 @@ export function updateVideoChannelChoices(self: DanteInstance, deviceIp: string,
 		existing.length !== channelChoice.length ||
 		channelChoice.some((choice, index) => choice.label !== existing[index]?.label)
 	if (changed) {
-		logChannelNameChanges(deviceName, channelType, existing, channelChoice, 'video')
+		logChannelNameChanges(
+			deviceName,
+			channelType,
+			existing,
+			channelChoice,
+			channelsAreSettling(self, deviceIp),
+			'video',
+		)
 		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
 	}
 }
 
 /**
- * Reports channel renames at info, and the first sight of a device's channels at debug.
+ * Reports channel renames at info, and a device's channel list being filled in at debug.
  *
  * A channel name is what every crosspoint action and feedback is stored against, so a rename can
  * quietly break a whole page of buttons - the same reason a device rename is worth an info line.
- * The initial population is not a change and would otherwise log one line per channel per device on
- * every connect, so it stays at debug.
+ * Filling the list in is not a rename, and there is a lot of it: the very first reply, every page
+ * after the first (a channel not in the page just parsed has an empty name until its own page
+ * arrives), and the transmit friendly names that supersede the plain names a reply or two earlier.
+ * All of it would otherwise read as one rename line per channel on every connect.
+ *
+ * Three things separate the fill from a rename, and all three are needed - `settling` alone leaves
+ * a slow reply logging nonsense, and the empty-name test alone cannot tell a friendly name from a
+ * rename:
+ *
+ * - no previous list at all, so nothing can have changed;
+ * - `settling`, meaning the module asked this device for its channels moments ago and these replies
+ *   are the answer - see `markChannelsSettling`;
+ * - a name appearing where there was none, which is a channel being learned whenever it happens.
  */
 function logChannelNameChanges(
 	deviceName: string,
 	channelType: 'tx' | 'rx',
 	existing: DropdownChoice<number>[] | undefined,
 	incoming: DropdownChoice<number>[],
+	settling: boolean,
 	mediaLabel: 'video' | undefined = undefined,
 ): void {
 	const direction = `${mediaLabel ? `${mediaLabel} ` : ''}${channelType === 'tx' ? 'transmit' : 'receive'}`
@@ -589,14 +624,19 @@ function logChannelNameChanges(
 	}
 
 	if (existing.length !== incoming.length) {
-		logger.info(`${deviceName}: ${direction} channel count changed from ${existing.length} to ${incoming.length}`)
+		const countLine = `${deviceName}: ${direction} channel count changed from ${existing.length} to ${incoming.length}`
+		if (settling) logger.debug(countLine)
+		else logger.info(countLine)
 	}
 
 	for (const [index, choice] of incoming.entries()) {
 		const before = existing[index]
 		// only channels that were already there can have been renamed; the rest are new
 		if (before === undefined || before.label === choice.label) continue
-		logger.info(`${deviceName} ${direction} channel ${choice.id} renamed: '${before.label}' -> '${choice.label}'`)
+
+		const line = `${deviceName} ${direction} channel ${choice.id} renamed: '${before.label}' -> '${choice.label}'`
+		if (settling || before.label === '') logger.debug(line)
+		else logger.info(line)
 	}
 }
 

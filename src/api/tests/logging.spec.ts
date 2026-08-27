@@ -29,7 +29,7 @@ vi.mock('@companion-module/base', async (importOriginal) => {
 	}
 })
 
-const { danteDiscovery, destroyDevice, parseReply, updateChannelChoices, updateDeviceChoice } =
+const { danteDiscovery, destroyDevice, markChannelsSettling, parseReply, updateChannelChoices, updateDeviceChoice } =
 	await import('../index.js')
 const { DANTE_CONST } = await import('../const.js')
 type DevicesData = import('../index.js').DevicesData
@@ -317,5 +317,105 @@ describe('route changes', () => {
 		deliver(self, [{ number: 1, name: 'In 1', source: 'DeviceB', channel: 'Out 1', status: 9 }])
 
 		expect(at('info').filter((text) => text.includes('Route'))).toEqual([])
+	})
+})
+
+/**
+ * A device does not hand over its channel list in one piece: it answers in pages, and its transmit
+ * names arrive twice over - the plain names first, then the friendly names that supersede them
+ * where one is set. Every one of those replies looks like a change to the reply before it, so
+ * discovering a 32-channel device used to log a rename line per channel, at info, saying a name
+ * nobody had touched had changed from nothing into itself.
+ */
+describe('channel names while a device is being discovered', () => {
+	const IP = '10.0.0.5'
+	const rinfo = (reply: Buffer) => ({ address: IP, size: reply.length }) as never
+
+	/** A device whose channel count is known, so its channel list is the full width from the start. */
+	function counted(rxCount: number) {
+		return instance({ [IP]: { name: 'DeviceA', ports: { ARC: 4440 }, audioRx: { count: rxCount } } })
+	}
+
+	function deliverPage(self: DanteInstance, channels: Parameters<typeof rxReply>[0]) {
+		const reply = rxReply(channels)
+		parseReply(self, reply, rinfo(reply))
+	}
+
+	/** A device with transmit channels whose names have arrived, but no friendly names yet. */
+	function withTxNames() {
+		const self = instance({
+			[IP]: {
+				name: 'DeviceA',
+				ports: { ARC: 4440 },
+				audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02' } },
+			},
+		})
+		updateChannelChoices(self, IP, 'tx')
+		captured.length = 0
+		return self
+	}
+
+	it('reports the later pages of a first read as nothing at all', () => {
+		const self = counted(4)
+		deliverPage(self, [
+			{ number: 1, name: 'In 1', status: 0 },
+			{ number: 2, name: 'In 2', status: 0 },
+		])
+		deliverPage(self, [
+			{ number: 3, name: 'In 3', status: 0 },
+			{ number: 4, name: 'In 4', status: 0 },
+		])
+
+		expect(at('info')).toEqual([])
+	})
+
+	it('still records the fill at debug, so a verbose log can be read for it', () => {
+		const self = counted(4)
+		deliverPage(self, [{ number: 1, name: 'In 1', status: 0 }])
+		deliverPage(self, [{ number: 3, name: 'In 3', status: 0 }])
+
+		expect(at('debug').some((text) => text.includes("channel 3 renamed: '' -> 'In 3'"))).toBe(true)
+	})
+
+	it('does not call a transmit friendly name a rename while the device is answering', () => {
+		const self = withTxNames()
+		// the friendly names reply follows the channel names reply, and supersedes it where set
+		markChannelsSettling(self, IP)
+		self.devicesData[IP].audioTx![1].friendlyName = 'Left'
+		updateChannelChoices(self, IP, 'tx')
+
+		expect(at('info')).toEqual([])
+		expect(at('debug').some((text) => text.includes("'01' -> 'Left'"))).toBe(true)
+	})
+
+	it('reports the same change as a rename once the device has stopped answering', () => {
+		vi.useFakeTimers()
+		try {
+			const self = withTxNames()
+			markChannelsSettling(self, IP)
+			// long enough after the query that a name arriving now is somebody renaming a channel
+			vi.advanceTimersByTime(60_000)
+
+			self.devicesData[IP].audioTx![1].friendlyName = 'Left'
+			updateChannelChoices(self, IP, 'tx')
+
+			expect(at('info').some((text) => text.includes("'01' -> 'Left'"))).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('reports a channel count change once the device has stopped answering', () => {
+		const self = counted(2)
+		deliverPage(self, [
+			{ number: 1, name: 'In 1', status: 0 },
+			{ number: 2, name: 'In 2', status: 0 },
+		])
+		captured.length = 0
+
+		self.devicesData[IP].audioRx!.count = 3
+		updateChannelChoices(self, IP, 'rx')
+
+		expect(at('info').some((text) => text.includes('channel count changed from 2 to 3'))).toBe(true)
 	})
 })
