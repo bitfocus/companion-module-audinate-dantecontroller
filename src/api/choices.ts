@@ -75,30 +75,60 @@ export function orPlaceholder(choices: DropdownChoice<string>[], label: string):
 }
 
 /**
- * Devices that have receive channels, as dropdown choices.
+ * What a device has to offer in one direction, as a suffix for its dropdown label: ` (A)`, ` (V)`
+ * or ` (AV)`.
+ *
+ * These pickers are shared by both media types and cannot be narrowed by the Channel Type selected
+ * beside them, so a list of bare names says nothing about which entries can serve the type in hand -
+ * the user picks a device, no channel picker appears, and only then does a warning explain why.
+ * The tag moves that answer to where the choice is made.
+ *
+ * Per direction, not per device: an encoder with video transmit channels and audio *receive* ones
+ * is `(V)` in a source list, because video is all it can be a source of.
+ */
+function mediaTag(device: DeviceData | undefined, direction: 'rx' | 'tx'): string {
+	const hasAudio = direction === 'rx' ? hasAudioRxChannels(device) : hasAudioTxChannels(device)
+	const hasVideo = direction === 'rx' ? hasVideoRxChannels(device) : hasVideoTxChannels(device)
+
+	if (hasAudio && hasVideo) return ' (AV)'
+	if (hasVideo) return ' (V)'
+	if (hasAudio) return ' (A)'
+	return ''
+}
+
+/**
+ * Devices that have channels in one direction, as dropdown choices tagged with what they carry.
  *
  * Audio or video: the picker is shared by both (see {@link CHANNEL_MEDIA_TYPES}), and a device with
  * only one of the two must still appear so its channels are reachable once that type is selected.
+ *
+ * The id stays the bare device name - it is what actions store and what `deviceByIdentifier`
+ * resolves - so the tag is on the label alone and an action saved before it existed is unaffected.
  */
-export function rxDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
-	return orPlaceholder(
-		self.devicesChoices.filter((choice) => {
-			const device = deviceByIdentifier(self, String(choice.id))
-			return hasAudioRxChannels(device) || hasVideoRxChannels(device)
-		}),
-		'No devices with receive channels found',
-	)
+function mediaTaggedDeviceChoices(
+	self: DanteInstance,
+	direction: 'rx' | 'tx',
+	emptyLabel: string,
+): DropdownChoice<string>[] {
+	const choices: DropdownChoice<string>[] = []
+
+	for (const choice of self.devicesChoices) {
+		const tag = mediaTag(deviceByIdentifier(self, String(choice.id)), direction)
+		if (tag === '') continue
+		choices.push({ id: choice.id, label: `${choice.label}${tag}` })
+	}
+
+	return orPlaceholder(choices, emptyLabel)
 }
 
-/** Devices that have transmit channels, as dropdown choices. See {@link rxDeviceChoices}. */
+/** Devices that have receive channels, as dropdown choices. See {@link mediaTaggedDeviceChoices}. */
+export function rxDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
+	return mediaTaggedDeviceChoices(self, 'rx', 'No devices with receive channels found')
+}
+
+/** Devices that have transmit channels, as dropdown choices. See {@link mediaTaggedDeviceChoices}. */
 export function txDeviceChoices(self: DanteInstance): DropdownChoice<string>[] {
-	return orPlaceholder(
-		self.devicesChoices.filter((choice) => {
-			const device = deviceByIdentifier(self, String(choice.id))
-			return hasAudioTxChannels(device) || hasVideoTxChannels(device)
-		}),
-		'No devices with transmit channels found',
-	)
+	return mediaTaggedDeviceChoices(self, 'tx', 'No devices with transmit channels found')
 }
 
 /**

@@ -799,3 +799,87 @@ describe('option ids are unique within a definition', () => {
 		expect(ids).not.toContain('sr_AController')
 	})
 })
+
+/**
+ * The crosspoint pickers are shared by audio and video, so their lists mix devices that can serve
+ * the selected Channel Type with devices that cannot - by design, since a dropdown's choices cannot
+ * be narrowed by the value of the option beside it. Tagging the label says which is which at the
+ * moment of choosing, instead of leaving the user to pick one and read a warning afterwards.
+ */
+describe('device pickers say what each device carries', () => {
+	/** Every media shape a picker can meet: audio only, video only, both, and one of each direction. */
+	function withEveryShape() {
+		const self = mockInstance()
+		const io = (count: number) => ({ count, 1: { number: 1, name: 'Ch 1' } })
+		Object.assign(self.devicesData['10.0.0.6'], { videoRx: io(1), videoTx: io(1) })
+		self.devicesData['10.0.0.8'] = { name: 'Decoder', ports: { ARC: 4440 }, videoRx: io(1) }
+		// audio one way, video the other - the case a single per-device tag would get wrong
+		self.devicesData['10.0.0.9'] = { name: 'Mixed', ports: { ARC: 4440 }, audioTx: io(1), videoRx: io(1) }
+		self.devicesChoices = [
+			...self.devicesChoices,
+			{ id: '10.0.0.8', label: 'Decoder' },
+			{ id: '10.0.0.9', label: 'Mixed' },
+		]
+		return self
+	}
+
+	function picker(actionId: string, optionId: string) {
+		const self = withEveryShape()
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		const options = (definitions as Record<string, DefinitionLike>)[actionId]?.options ?? []
+		const found = options.find((option) => option.id === optionId)
+		expect(found, `${actionId} has no ${optionId}`).toBeDefined()
+		return found?.choices ?? []
+	}
+
+	/** The label a device's own entry carries in that picker. */
+	function labelFor(choices: { id: string | number; label: string }[], deviceIp: string) {
+		return choices.find((choice) => choice.id === deviceIp)?.label
+	}
+
+	it('tags an audio-only device, a video-only device, and one carrying both', () => {
+		const choices = picker('makeCrosspointDropDown', 'destinationDevice')
+
+		expect(labelFor(choices, '10.0.0.5')).toBe('DeviceA (A)')
+		expect(labelFor(choices, '10.0.0.8')).toBe('Decoder (V)')
+		expect(labelFor(choices, '10.0.0.6')).toBe('DeviceB (AV)')
+	})
+
+	it('tags what the device offers in that direction, not what it has in total', () => {
+		// Mixed transmits audio and receives video, so it is a video destination and an audio source
+		expect(labelFor(picker('makeCrosspointDropDown', 'destinationDevice'), '10.0.0.9')).toBe('Mixed (V)')
+		expect(labelFor(picker('makeCrosspointDropDown', 'sourceDevice'), '10.0.0.9')).toBe('Mixed (A)')
+	})
+
+	it('leaves the id alone, so an action saved before the tag existed still resolves', () => {
+		const choices = picker('makeCrosspointDropDown', 'destinationDevice')
+
+		expect(choices.map((choice) => choice.id)).toContain('10.0.0.5')
+	})
+
+	it('does not tag a list that only ever holds audio devices, where it would say nothing', () => {
+		for (const [actionId, optionId] of [
+			['setOutputLevel', 'device'],
+			['setLatency', 'destinationDevice'],
+			['setSampleRate', 'device'],
+		]) {
+			const labels = picker(actionId, optionId).map((choice) => choice.label)
+			expect(
+				labels.every((label) => !label.includes('(')),
+				`${actionId} tags its labels`,
+			).toBe(true)
+		}
+	})
+
+	it('does not tag the lists that hold every device, media type or not', () => {
+		// renaming, refreshing and reading a property work the same on a device with no channels at all
+		for (const actionId of ['setDeviceName', 'resetDeviceName', 'refresh']) {
+			const labels = picker(actionId, 'device').map((choice) => choice.label)
+			expect(
+				labels.every((label) => !label.includes('(')),
+				`${actionId} tags its labels`,
+			).toBe(true)
+		}
+	})
+})
