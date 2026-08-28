@@ -6,7 +6,13 @@ import multidns from 'multicast-dns'
 import dgram from 'node:dgram'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
-import { listNetworkInterfaces, resolveConfiguredInterface, encodeInterfaceId, effectiveTimeout } from '../config.js'
+import {
+	listNetworkInterfaces,
+	resolveConfiguredInterface,
+	encodeInterfaceId,
+	effectiveTimeout,
+	type NetworkInterfaceInfo,
+} from '../config.js'
 import type DanteInstance from '../main.js'
 import type { ConnectionName, ServiceName, DanteSockets, MdnsResponsePacket } from './types.js'
 import {
@@ -97,6 +103,24 @@ export class DanteConnection {
 	counter: Buffer = Buffer.alloc(2)
 	/** Hardware address of the chosen card, or all-zero when it is resolved per device. */
 	mac: Buffer = Buffer.alloc(6)
+	/**
+	 * The explicitly chosen network card, or undefined when the card is chosen automatically.
+	 *
+	 * The sockets that receive multicast are bound to the wildcard address, so the OS hands them
+	 * traffic that arrived on any card - `addMembership` scopes the group join, not the delivery.
+	 * Discovery uses this to drop what came in on a card the user did not pick.
+	 */
+	boundInterface?: NetworkInterfaceInfo
+	/** Off-card sources already reported, so that news is logged once rather than once per packet. */
+	readonly ignoredSources = new Set<string>()
+	/**
+	 * Receive-only listener for the SETTINGS multicast group, present only when a card is chosen.
+	 *
+	 * `sockets.SETTINGS` then binds the card's own address so its unicast replies cannot be taken by
+	 * another instance of this module on the same host, which leaves it unable to see the group - so
+	 * the group gets a wildcard-bound socket of its own. See the binds in `initConnection`.
+	 */
+	settingsMulticast?: dgram.Socket
 	interval: NodeJS.Timeout | null = null
 
 	constructor(private readonly self: DanteInstance) {}
@@ -121,6 +145,20 @@ export class DanteConnection {
 			}
 		}
 		this.sockets = {}
+
+		if (this.settingsMulticast) {
+			// same reasoning as the sockets above - drop the listeners before closing
+			this.settingsMulticast.removeAllListeners()
+			try {
+				this.settingsMulticast.close()
+			} catch {
+				// already closed - nothing to do on teardown
+			}
+			this.settingsMulticast = undefined
+		}
+
+		this.boundInterface = undefined
+		this.ignoredSources.clear()
 
 		if (this.mdns) {
 			this.mdns.removeAllListeners()
@@ -247,10 +285,30 @@ export function initConnection(self: DanteInstance): void {
 	const boundAddress = resolved?.nic.address
 	// Which interfaces to join multicast groups on: the chosen one, or all of them when automatic.
 	const multicastInterfaces = boundAddress !== undefined ? [boundAddress] : available.map((nic) => nic.address)
+	// Joining a group on one card does not stop the OS delivering that group's traffic from another
+	// card to a wildcard-bound socket, so discovery filters by subnet instead - see `danteDiscovery`.
+	// `resolved` is undefined unless a card was explicitly chosen, which is exactly when to filter.
+	self.connection.boundInterface = resolved?.nic
 	if (resolved?.matchedBy === 'mac') {
 		logger.info(
 			`Configured interface has a new address: ${resolved.nic.name} is now ${resolved.nic.address}. ` +
 				`Matched it by hardware address instead.`,
+		)
+	}
+
+	// Which card a connection ended up on decides which devices it can see, and until now the only
+	// card the log ever named was one it could not find - so a connection quietly discovering a
+	// neighbouring network looked identical to one working correctly. Say it either way.
+	if (resolved) {
+		logger.info(
+			`Bound to network card ${resolved.nic.name} (${resolved.nic.address}/${resolved.nic.netmask}) - ` +
+				`only devices on that subnet will be discovered`,
+		)
+	} else if (!self.config.mac) {
+		const availableLabels = available.map((nic) => `${nic.name} (${nic.address})`).join(', ')
+		logger.info(
+			`Network card automatic - discovering on all ${available.length} card(s): ${availableLabels || 'none'}. ` +
+				`Set 'Network card' in the connection config to restrict this to one subnet.`,
 		)
 	}
 
@@ -328,6 +386,16 @@ export function initConnection(self: DanteInstance): void {
 		self.mac = Buffer.from('000000000000', 'hex')
 	}
 
+	// The settings path is two sockets when a card is chosen (see the binds below) and one otherwise;
+	// either way it is only usable once both halves are up. Locals rather than connection state: the
+	// handlers that read and write them are all created in this call and die with it.
+	let settingsUnicastUp = false
+	let settingsMulticastUp = false
+	const updateSettingsStatus = () => {
+		self.activeConnections.SETTINGS = settingsUnicastUp && settingsMulticastUp
+		checkConnections(self)
+	}
+
 	// create Dante settings socket
 	self.sockets.SETTINGS = dgram.createSocket({ type: 'udp4', reuseAddr: true, ...REUSE_PORT_OPTION })
 	const settingSocket = self.sockets.SETTINGS
@@ -335,6 +403,7 @@ export function initConnection(self: DanteInstance): void {
 
 	settingSocket.on('error', (error) => {
 		logger.error(`Settings socket : ${error.message}`)
+		settingsUnicastUp = false
 		self.activeConnections.SETTINGS = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -344,6 +413,7 @@ export function initConnection(self: DanteInstance): void {
 
 	settingSocket.on('close', () => {
 		logger.warn('Settings socket closed')
+		settingsUnicastUp = false
 		self.activeConnections.SETTINGS = false
 		if (self.CONNECTED) {
 			self.updateStatus(InstanceStatus.Disconnected)
@@ -352,18 +422,85 @@ export function initConnection(self: DanteInstance): void {
 	})
 
 	settingSocket.on('listening', () => {
-		const joined = joinMulticastGroup(settingSocket, DANTE_CONST.MULTICAST_IP.INFO, 'SETTINGS', multicastInterfaces)
-		// without the group membership the socket is bound but deaf, so don't report it as active
-		self.activeConnections.SETTINGS = joined
-		checkConnections(self)
+		settingsUnicastUp = true
+		if (boundAddress === undefined) {
+			// One socket doing both jobs, so it carries the group membership too. Without it the
+			// socket is bound but deaf to announcements, so don't report the path as usable.
+			settingsMulticastUp = joinMulticastGroup(
+				settingSocket,
+				DANTE_CONST.MULTICAST_IP.INFO,
+				'SETTINGS',
+				multicastInterfaces,
+			)
+		}
+		updateSettingsStatus()
 	})
 
-	// Always bind to the wildcard address - a socket bound to a specific unicast interface
-	// address can silently fail to receive multicast-addressed packets on some platforms
-	// (e.g. macOS/BSD), since the packet's destination (the multicast group IP) won't match
-	// the bound address. `addMembership` above already scopes group membership to the chosen
-	// interface, so the wildcard bind doesn't widen which interface's traffic we receive.
-	settingSocket.bind(DANTE_CONST.PORTS.INFO)
+	// Settings is the one service that both listens on a fixed port and sends unicast queries whose
+	// replies come back to that same port. Those two jobs want incompatible binds, and with more than
+	// one instance of this module on a host they conflict outright:
+	//
+	// - Multicast announcements only arrive on a wildcard-bound socket. A socket bound to a specific
+	//   unicast address never sees them, since the packet's destination is the group address, not the
+	//   bound one. Multicast is delivered to every socket bound to the port, so instances coexist.
+	// - Unicast replies are the opposite. Two instances both bound to `0.0.0.0:8702` are equally
+	//   specific, so the OS picks exactly one of them per datagram (a SO_REUSEPORT group load-balances
+	//   unicast; multicast is exempt). One instance's settings reply is then delivered to the other,
+	//   which drops it as an unregistered device - and the instance that asked never sees it. The
+	//   choice is hashed per source, so it fails consistently for a given device rather than at random:
+	//   sample rate, encoding, pullup, output level and the model variables silently stay empty.
+	//
+	// So when a card is chosen, split the jobs. This socket binds the card's own address, which
+	// outscores any wildcard bind in the OS's socket lookup and so deterministically receives the
+	// replies to its own queries; the listener below takes the multicast half. With the card automatic
+	// there is only ever one instance's worth of scope to begin with, so one wildcard socket does both.
+	if (boundAddress === undefined) {
+		settingSocket.bind(DANTE_CONST.PORTS.INFO)
+	} else {
+		settingSocket.bind(DANTE_CONST.PORTS.INFO, boundAddress)
+
+		// The multicast half of the settings path: receive-only, and never sent from - `sendCommand`
+		// uses `sockets.SETTINGS` above. Kept out of `DanteSockets` because `ServiceName` also keys
+		// the per-device port map, where a receive-only listener has no meaning.
+		const settingsMulticastSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true, ...REUSE_PORT_OPTION })
+		self.connection.settingsMulticast = settingsMulticastSocket
+		settingsMulticastSocket.on('message', (reply, rinfo) => parseSettingsReply(self, reply, rinfo))
+
+		settingsMulticastSocket.on('error', (error) => {
+			logger.error(`Settings multicast socket : ${error.message}`)
+			settingsMulticastUp = false
+			self.activeConnections.SETTINGS = false
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected)
+				self.CONNECTED = false
+			}
+		})
+
+		settingsMulticastSocket.on('close', () => {
+			logger.warn('Settings multicast socket closed')
+			settingsMulticastUp = false
+			self.activeConnections.SETTINGS = false
+			if (self.CONNECTED) {
+				self.updateStatus(InstanceStatus.Disconnected)
+				self.CONNECTED = false
+			}
+		})
+
+		settingsMulticastSocket.on('listening', () => {
+			settingsMulticastUp = joinMulticastGroup(
+				settingsMulticastSocket,
+				DANTE_CONST.MULTICAST_IP.INFO,
+				'SETTINGS',
+				multicastInterfaces,
+			)
+			updateSettingsStatus()
+		})
+
+		// Wildcard, for the reason given above - a specific bind would never see the group's traffic.
+		// It therefore also receives announcements that arrived on cards the operator did not choose;
+		// those are dropped by `parseSettingsReply`, which ignores devices discovery never registered.
+		settingsMulticastSocket.bind(DANTE_CONST.PORTS.INFO)
+	}
 
 	// create Dante CMC socket
 	self.sockets.CMC = dgram.createSocket({ type: 'udp4', reuseAddr: true, ...REUSE_PORT_OPTION })
@@ -443,7 +580,8 @@ export function initConnection(self: DanteInstance): void {
 		// `multicast-dns` binds its socket to `bind ?? interface` - passing only `interface` binds
 		// to that specific unicast address, which (like our own sockets above) can silently drop
 		// incoming multicast-addressed replies on macOS/BSD. Bind the socket to the wildcard address
-		// explicitly, while still scoping multicast group membership to the chosen interface.
+		// explicitly, while still scoping outgoing queries and group membership to the chosen card.
+		// Incoming is therefore not scoped - `danteDiscovery` filters by subnet instead.
 		self.mdns = multidns({ interface: boundAddress, bind: '0.0.0.0' })
 	} else {
 		self.mdns = multidns()

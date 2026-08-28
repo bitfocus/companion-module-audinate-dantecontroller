@@ -10,8 +10,39 @@ import type { MdnsResponsePacket, ServiceName } from './types.js'
 import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
+import { addressOnInterface } from '../config.js'
 
 const logger = createModuleLogger('api:discovery')
+
+/**
+ * Whether a device announcing itself from `sourceIp` should be discovered at all.
+ *
+ * Choosing a network card scopes what the module *sends*, but not what it receives: the mDNS socket
+ * is bound to the wildcard address (see the SETTINGS bind in `connection.ts` for why), and joining a
+ * multicast group on one card does not stop the OS delivering that group's traffic from another one.
+ * On a multi-homed host - a VM with two vNICs, or two cards on one flat segment - that means devices
+ * on the card the operator did not pick otherwise get registered and controlled.
+ *
+ * Registration happens only here, so this is the one place the choice has to be enforced. With the
+ * card chosen automatically there is nothing to enforce and every device is accepted.
+ */
+function onChosenCard(self: DanteInstance, sourceIp: string): boolean {
+	const nic = self.boundInterface
+	if (!nic) return true
+	if (addressOnInterface(nic, sourceIp)) return true
+
+	// Genuine news rather than protocol plumbing: there are Dante devices reachable from this
+	// machine that the module is deliberately not showing. Said once per source, not per packet.
+	if (!self.ignoredSources.has(sourceIp)) {
+		self.ignoredSources.add(sourceIp)
+		logger.info(
+			`Ignoring Dante device at ${sourceIp} : it is not on the configured network card ` +
+				`${nic.name} (${nic.address}/${nic.netmask}). Change 'Network card' in the connection ` +
+				`config to control devices on that network instead.`,
+		)
+	}
+	return false
+}
 
 /**
  * Handles an mDNS response: follows up PTR records with SRV queries, and for SRV records
@@ -19,6 +50,8 @@ const logger = createModuleLogger('api:discovery')
  * queries (channel count/settings for ARC, settings port for CMC) when a port is newly learned.
  */
 export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket, rinfo: dgram.RemoteInfo): void {
+	if (!onChosenCard(self, rinfo.address)) return
+
 	const answers = [...response.answers, ...response.additionals]
 	answers.forEach((answer) => {
 		const name = answer.name

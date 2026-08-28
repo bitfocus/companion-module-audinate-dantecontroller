@@ -117,4 +117,15 @@ describe('DanteConnection', () => {
 		expect(c.mdns).toBeUndefined()
 		expect(c.interval).toBeNull()
 	})
+
+	it('forgets the chosen card, so a re-init cannot filter discovery against a stale subnet', () => {
+		const c = connection()
+		c.boundInterface = { name: 'enX0', address: '172.16.0.17', mac: '3a:40:c8:f1:11:b2', netmask: '255.255.255.0' }
+		// and the once-per-source log has to speak again for a connection that starts over
+		c.ignoredSources.add('172.16.3.20')
+
+		c.close()
+		expect(c.boundInterface).toBeUndefined()
+		expect(c.ignoredSources.size).toBe(0)
+	})
 })

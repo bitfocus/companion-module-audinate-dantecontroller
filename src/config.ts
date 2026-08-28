@@ -251,6 +251,15 @@ function toUint32(address: string): number | undefined {
 	return value >>> 0
 }
 
+/** Whether `address` falls inside the subnet `nic` is attached to. */
+export function addressOnInterface(nic: NetworkInterfaceInfo, address: string): boolean {
+	const target = toUint32(address)
+	const mask = toUint32(nic.netmask)
+	const own = toUint32(nic.address)
+	if (target === undefined || mask === undefined || own === undefined || mask === 0) return false
+	return (own & mask) >>> 0 === (target & mask) >>> 0
+}
+
 /**
  * The network interface whose subnet contains `address`.
  *
@@ -262,13 +271,5 @@ export function findInterfaceForAddress(
 	available: NetworkInterfaceInfo[],
 	address: string,
 ): NetworkInterfaceInfo | undefined {
-	const target = toUint32(address)
-	if (target === undefined) return undefined
-
-	return available.find((nic) => {
-		const mask = toUint32(nic.netmask)
-		const own = toUint32(nic.address)
-		if (mask === undefined || own === undefined || mask === 0) return false
-		return (own & mask) >>> 0 === (target & mask) >>> 0
-	})
+	return available.find((nic) => addressOnInterface(nic, address))
 }

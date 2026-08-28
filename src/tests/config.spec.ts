@@ -3,6 +3,7 @@ import {
 	encodeInterfaceId,
 	resolveConfiguredInterface,
 	findInterfaceForAddress,
+	addressOnInterface,
 	effectiveTimeout,
 	GetConfigFields,
 	TIMEOUT_MINIMUM,
@@ -235,5 +236,33 @@ describe('the timeout warning config field', () => {
 		for (const id of ids) {
 			expect(fields.find((field) => field.id === id)?.disableAutoExpression, id).toBe(true)
 		}
+	})
+})
+
+describe('addressOnInterface', () => {
+	it('matches an address inside the card subnet', () => {
+		expect(addressOnInterface(lan, '10.1.1.211')).toBe(true)
+		expect(addressOnInterface(dante, '169.254.208.57')).toBe(true)
+	})
+
+	it('rejects an address on a different subnet of the same private range', () => {
+		// The multi-homed case this exists for: two vNICs on 172.16.x.x, only one of them chosen.
+		const chosen: NetworkInterfaceInfo = {
+			name: 'ens160',
+			address: '172.16.0.17',
+			mac: '00:0c:29:1a:2b:3c',
+			netmask: '255.255.255.0',
+		}
+		expect(addressOnInterface(chosen, '172.16.0.99')).toBe(true)
+		expect(addressOnInterface(chosen, '172.16.3.20')).toBe(false)
+
+		// The same two addresses are one subnet at /16 - then there is nothing to separate.
+		expect(addressOnInterface({ ...chosen, netmask: '255.255.0.0' }, '172.16.3.20')).toBe(true)
+	})
+
+	it('rejects an unparseable address or netmask rather than matching everything', () => {
+		expect(addressOnInterface(lan, 'not-an-address')).toBe(false)
+		expect(addressOnInterface({ ...lan, netmask: '' }, '10.1.1.211')).toBe(false)
+		expect(addressOnInterface({ ...lan, netmask: '0.0.0.0' }, '10.1.1.211')).toBe(false)
 	})
 })

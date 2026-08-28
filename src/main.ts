@@ -5,7 +5,7 @@ import {
 	type SomeCompanionConfigField,
 } from '@companion-module/base'
 import type multidns from 'multicast-dns'
-import { GetConfigFields, type ModuleConfig } from './config.js'
+import { GetConfigFields, type ModuleConfig, type NetworkInterfaceInfo } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
 import {
 	DanteConnection,
@@ -97,6 +97,12 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	}
 	set CONNECTED(value: boolean) {
 		this.connection.connected = value
+	}
+	get boundInterface(): NetworkInterfaceInfo | undefined {
+		return this.connection.boundInterface
+	}
+	get ignoredSources(): Set<string> {
+		return this.connection.ignoredSources
 	}
 	get INTERVAL(): NodeJS.Timeout | null {
 		return this.connection.interval
