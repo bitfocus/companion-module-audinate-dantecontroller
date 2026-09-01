@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { UpdateActions } from '../actions.js'
+import { UpdateFeedbacks } from '../feedbacks.js'
 import type { DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
 
@@ -66,8 +67,8 @@ function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
 	return byDevice
 }
 
-function definitions(data: DevicesData = devicesData()) {
-	const self = {
+function instance(data: DevicesData = devicesData()) {
+	return {
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
 		// derived from the devices' channels, as updateChannelChoices does in production - a fixture
@@ -75,10 +76,22 @@ function definitions(data: DevicesData = devicesData()) {
 		rxChannelsChoices: channelChoicesFor(data, 'rx'),
 		txChannelsChoices: channelChoicesFor(data, 'tx'),
 		setActionDefinitions: vi.fn(),
+		setFeedbackDefinitions: vi.fn(),
+		checkFeedbacksById: vi.fn(),
 		log: vi.fn(),
 	} as unknown as DanteInstance
+}
+
+function definitions(data: DevicesData = devicesData()) {
+	const self = instance(data)
 	UpdateActions(self)
 	return (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+}
+
+function feedbackDefinitions(data: DevicesData = devicesData()) {
+	const self = instance(data)
+	UpdateFeedbacks(self)
+	return (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 }
 
 /** Invokes an action's learn callback with the given options. */
@@ -86,6 +99,13 @@ async function learn(actionId: string, options: Record<string, unknown>, data?: 
 	const definition = definitions(data)[actionId]
 	expect(definition?.learn, `${actionId} has no learn callback`).toBeDefined()
 	return definition.learn({ id: 'a', controlId: 'b', actionId, options }, {})
+}
+
+/** Invokes a feedback's learn callback with the given options. */
+async function learnFeedback(feedbackId: string, options: Record<string, unknown>, data?: DevicesData) {
+	const definition = feedbackDefinitions(data)[feedbackId]
+	expect(definition?.learn, `${feedbackId} has no learn callback`).toBeDefined()
+	return definition.learn({ id: 'a', controlId: 'b', feedbackId, options }, {})
 }
 
 describe('makeCrosspoint learn', () => {
@@ -227,6 +247,106 @@ describe('settings learn', () => {
 	})
 })
 
+describe('routing_bg feedback learn', () => {
+	it('learns the source device and its per-device channel key', async () => {
+		expect(await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })).toEqual({
+			sourceDevice: 'DeviceA',
+			sourceChannel_DeviceA: 3,
+		})
+	})
+
+	it('returns only the source fields, leaving the destination selection untouched', async () => {
+		const learnt = await learnFeedback('routing_bg', {
+			destinationDevice: B,
+			[`destinationChannel_${B}`]: 2,
+			sourceDevice: 'stale',
+		})
+		expect(Object.keys(learnt).sort()).toEqual(['sourceChannel_DeviceA', 'sourceDevice'].sort())
+	})
+
+	it('learns a value the source channel dropdown can select', async () => {
+		const learnt = await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })
+		const option = (feedbackDefinitions().routing_bg.options ?? []).find(
+			(candidate: { id: string }) => candidate.id === 'sourceChannel_DeviceA',
+		)
+		expect(option?.choices.map((choice: { id: unknown }) => choice.id)).toContain(learnt.sourceChannel_DeviceA)
+	})
+
+	it('declines when the destination channel is unrouted', async () => {
+		expect(await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 1 })).toBeUndefined()
+	})
+
+	it('declines when the destination channel option is missing entirely', async () => {
+		expect(await learnFeedback('routing_bg', { destinationDevice: B })).toBeUndefined()
+	})
+
+	it('declines when the source device is not on the network', async () => {
+		const data = devicesData()
+		;(data[B].audioRx as Record<number, { sourceDevice: string }>)[2].sourceDevice = 'AbsentDevice'
+		expect(
+			await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
+		).toBeUndefined()
+	})
+
+	it('declines when the source names a channel the module has not seen', async () => {
+		const data = devicesData()
+		;(data[B].audioRx as Record<number, { sourceChannel: string }>)[2].sourceChannel = 'Unknown'
+		expect(
+			await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
+		).toBeUndefined()
+	})
+})
+
+describe('routing_bg_manual feedback learn', () => {
+	it('learns the source from what the destination is subscribed to', async () => {
+		expect(await learnFeedback('routing_bg_manual', { destinationDeviceId: B, destinationChannelId: '2' })).toEqual({
+			sourceChannelName: 'Talkback',
+			sourceDeviceName: 'DeviceA',
+		})
+	})
+
+	it('accepts a device name as well as an IP, and a channel name as well as a number', async () => {
+		expect(
+			await learnFeedback('routing_bg_manual', { destinationDeviceId: 'DeviceB', destinationChannelId: 'In 2' }),
+		).toEqual({ sourceChannelName: 'Talkback', sourceDeviceName: 'DeviceA' })
+	})
+
+	it('returns only the source fields, leaving the destination fields untouched', async () => {
+		const learnt = await learnFeedback('routing_bg_manual', {
+			destinationDeviceId: B,
+			destinationChannelId: '2',
+			sourceChannelName: 'old',
+			sourceDeviceName: 'old',
+		})
+		expect(Object.keys(learnt).sort()).toEqual(['sourceChannelName', 'sourceDeviceName'])
+	})
+
+	it('declines when the destination channel is not routed', async () => {
+		expect(
+			await learnFeedback('routing_bg_manual', { destinationDeviceId: B, destinationChannelId: '1' }),
+		).toBeUndefined()
+	})
+
+	it('declines for an unknown device', async () => {
+		expect(
+			await learnFeedback('routing_bg_manual', { destinationDeviceId: 'Nope', destinationChannelId: '1' }),
+		).toBeUndefined()
+	})
+
+	it('resolves a self-route to the device its own name', async () => {
+		const data = devicesData()
+		;(data[A].audioRx as Record<number, unknown>)[1] = {
+			number: 1,
+			name: 'In 1',
+			sourceDevice: '.',
+			sourceChannel: '01',
+		}
+		expect(
+			await learnFeedback('routing_bg_manual', { destinationDeviceId: A, destinationChannelId: '1' }, data),
+		).toEqual({ sourceChannelName: '01', sourceDeviceName: 'DeviceA' })
+	})
+})
+
 describe('learnt values are selectable', () => {
 	/**
 	 * A learnt value has to equal one of the ids its own dropdown offers, or Companion has nothing
@@ -273,6 +393,20 @@ describe('the 2.0 contract', () => {
 
 	it.each(cases)('%s returns only the fields it learnt', async (actionId, options, expected) => {
 		const learnt = await learn(actionId, options)
+		expect(Object.keys(learnt).sort()).toEqual([...expected].sort())
+	})
+
+	const feedbackCases: [string, Record<string, unknown>, string[]][] = [
+		['routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, ['sourceDevice', 'sourceChannel_DeviceA']],
+		[
+			'routing_bg_manual',
+			{ destinationDeviceId: B, destinationChannelId: '2' },
+			['sourceChannelName', 'sourceDeviceName'],
+		],
+	]
+
+	it.each(feedbackCases)('%s returns only the fields it learnt', async (feedbackId, options, expected) => {
+		const learnt = await learnFeedback(feedbackId, options)
 		expect(Object.keys(learnt).sort()).toEqual([...expected].sort())
 	})
 })

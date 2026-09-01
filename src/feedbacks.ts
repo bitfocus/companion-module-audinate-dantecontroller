@@ -201,6 +201,53 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			...perDeviceMissingChannelWarnings(self, 'sourceDevice', 'tx'),
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
+		// Learn the source device and channel from whatever the chosen destination is currently
+		// subscribed to - the same learn the matching action offers. Only the source fields are
+		// returned: per the 2.0 contract, returning the destination fields as well would overwrite
+		// any expression the user has entered in them.
+		learn: (feedback) => {
+			const opt = feedback.options
+			const isVideo = opt.channelType === 'video'
+			const destinationChannelNumber = deviceOptionValue<number | undefined>(
+				self,
+				opt,
+				channelOptionPrefix('destinationChannel', opt.channelType),
+				opt.destinationDevice,
+				undefined,
+			)
+			// No value means the field was never rendered - the device has no channels of this type -
+			// so there is no destination to read a subscription from.
+			if (destinationChannelNumber === undefined) return undefined
+
+			const source = isVideo
+				? getVideoRxChannelSource(self, opt.destinationDevice, destinationChannelNumber)
+				: getAudioRxChannelSource(self, opt.destinationDevice, destinationChannelNumber)
+			// Unrouted, or a device that has not reported yet: leave the user's settings as they are.
+			if (!source) return undefined
+
+			// The device the route names must be one the picker offers, which is keyed by name.
+			const sourceIp = findDeviceIpByName(self, source.deviceName)
+			if (!sourceIp) return undefined
+
+			// The dropdown holds a channel number, so a subscription naming a channel this module has
+			// not seen on the source cannot be expressed as a selection.
+			const sourceChannelNumber = isVideo
+				? findVideoTxChannelByName(self, sourceIp, source.channelName)?.number
+				: findAudioTxChannelByName(self, sourceIp, source.channelName)?.number
+			if (sourceChannelNumber === undefined) return undefined
+
+			// Built by assignment, not as one literal: TypeScript widens a computed key in an object
+			// literal to `string`, which no longer matches the per-device option key type. The prefix
+			// is branched explicitly (rather than built via channelOptionPrefix) so the key stays a
+			// literal template TypeScript can check against the option type's per-media-type Records.
+			const learnt: Partial<RoutingBgOptions> = { sourceDevice: source.deviceName }
+			if (isVideo) {
+				learnt[`sourceChannelVideo_${source.deviceName}`] = sourceChannelNumber
+			} else {
+				learnt[`sourceChannel_${source.deviceName}`] = sourceChannelNumber
+			}
+			return learnt
+		},
 		callback: (feedback) => {
 			const opt = feedback.options
 			const isVideo = opt.channelType === 'video'
@@ -310,6 +357,30 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			},
 		],
 		unsubscribe: (feedback) => untrackFeedback(self, feedback.id),
+		// Learn the source from whatever the chosen destination is currently subscribed to - the same
+		// learn the matching action offers. Only the two source fields are returned: per the 2.0
+		// contract, returning the destination fields as well would overwrite any expression the user
+		// has entered in them.
+		learn: (feedback) => {
+			const opt = feedback.options
+			const isVideo = opt.channelType === 'video'
+			// The destination channel field takes either a name or a number, so it is resolved by name
+			// first and read as a number only when no channel carries that name.
+			const channel = isVideo
+				? findVideoRxChannelByName(self, opt.destinationDeviceId, opt.destinationChannelId)
+				: findAudioRxChannelByName(self, opt.destinationDeviceId, opt.destinationChannelId)
+			const channelNumber = channel?.number ?? Number(opt.destinationChannelId)
+			if (!Number.isFinite(channelNumber)) return undefined
+
+			// Both device fields take a name or an IP, which these resolve either way.
+			const source = isVideo
+				? getVideoRxChannelSource(self, opt.destinationDeviceId, channelNumber)
+				: getAudioRxChannelSource(self, opt.destinationDeviceId, channelNumber)
+			// Unrouted, or a device that has not reported yet: leave the user's settings as they are.
+			if (!source) return undefined
+
+			return { sourceChannelName: source.channelName, sourceDeviceName: source.deviceName }
+		},
 		callback: async (feedback) => {
 			const opt = feedback.options
 			const isVideo = opt.channelType === 'video'

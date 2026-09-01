@@ -199,6 +199,69 @@ describe('Crosspoint - Connected feedback, video', () => {
 	})
 })
 
+describe('Crosspoint - Connected feedback learn, video', () => {
+	function learn(self: DanteInstance, feedbackId: string, options: Record<string, unknown>) {
+		return feedbackDefinition(self, feedbackId).learn({ id: 'rb-video', options }, {})
+	}
+
+	it('learns the video source device and its per-device video channel key', () => {
+		expect(
+			learn(instance(), 'routing_bg', {
+				channelType: 'video',
+				destinationDevice: 'DeviceA',
+				destinationChannelVideo_DeviceA: 1,
+			}),
+		).toEqual({ sourceDevice: 'DeviceB', sourceChannelVideo_DeviceB: 1 })
+	})
+
+	it('reads the audio route instead when channelType is audio', () => {
+		// The same destination device carries both, so the channelType decides which one is learnt.
+		expect(
+			learn(instance(), 'routing_bg', {
+				channelType: 'audio',
+				destinationDevice: 'DeviceA',
+				destinationChannel_DeviceA: 1,
+			}),
+		).toEqual({ sourceDevice: 'DeviceB', sourceChannel_DeviceB: 1 })
+	})
+
+	it('declines for a video channel that is not routed', () => {
+		expect(
+			learn(instance(), 'routing_bg', {
+				channelType: 'video',
+				destinationDevice: 'DeviceA',
+				destinationChannelVideo_DeviceA: 2,
+			}),
+		).toBeUndefined()
+	})
+
+	it('declines when the destination has no video channels at all', () => {
+		// DeviceB has no video rx channels, so destinationChannelVideo_DeviceB was never rendered
+		expect(learn(instance(), 'routing_bg', { channelType: 'video', destinationDevice: 'DeviceB' })).toBeUndefined()
+	})
+
+	it('learns the video source into the custom feedback text fields', () => {
+		expect(
+			learn(instance(), 'routing_bg_manual', {
+				channelType: 'video',
+				destinationDeviceId: 'DeviceA',
+				destinationChannelId: 'Video In 1',
+			}),
+		).toEqual({ sourceChannelName: 'Cam 1', sourceDeviceName: 'DeviceB' })
+	})
+
+	it('does not fall back to the audio route when the custom feedback asks for video', () => {
+		// Video ch2 is unrouted while audio ch1 is routed - a video learn must not read across
+		expect(
+			learn(instance(), 'routing_bg_manual', {
+				channelType: 'video',
+				destinationDeviceId: 'DeviceA',
+				destinationChannelId: '2',
+			}),
+		).toBeUndefined()
+	})
+})
+
 describe('Crosspoint - Make/Clear actions, video', () => {
 	function send(self: DanteInstance) {
 		return (self.sockets.ARC as unknown as { send: ReturnType<typeof vi.fn> }).send
