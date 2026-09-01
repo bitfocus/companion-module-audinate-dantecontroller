@@ -5,6 +5,9 @@ import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('variables')
 
+export const sanitiseVariableId = (id: string, substitute: '' | '.' | '-' | '_' = '_'): string =>
+	id.replaceAll(/[^a-zA-Z0-9-_.]/gm, substitute)
+
 /** Builds and registers the set of variable definitions for all known devices. */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
 	if (!self.config.variables) {
@@ -21,32 +24,35 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 
 	for (const device of Object.values(self.devicesData)) {
 		if (!device.name) continue
-		variables[`${device.name}_ip`] = { name: 'Ip address of ' + device.name }
-		variables[`${device.name}_locked`] = { name: 'Device lock state of ' + device.name }
-		variables[`${device.name}_tx`] = { name: 'Number of audio outputs for ' + device.name }
-		variables[`${device.name}_tx_names`] = { name: 'Audio output names for ' + device.name }
-		variables[`${device.name}_rx`] = { name: 'Number of audio inputs for ' + device.name }
-		variables[`${device.name}_rx_names`] = { name: 'Audio input names for ' + device.name }
-		variables[`${device.name}_tx_video`] = { name: 'Number of video outputs for ' + device.name }
-		variables[`${device.name}_tx_names_video`] = { name: 'Video output names for ' + device.name }
-		variables[`${device.name}_rx_video`] = { name: 'Number of video inputs for ' + device.name }
-		variables[`${device.name}_rx_names_video`] = { name: 'Video input names for ' + device.name }
-		variables[`${device.name}_sr`] = { name: 'Sample rate of ' + device.name }
-		variables[`${device.name}_pullup`] = { name: 'Sample rate pullup of ' + device.name }
-		variables[`${device.name}_latency`] = { name: 'Latency of ' + device.name + ' (in ms)' }
-		variables[`${device.name}_encoding`] = { name: 'Encoding of ' + device.name }
-		variables[`${device.name}_output_levels`] = { name: 'Output levels of ' + device.name }
-		variables[`${device.name}_model_name`] = { name: 'Model name of ' + device.name }
-		variables[`${device.name}_product_version`] = { name: 'Product version of ' + device.name }
-		variables[`${device.name}_dante_model`] = { name: 'Dante model of ' + device.name }
-		variables[`${device.name}_dante_software_version`] = { name: 'Dante software version of ' + device.name }
-		variables[`${device.name}_hardware_version`] = { name: 'Hardware version of ' + device.name }
-		variables[`${device.name}_manufacturer`] = { name: 'Manufacturer of ' + device.name }
-		variables[`${device.name}_manufacturer_short`] = { name: 'Manufacturer (short) of ' + device.name }
-		variables[`${device.name}_software_version`] = { name: 'Software version of ' + device.name }
-		variables[`${device.name}_software_build`] = { name: 'Software build of ' + device.name }
-		variables[`${device.name}_dante_software_build`] = { name: 'Dante software build of ' + device.name }
-		variables[`${device.name}_hardware_build`] = { name: 'Hardware build of ' + device.name }
+		// Device names can contain characters Companion rejects in a variable id (spaces most often), so
+		// the id is sanitised while the human-readable name keeps the device's real name.
+		const id = sanitiseVariableId(device.name)
+		variables[`${id}_ip`] = { name: 'Ip address of ' + device.name }
+		variables[`${id}_locked`] = { name: 'Device lock state of ' + device.name }
+		variables[`${id}_tx`] = { name: 'Number of audio outputs for ' + device.name }
+		variables[`${id}_tx_names`] = { name: 'Audio output names for ' + device.name }
+		variables[`${id}_rx`] = { name: 'Number of audio inputs for ' + device.name }
+		variables[`${id}_rx_names`] = { name: 'Audio input names for ' + device.name }
+		variables[`${id}_tx_video`] = { name: 'Number of video outputs for ' + device.name }
+		variables[`${id}_tx_names_video`] = { name: 'Video output names for ' + device.name }
+		variables[`${id}_rx_video`] = { name: 'Number of video inputs for ' + device.name }
+		variables[`${id}_rx_names_video`] = { name: 'Video input names for ' + device.name }
+		variables[`${id}_sr`] = { name: 'Sample rate of ' + device.name }
+		variables[`${id}_pullup`] = { name: 'Sample rate pullup of ' + device.name }
+		variables[`${id}_latency`] = { name: 'Latency of ' + device.name + ' (in ms)' }
+		variables[`${id}_encoding`] = { name: 'Encoding of ' + device.name }
+		variables[`${id}_output_levels`] = { name: 'Output levels of ' + device.name }
+		variables[`${id}_model_name`] = { name: 'Model name of ' + device.name }
+		variables[`${id}_product_version`] = { name: 'Product version of ' + device.name }
+		variables[`${id}_dante_model`] = { name: 'Dante model of ' + device.name }
+		variables[`${id}_dante_software_version`] = { name: 'Dante software version of ' + device.name }
+		variables[`${id}_hardware_version`] = { name: 'Hardware version of ' + device.name }
+		variables[`${id}_manufacturer`] = { name: 'Manufacturer of ' + device.name }
+		variables[`${id}_manufacturer_short`] = { name: 'Manufacturer (short) of ' + device.name }
+		variables[`${id}_software_version`] = { name: 'Software version of ' + device.name }
+		variables[`${id}_software_build`] = { name: 'Software build of ' + device.name }
+		variables[`${id}_dante_software_build`] = { name: 'Dante software build of ' + device.name }
+		variables[`${id}_hardware_build`] = { name: 'Hardware build of ' + device.name }
 	}
 
 	self.setVariableDefinitions(variables)
@@ -101,6 +107,8 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 		const deviceName = device.name
 		if (deviceName) {
 			devices.push(deviceName)
+			// Ids must match the ones UpdateVariableDefinitions registered, so sanitise the same way.
+			const id = sanitiseVariableId(deviceName)
 
 			if (ip == ipAddress || !ipAddress) {
 				for (const variableType of variableTypes) {
@@ -111,76 +119,72 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 						// Values come from `deviceProperty`, the same accessor the Device Property feedback
 						// reads, so a variable and a feedback can never disagree about a device.
 						case 'ip':
-							variableValues[`${deviceName}_ip`] = deviceProperty(device, ip, 'ip')
+							variableValues[`${id}_ip`] = deviceProperty(device, ip, 'ip')
 							break
 
 						case 'locked':
-							variableValues[`${deviceName}_locked`] = deviceProperty(device, ip, 'locked')
+							variableValues[`${id}_locked`] = deviceProperty(device, ip, 'locked')
 							break
 
 						case 'rx':
 						case 'tx':
-							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							variableValues[`${id}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 
 						case 'rx_names':
 						case 'tx_names':
-							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							variableValues[`${id}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 
 						case 'rx_video':
 						case 'tx_video':
-							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							variableValues[`${id}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 
 						case 'rx_names_video':
 						case 'tx_names_video':
-							variableValues[`${deviceName}_${variableType}`] = deviceProperty(device, ip, variableType)
+							variableValues[`${id}_${variableType}`] = deviceProperty(device, ip, variableType)
 							break
 
 						// Split rather than grouped: each of these has its own value type in the schema, so a
 						// single indexed write would be checked against the union of them all.
 						case 'sr':
-							variableValues[`${deviceName}_sr`] = deviceProperty(device, ip, 'sr')
+							variableValues[`${id}_sr`] = deviceProperty(device, ip, 'sr')
 							break
 
 						case 'latency':
-							variableValues[`${deviceName}_latency`] = deviceProperty(device, ip, 'latency')
+							variableValues[`${id}_latency`] = deviceProperty(device, ip, 'latency')
 							break
 
 						case 'encoding':
-							variableValues[`${deviceName}_encoding`] = deviceProperty(device, ip, 'encoding')
+							variableValues[`${id}_encoding`] = deviceProperty(device, ip, 'encoding')
 							break
 
 						case 'pullup':
-							variableValues[`${deviceName}_pullup`] = deviceProperty(device, ip, 'pullup')
+							variableValues[`${id}_pullup`] = deviceProperty(device, ip, 'pullup')
 							break
 
 						case 'output_levels':
-							variableValues[`${deviceName}_output_levels`] = deviceProperty(device, ip, 'output_levels')
+							variableValues[`${id}_output_levels`] = deviceProperty(device, ip, 'output_levels')
 							break
 
 						// one update category, two variables
 						case 'manf':
-							variableValues[`${deviceName}_model_name`] = deviceProperty(device, ip, 'model_name')
-							variableValues[`${deviceName}_product_version`] = deviceProperty(device, ip, 'product_version')
-							variableValues[`${deviceName}_manufacturer`] = deviceProperty(device, ip, 'manufacturer')
-							variableValues[`${deviceName}_manufacturer_short`] = deviceProperty(device, ip, 'manufacturer_short')
-							variableValues[`${deviceName}_software_version`] = deviceProperty(device, ip, 'software_version')
-							variableValues[`${deviceName}_software_build`] = deviceProperty(device, ip, 'software_build')
+							variableValues[`${id}_model_name`] = deviceProperty(device, ip, 'model_name')
+							variableValues[`${id}_product_version`] = deviceProperty(device, ip, 'product_version')
+							variableValues[`${id}_manufacturer`] = deviceProperty(device, ip, 'manufacturer')
+							variableValues[`${id}_manufacturer_short`] = deviceProperty(device, ip, 'manufacturer_short')
+							variableValues[`${id}_software_version`] = deviceProperty(device, ip, 'software_version')
+							variableValues[`${id}_software_build`] = deviceProperty(device, ip, 'software_build')
 							break
 
 						// the versions reply, likewise
 						case 'versions':
-							variableValues[`${deviceName}_dante_model`] = deviceProperty(device, ip, 'dante_model')
-							variableValues[`${deviceName}_dante_software_version`] = deviceProperty(
-								device,
-								ip,
-								'dante_software_version',
-							)
-							variableValues[`${deviceName}_hardware_version`] = deviceProperty(device, ip, 'hardware_version')
-							variableValues[`${deviceName}_dante_software_build`] = deviceProperty(device, ip, 'dante_software_build')
-							variableValues[`${deviceName}_hardware_build`] = deviceProperty(device, ip, 'hardware_build')
+							variableValues[`${id}_dante_model`] = deviceProperty(device, ip, 'dante_model')
+							variableValues[`${id}_dante_software_version`] = deviceProperty(device, ip, 'dante_software_version')
+							variableValues[`${id}_hardware_version`] = deviceProperty(device, ip, 'hardware_version')
+							variableValues[`${id}_dante_software_build`] = deviceProperty(device, ip, 'dante_software_build')
+							variableValues[`${id}_hardware_build`] = deviceProperty(device, ip, 'hardware_build')
 							break
 					}
 				}

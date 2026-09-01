@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { UpdateFeedbacks } from '../feedbacks.js'
-import { CheckVariables, UpdateVariableDefinitions } from '../variables.js'
+import { CheckVariables, UpdateVariableDefinitions, sanitiseVariableId } from '../variables.js'
 import {
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,
@@ -332,5 +332,55 @@ describe('the Create Module Variables option', () => {
 		// the point of the option: the data is still tracked, only the variables are not created
 		const self = withVariables(false)
 		expect(definition(self).callback({ id: 'fb', options: { device: 'DeviceA', property: 'sr' } }, {})).toBe(48000)
+	})
+})
+
+describe('variable ids are sanitised', () => {
+	/** Companion rejects a variable id containing anything but letters, digits, `-`, `_` and `.`. */
+	const MESSY = 'Studio 1 (Rack A)'
+	const CLEAN = 'Studio_1__Rack_A_'
+
+	function withMessyDeviceName() {
+		const data = devicesData()
+		data[A].name = MESSY
+		const self = instance(data)
+		self.setVariableDefinitions = vi.fn()
+		self.setVariableValues = vi.fn()
+		return self
+	}
+
+	it('strips illegal characters, so a name with spaces still produces a usable id', () => {
+		expect(sanitiseVariableId(MESSY)).toBe(CLEAN)
+	})
+
+	it('registers definitions under the sanitised id while the label keeps the real device name', () => {
+		const self = withMessyDeviceName()
+		UpdateVariableDefinitions(self)
+
+		const definitions = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		expect(Object.keys(definitions)).toContain(`${CLEAN}_ip`)
+		expect(Object.keys(definitions).filter((id) => id.includes(' '))).toEqual([])
+		expect(definitions[`${CLEAN}_ip`].name).toBe(`Ip address of ${MESSY}`)
+	})
+
+	it('writes values under the same sanitised id the definitions used', () => {
+		const self = withMessyDeviceName()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		const definitions = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+		expect(written[`${CLEAN}_sr`]).toBe(48000)
+		// every value written must have a definition, or Companion drops it
+		for (const id of Object.keys(written)) expect(definitions).toHaveProperty(id)
+	})
+
+	it('keeps the unsanitised name in the devices list, which reports real device names', () => {
+		const self = withMessyDeviceName()
+		CheckVariables(self)
+
+		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		expect(written.devices).toContain(MESSY)
 	})
 })
