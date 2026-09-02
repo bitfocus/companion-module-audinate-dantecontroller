@@ -129,3 +129,182 @@ describe('DanteConnection', () => {
 		expect(c.ignoredSources.size).toBe(0)
 	})
 })
+
+/**
+ * The silence watchdog.
+ *
+ * Its reason to exist is a fault that reports nothing: a multicast membership lapses and the sockets
+ * stay bound, unerrored and Ok while no traffic reaches them again. Nothing re-joins a group after
+ * the initial 'listening' handler, so without this the module stays deaf until someone restarts the
+ * connection by hand.
+ */
+describe('DanteConnection silence watchdog', () => {
+	const THRESHOLD_MS = 30_000
+
+	/**
+	 * A connection whose `open` is stubbed to do what the real one does to this state.
+	 *
+	 * `initConnection` closes first and arms a fresh watchdog before it returns, so the stub does
+	 * both. Closing alone would leave no watchdog running afterwards, and the once-per-outage test
+	 * below would then pass because no timer was left to fire rather than because the reset disarmed
+	 * it - which is the property actually worth pinning.
+	 */
+	function watched(config?: { interval: number; timeoutInterval: number }, timeout = 0) {
+		const self = { log: vi.fn(), updateStatus: vi.fn(), config, timeout } as unknown as DanteInstance
+		const c = new DanteConnection(self)
+		// `noteTraffic` reaches `checkConnections`, which reads this state off the instance - the real
+		// one forwards to the connection (see the accessors on DanteInstance), so the fake must too
+		Object.defineProperty(self, 'activeConnections', { get: () => c.activeConnections })
+		Object.defineProperty(self, 'configError', { get: () => c.configError })
+		Object.defineProperty(self, 'CONNECTED', {
+			get: () => c.connected,
+			set: (value: boolean) => (c.connected = value),
+		})
+		const open = vi.fn(() => {
+			c.close()
+			c.startWatchdog()
+		})
+		c.open = open
+		return { c, open }
+	}
+
+	function withFakeTimers(body: () => void) {
+		vi.useFakeTimers()
+		try {
+			body()
+		} finally {
+			vi.useRealTimers()
+		}
+	}
+
+	it('stays quiet on a network that has never had any traffic to lose', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+
+			vi.advanceTimersByTime(THRESHOLD_MS * 10)
+			expect(open).not.toHaveBeenCalled()
+			c.close()
+		})
+	})
+
+	it('stays quiet while traffic keeps arriving', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+
+			// a heartbeat every second, as a live Dante network produces
+			for (let i = 0; i < THRESHOLD_MS / 1000 + 30; i++) {
+				c.noteTraffic('HEARTBEAT')
+				vi.advanceTimersByTime(1000)
+			}
+			expect(open).not.toHaveBeenCalled()
+			c.close()
+		})
+	})
+
+	it('reopens the connection once the silence passes the threshold', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+
+			vi.advanceTimersByTime(THRESHOLD_MS - 1000)
+			expect(open).not.toHaveBeenCalled()
+
+			vi.advanceTimersByTime(THRESHOLD_MS)
+			expect(open).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it('attempts recovery once per outage, not once per window', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+
+			// devices all powered off overnight: the reopen cannot help, and must not keep firing
+			vi.advanceTimersByTime(THRESHOLD_MS * 20)
+			expect(open).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it('arms again once traffic returns, so a second outage is also recovered', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+			vi.advanceTimersByTime(THRESHOLD_MS * 2)
+			expect(open).toHaveBeenCalledTimes(1)
+
+			// the reopen worked - traffic is back, and a later outage is a new one
+			c.noteTraffic('HEARTBEAT')
+			vi.advanceTimersByTime(THRESHOLD_MS * 2)
+			expect(open).toHaveBeenCalledTimes(2)
+		})
+	})
+
+	it('scales the threshold with the poll interval, so slow polling is not called silence', () => {
+		withFakeTimers(() => {
+			// polling once a minute: 30s of quiet is normal, not a fault
+			const { c, open } = watched({ interval: 60_000, timeoutInterval: 300_000 })
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+
+			vi.advanceTimersByTime(THRESHOLD_MS * 2)
+			expect(open).not.toHaveBeenCalled()
+
+			vi.advanceTimersByTime(60_000 * 5)
+			expect(open).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it('does not restart before a long device timeout has had a chance to fire', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched({ interval: 1000, timeoutInterval: 120_000 }, 120_000)
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+
+			vi.advanceTimersByTime(THRESHOLD_MS * 2)
+			expect(open).not.toHaveBeenCalled()
+			c.close()
+		})
+	})
+
+	it('stops on close, so no watchdog outlives the connection', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+			c.noteTraffic('HEARTBEAT')
+
+			c.close()
+			expect(c.watchdog).toBeNull()
+			vi.advanceTimersByTime(THRESHOLD_MS * 10)
+			expect(open).not.toHaveBeenCalled()
+		})
+	})
+
+	it('forgets the last packet time on close, so a reopened connection starts disarmed', () => {
+		const { c } = watched()
+		c.noteTraffic('HEARTBEAT')
+		expect(c.lastPacketAt).toBeGreaterThan(0)
+
+		c.close()
+		expect(c.lastPacketAt).toBe(0)
+	})
+
+	it('replaces an existing watchdog rather than stacking a second one', () => {
+		withFakeTimers(() => {
+			const { c, open } = watched()
+			c.startWatchdog()
+			const first = c.watchdog
+			c.startWatchdog()
+
+			expect(c.watchdog).not.toBe(first)
+			c.noteTraffic('HEARTBEAT')
+			vi.advanceTimersByTime(THRESHOLD_MS * 2)
+			// one reopen, not one per timer left running
+			expect(open).toHaveBeenCalledTimes(1)
+		})
+	})
+})

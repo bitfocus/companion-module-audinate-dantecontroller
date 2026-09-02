@@ -5,7 +5,7 @@
 import { DANTE_CONST } from './const.js'
 import { codeLabel, isSubscriptionConnected } from './protocol-rules.js'
 import merge from '../utils/merge.js'
-import { InstanceStatus, createModuleLogger } from '@companion-module/base'
+import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import type {
@@ -528,6 +528,12 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 		logger.debug(`ARC : Rx (${reply.length}): ${reply.toString('hex')}`)
 	}
 
+	// The protocol marker, size and command id are read at fixed offsets 0, 2 and 6. A datagram too
+	// short to hold them is not one of ours - but `bufferToInt` does an unguarded `readUInt16BE`, so
+	// without this it throws instead of failing to match, and the throw is fatal: this runs straight
+	// off a socket's 'message' event. An empty UDP datagram is legal and enough to do it.
+	if (reply.length < 8) return
+
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CONTROL && replySize === bufferToInt(reply, 2)) {
 		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's
 		// existence - ignore ARC traffic from a device we haven't registered yet, so an unsolicited
@@ -762,16 +768,19 @@ function logVideoChannelCounts(
  * keeps the sending device from being considered offline.
  */
 export function parseHeartbeatReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
+	// see parseReply - the marker and size at offsets 0 and 2 cannot be read from a shorter packet
+	if (reply.length < 4) return
+
 	if (
 		bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.HEARTBEAT &&
 		rinfo.size === bufferToInt(reply, 2) &&
 		parseString(reply, 16) == 'Audinate'
 	) {
-		// network is alive
-		if (!self.CONNECTED) {
-			self.updateStatus(InstanceStatus.Ok)
-			self.CONNECTED = true
-		}
+		// Nothing here reports the status. Receiving on the heartbeat socket is what proves that
+		// service is alive, and `noteTraffic` has already recorded it - from the socket handler, before
+		// this ran. Forcing Ok here as well used to declare the whole connection healthy on the
+		// strength of one socket, which is why the status flapped: this said Ok, and the next
+		// `checkConnections` saw a service still marked down and said Disconnected again.
 
 		// device is online
 		keepAlive(self, rinfo.address)
@@ -810,12 +819,11 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		logger.debug(`SETTINGS : Rx (${reply.length}): ${reply.toString('hex')}`)
 	}
 
+	// see parseReply - the marker and size at offsets 0 and 2
+	if (reply.length < 4) return
+
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.SETTINGS && replySize == bufferToInt(reply, 2)) {
-		// network is alive
-		if (!self.CONNECTED) {
-			self.updateStatus(InstanceStatus.Ok)
-			self.CONNECTED = true
-		}
+		// see parseHeartbeatReply: liveness is recorded by `noteTraffic` on the socket, not here
 
 		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's
 		// existence - ignore SETTINGS traffic (often unsolicited multicast) from a device we haven't
@@ -826,6 +834,8 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		}
 
 		const payload = reply.subarray(24)
+		// the command id sits at payload offset 2, so a reply truncated inside the header carries none
+		if (payload.length < 4) return
 		const commandId = bufferToInt(payload, 2)
 
 		deviceData[deviceIp] = {}
@@ -1036,6 +1046,9 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 		// Log replies when in debug mode
 		logger.debug(`CMC : Rx Info(${reply.length}): ${reply.toString('hex')}`)
 	}
+
+	// see parseReply - marker, size and command id sit at offsets 0, 2 and 6
+	if (reply.length < 8) return
 
 	if (bufferToInt(reply, 0) == DANTE_CONST.PROTOCOL.CMC && replySize == bufferToInt(reply, 2)) {
 		// mDNS discovery (danteDiscovery -> registerDevice) is the source of truth for a device's

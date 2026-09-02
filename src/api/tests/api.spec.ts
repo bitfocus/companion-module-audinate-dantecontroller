@@ -1097,11 +1097,11 @@ describe('resolveDeviceIp / deviceByIdentifier', () => {
 		const buf = Buffer.from('aabb', 'hex')
 
 		sendCommand(self, buf, 'DeviceA')
-		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
 
 		send.mockClear()
 		sendCommand(self, buf, '10.0.0.5')
-		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
 	})
 })
 
@@ -1215,7 +1215,7 @@ describe('sendCommand', () => {
 		})
 		const buf = Buffer.from('aabb', 'hex')
 		sendCommand(self, buf, '10.0.0.5')
-		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
 	})
 
 	it('uses forcePort when given, overriding the learned port', () => {
@@ -1226,7 +1226,7 @@ describe('sendCommand', () => {
 		})
 		const buf = Buffer.from('aabb', 'hex')
 		sendCommand(self, buf, '10.0.0.5', 'CMC', 9999)
-		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 9999, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 9999, '10.0.0.5', expect.any(Function))
 	})
 
 	it('logs an error and sends nothing when no port is known', () => {
@@ -1235,6 +1235,117 @@ describe('sendCommand', () => {
 		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
 		expect(send).not.toHaveBeenCalled()
 		expect(loggerSink).toHaveBeenCalledWith('api:connection', 'error', expect.stringContaining('Undefined port'))
+	})
+})
+
+/**
+ * A failed send must not be allowed to reach the socket's own 'error' handler.
+ *
+ * That handler marks the service down, and nothing sets it back up short of a fresh bind - so one
+ * undeliverable datagram would otherwise latch the connection into Disconnected for good. Passing a
+ * callback to `dgram.send` is what keeps the error here instead.
+ */
+describe('sendCommand failure handling', () => {
+	/** A socket whose send fails the given number of times, then succeeds. */
+	function failingSocket(error: NodeJS.ErrnoException, failures = Infinity) {
+		let sent = 0
+		const send = vi.fn(
+			(
+				_buf: Buffer,
+				_offset: number,
+				_length: number,
+				_port: number,
+				_address: string,
+				callback: (error: Error | null) => void,
+			) => {
+				sent++
+				callback(sent <= failures ? error : null)
+			},
+		)
+		return send
+	}
+
+	function instanceWith(send: ReturnType<typeof vi.fn>) {
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } } } as unknown as DevicesData,
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			activeConnections: { ARC: true },
+			CONNECTED: true,
+		})
+	}
+
+	const unreachable: NodeJS.ErrnoException = Object.assign(new Error('send EHOSTUNREACH'), { code: 'EHOSTUNREACH' })
+
+	it('passes a callback, so dgram reports the error there rather than on the socket', () => {
+		const send = failingSocket(unreachable)
+		sendCommand(instanceWith(send), Buffer.from('aa', 'hex'), '10.0.0.5')
+		expect(send.mock.calls[0][5]).toBeTypeOf('function')
+	})
+
+	it('leaves the service up and the status alone when a send fails', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		expect(self.activeConnections.ARC).toBe(true)
+		expect(self.CONNECTED).toBe(true)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+
+	it('reports the failure once, naming the device', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		expect(loggerSink).toHaveBeenCalledWith(
+			'api:connection',
+			'warn',
+			expect.stringContaining('ARC send to DeviceA (10.0.0.5) failed'),
+		)
+	})
+
+	it('does not repeat itself while the same failure persists', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		// a channel query is up to sixteen datagrams; one line, not sixteen
+		for (let i = 0; i < 16; i++) sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(1)
+	})
+
+	it('reports again after a success, so a device that comes and goes is not silenced', () => {
+		// fails, succeeds, then fails again
+		const self = instanceWith(failingSocket(unreachable, 1))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const sendAgain = failingSocket(unreachable)
+		self.sockets.ARC = { send: sendAgain } as unknown as dgram.Socket
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(2)
+	})
+
+	it('reports a different error code separately, since it is different news', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const refused: NodeJS.ErrnoException = Object.assign(new Error('send EPERM'), { code: 'EPERM' })
+		self.sockets.ARC = { send: failingSocket(refused) } as unknown as dgram.Socket
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(2)
+	})
+
+	it('survives a send that throws synchronously, as a closed socket does', () => {
+		const send = vi.fn(() => {
+			throw Object.assign(new Error('Not running'), { code: 'ERR_SOCKET_DGRAM_NOT_RUNNING' })
+		})
+		const self = instanceWith(send)
+
+		expect(() => sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')).not.toThrow()
+		expect(self.activeConnections.ARC).toBe(true)
+		expect(loggerSink).toHaveBeenCalledWith('api:connection', 'warn', expect.stringContaining('Not running'))
 	})
 })
 
@@ -1303,7 +1414,7 @@ describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
 			sockets: { ARC: { send } as unknown as dgram.Socket },
 		})
 		makeAudioCrosspoint(self, '10.0.0.5', 'Input 1', 'SourceDevice', '1')
-		expect(send).toHaveBeenCalledWith(expect.any(Buffer), 0, expect.any(Number), 4440, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(expect.any(Buffer), 0, expect.any(Number), 4440, '10.0.0.5', expect.any(Function))
 	})
 
 	it('clearAudioCrosspoint logs an error when the destination device cannot be resolved', () => {
@@ -1385,12 +1496,23 @@ describe('clearAllAudioCrosspoints', () => {
 })
 
 describe('parseHeartbeatReply', () => {
-	it('marks the connection Ok on a valid packet (real capture)', () => {
+	it('keeps the sending device online on a valid packet (real capture)', () => {
+		const self = createMockInstance({
+			devicesData: { [REAL_DEVICE_IP]: { name: 'DeviceA', ports: {}, timeoutArray: [] } } as unknown as DevicesData,
+		})
+		const reply = Buffer.from(REAL_HEARTBEAT_HEX, 'hex')
+		parseHeartbeatReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		// keepAlive re-arms the device's offline timer
+		expect(self.devicesData[REAL_DEVICE_IP].timeoutArray?.[0]).toBeDefined()
+	})
+
+	it('does not report the status itself, leaving that to checkConnections', () => {
+		// forcing Ok from one socket's traffic is what made the status flap - see the handler
 		const self = createMockInstance({ CONNECTED: false })
 		const reply = Buffer.from(REAL_HEARTBEAT_HEX, 'hex')
 		parseHeartbeatReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
-		expect(self.CONNECTED).toBe(true)
-		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Ok)
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
 	})
 
 	it('ignores a packet with the wrong protocol marker', () => {
@@ -1583,11 +1705,16 @@ describe('parseReply (ARC) - channel count', () => {
 })
 
 describe('parseSettingsReply', () => {
-	it('marks the connection Ok on a valid packet regardless of registration (real capture)', () => {
+	it('does not report the status itself, leaving that to checkConnections', () => {
+		// This used to force Ok here, and did so even for an unregistered device, to say "the network
+		// is alive". That job now belongs to `noteTraffic` on the settings socket, which likewise runs
+		// regardless of registration - see socket-errors.spec.ts. Doing it here as well declared the
+		// whole connection healthy from one socket, against services that were still marked down.
 		const self = createMockInstance({ CONNECTED: false, devicesData: {} })
 		const reply = Buffer.from(REAL_SETTINGS_HEX, 'hex')
 		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
-		expect(self.CONNECTED).toBe(true)
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
 	})
 
 	it('ignores SETTINGS traffic from a device not yet registered via mDNS discovery', () => {
