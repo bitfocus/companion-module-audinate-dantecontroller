@@ -883,3 +883,96 @@ describe('device pickers say what each device carries', () => {
 		}
 	})
 })
+
+describe('option ids are sanitised', () => {
+	/**
+	 * Companion cannot handle an option id containing a space, and a device may be named anything -
+	 * "Studio 1 (Rack A)" is an ordinary Dante name. The per-device fields are suffixed with the
+	 * device name, so without sanitising, such a device makes every field it names misbehave.
+	 */
+	const MESSY = 'Studio 1 (Rack A)'
+	const CLEAN = 'Studio_1__Rack_A_'
+
+	/** The same two devices, with the first renamed to something Companion cannot use verbatim. */
+	function messyData(): DevicesData {
+		const data = devicesData()
+		;(data['10.0.0.5'] as { name: string }).name = MESSY
+		return data
+	}
+
+	function messyInstance() {
+		const data = messyData()
+		return {
+			devicesData: data,
+			devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
+			rxChannelsChoices: { [MESSY]: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
+			txChannelsChoices: { [MESSY]: [{ id: 1, label: 'Out 1' }], DeviceB: [{ id: 1, label: 'Out 1' }] },
+			setActionDefinitions: vi.fn(),
+			setFeedbackDefinitions: vi.fn(),
+			log: vi.fn(),
+		} as unknown as DanteInstance
+	}
+
+	function allOptionIds(definitions: Record<string, DefinitionLike>): string[] {
+		return Object.values(definitions).flatMap((definition) => (definition.options ?? []).map((option) => option.id))
+	}
+
+	function built() {
+		const self = messyInstance()
+		UpdateActions(self)
+		UpdateFeedbacks(self)
+		return {
+			actions: (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				DefinitionLike
+			>,
+			feedbacks: (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				DefinitionLike
+			>,
+		}
+	}
+
+	it('no action option id contains a character Companion rejects', () => {
+		const ids = allOptionIds(built().actions)
+		expect(ids.length).toBeGreaterThan(0)
+		expect(ids.filter((id) => !/^[a-zA-Z0-9\-_.]+$/.test(id))).toEqual([])
+	})
+
+	it('no feedback option id contains a character Companion rejects', () => {
+		const ids = allOptionIds(built().feedbacks)
+		expect(ids.length).toBeGreaterThan(0)
+		expect(ids.filter((id) => !/^[a-zA-Z0-9\-_.]+$/.test(id))).toEqual([])
+	})
+
+	it('actually generated fields for the messy device, rather than passing by finding none', () => {
+		// guards the two sweeps above: they would pass trivially if no per-device field existed
+		expect(allOptionIds(built().actions).filter((id) => id.includes(CLEAN)).length).toBeGreaterThan(0)
+	})
+
+	it.each([
+		['setSampleRate', 'sr_'],
+		['setPullup', 'pullup_'],
+		['setEncoding', 'encoding_'],
+		['setOutputLevel', 'channel_'],
+		['setRxChannelName', 'channel_'],
+	])('%s suffixes %s with the sanitised name', (actionId, prefix) => {
+		const ids = (built().actions[actionId]?.options ?? []).map((option) => option.id)
+		expect(ids).toContain(`${prefix}${CLEAN}`)
+	})
+
+	it('sanitises the channel pickers and their missing-channel warnings alike', () => {
+		const ids = (built().actions.makeCrosspointDropDown?.options ?? []).map((option) => option.id)
+		expect(ids).toContain(`destinationChannel_${CLEAN}`)
+		expect(ids).toContain(`sourceChannel_${CLEAN}`)
+		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${CLEAN}`)
+	})
+
+	it('leaves the device name itself unsanitised in choices and visibility expressions', () => {
+		// the name is a value, not an id: it is what the picker stores and what the expression
+		// compares against, so sanitising it here would stop the field ever showing
+		const options = built().actions.setSampleRate?.options ?? []
+		const field = options.find((option) => option.id === `sr_${CLEAN}`)
+		expect(field?.isVisibleExpression).toContain(`$(options:device) == '${MESSY}'`)
+	})
+})

@@ -36,6 +36,7 @@ import {
 	txDeviceChoices,
 	untrackFeedback,
 } from './api/index.js'
+import { sanitiseVariableId } from './utils/sanitise.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('feedbacks')
@@ -242,9 +243,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// literal template TypeScript can check against the option type's per-media-type Records.
 			const learnt: Partial<RoutingBgOptions> = { sourceDevice: source.deviceName }
 			if (isVideo) {
-				learnt[`sourceChannelVideo_${source.deviceName}`] = sourceChannelNumber
+				learnt[`sourceChannelVideo_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
 			} else {
-				learnt[`sourceChannel_${source.deviceName}`] = sourceChannelNumber
+				learnt[`sourceChannel_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
 			}
 			return learnt
 		},

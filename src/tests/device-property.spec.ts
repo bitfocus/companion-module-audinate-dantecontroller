@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { UpdateFeedbacks } from '../feedbacks.js'
-import { CheckVariables, UpdateVariableDefinitions, sanitiseVariableId } from '../variables.js'
+import { CheckVariables, UpdateVariableDefinitions } from '../variables.js'
+import { sanitiseVariableId } from '../utils/sanitise.js'
 import {
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,

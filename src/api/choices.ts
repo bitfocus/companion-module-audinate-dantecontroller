@@ -20,6 +20,7 @@ import {
 	hasVideoTxChannels,
 	scheduleUpdateData,
 } from './devices.js'
+import { sanitiseVariableId } from '../utils/sanitise.js'
 
 const logger = createModuleLogger('api:choices')
 
@@ -309,7 +310,9 @@ export function perDeviceChannelFields<Key extends string>(
 			fields.push({
 				type: 'dropdown',
 				label: mediaType === 'audio' ? label : `${CHANNEL_MEDIA_TYPE_LABELS[mediaType]} ${label.toLowerCase()}`,
-				id: `${channelOptionPrefix(basePrefix, mediaType)}_${name}` as Key,
+				// Sanitised, because a device name may hold characters an option id cannot - see
+				// deviceOptionValue, which reads these keys back the same way.
+				id: `${channelOptionPrefix(basePrefix, mediaType)}_${sanitiseVariableId(name)}` as Key,
 				choices: noneOption ? [noneOption, ...choices] : choices,
 				// The default comes from `choices` alone, never `[noneOption, ...choices]`: None sorts
 				// first, so including it here would make a freshly-added field default to "no route".
@@ -375,7 +378,7 @@ export function perDeviceMissingChannelWarnings(
 				type: 'static-text',
 				// Not `channelOptionPrefix`: these hold no value, so there is no saved-config
 				// compatibility to preserve and every media type can carry its own name.
-				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${name}`,
+				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${sanitiseVariableId(name)}`,
 				label: `No ${mediaLabel.toLowerCase()} channels`,
 				value:
 					`${name} has no ${mediaLabel.toLowerCase()} ${DIRECTION_LABELS[direction]} channels, so there ` +
@@ -474,10 +477,19 @@ export function devicesByName(
 }
 
 /**
- * Reads a per-device option, accepting either key form.
+ * Reads a per-device option, accepting every key form one may have been saved under.
  *
- * Fields are declared keyed by device name; an action saved earlier holds its value under the
- * device's address instead. The name is preferred so a re-saved action uses the current key.
+ * Fields are declared keyed by the *sanitised* device name, so that is tried first and a re-saved
+ * action always uses the current key. Three older forms are still accepted behind it:
+ *
+ * - the unsanitised name, which is what a config saved before ids were sanitised holds;
+ * - the identifier the option actually stores, sanitised - the device dropdown holds a name, and
+ *   when that device is offline `deviceByIdentifier` cannot resolve it to look the name up;
+ * - that identifier raw, which covers both an unsanitised name and an action saved before devices
+ *   were keyed by name at all, whose key is suffixed with an address.
+ *
+ * Order matters only where the forms differ; for a device whose name needs no sanitising, and for
+ * an address (sanitising leaves IPv4 untouched), several of these are the same key.
  */
 export function deviceOptionValue<T>(
 	self: DanteInstance,
@@ -487,8 +499,20 @@ export function deviceOptionValue<T>(
 	fallback: T,
 ): T {
 	const name = deviceByIdentifier(self, identifier)?.name
-	const byName = name !== undefined ? options[`${prefix}_${name}`] : undefined
-	return ((byName ?? options[`${prefix}_${identifier}`]) as T | undefined) ?? fallback
+	const suffixes = [
+		...(name !== undefined ? [sanitiseVariableId(name), name] : []),
+		sanitiseVariableId(identifier),
+		identifier,
+	]
+
+	for (const suffix of suffixes) {
+		// A null check rather than a truthiness test: 0 is a real value here - it is the channel
+		// number that clears a crosspoint - and must not fall through to the next key.
+		const stored = options[`${prefix}_${suffix}`]
+		if (stored !== undefined && stored !== null) return stored as T
+	}
+
+	return fallback
 }
 
 /** Adds a device to the `devicesChoices` dropdown list, keeping it sorted by label. */

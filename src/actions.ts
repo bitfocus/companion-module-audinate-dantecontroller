@@ -61,6 +61,7 @@ import {
 	txDeviceChoices,
 	type ChannelMediaType,
 } from './api/index.js'
+import { sanitiseVariableId } from './utils/sanitise.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('actions')
@@ -351,9 +352,9 @@ export function UpdateActions(self: DanteInstance): void {
 				// literal template TypeScript can check against the option type's per-media-type Records.
 				const learnt: Partial<MakeCrosspointDropDownOptions> = { sourceDevice: source.deviceName }
 				if (isVideo) {
-					learnt[`sourceChannelVideo_${source.deviceName}`] = sourceChannelNumber
+					learnt[`sourceChannelVideo_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
 				} else {
-					learnt[`sourceChannel_${source.deviceName}`] = sourceChannelNumber
+					learnt[`sourceChannel_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
 				}
 				return learnt
 			},
@@ -906,7 +907,8 @@ export function UpdateActions(self: DanteInstance): void {
 					({ name, device, ips }): SomeCompanionActionInputField<keyof SetSampleRateOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate',
-						id: `sr_${name}`,
+						// sanitised: a device name may hold characters an option id cannot
+						id: `sr_${sanitiseVariableId(name)}`,
 						choices: array2choices(device.srOptions, (f) => (Number(f) / 1000).toString() + ' kHz') ?? [],
 						// open on the rate the device is actually running, not merely the first it supports
 						default: currentChoiceId(
@@ -927,7 +929,7 @@ export function UpdateActions(self: DanteInstance): void {
 
 				// keyed by name, matching the option this definition declares
 				const learnt: Partial<SetSampleRateOptions> = {}
-				learnt[`sr_${device.name}`] = String(device.sr)
+				learnt[`sr_${sanitiseVariableId(device.name)}`] = String(device.sr)
 				return learnt
 			},
 			callback: async (action) => {
@@ -960,7 +962,7 @@ export function UpdateActions(self: DanteInstance): void {
 					({ name, device, ips }): SomeCompanionActionInputField<keyof SetPullupOptions> => ({
 						type: 'dropdown',
 						label: 'Sample rate pullup',
-						id: `pullup_${name}`,
+						id: `pullup_${sanitiseVariableId(name)}`,
 						choices: object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.PULLUPS, device.pullupOptions),
@@ -981,7 +983,7 @@ export function UpdateActions(self: DanteInstance): void {
 				if (!match) return undefined
 
 				const learnt: Partial<SetPullupOptions> = {}
-				learnt[`pullup_${device.name}`] = String(match.id)
+				learnt[`pullup_${sanitiseVariableId(device.name)}`] = String(match.id)
 				return learnt
 			},
 			callback: async (action) => {
@@ -1014,7 +1016,7 @@ export function UpdateActions(self: DanteInstance): void {
 					({ name, device, ips }): SomeCompanionActionInputField<keyof SetEncodingOptions> => ({
 						type: 'dropdown',
 						label: 'Encoding',
-						id: `encoding_${name}`,
+						id: `encoding_${sanitiseVariableId(name)}`,
 						choices: object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
 						default: currentChoiceId(
 							object2PartialChoices(DANTE_CONST.ENCODINGS, device.encodingOptions),
@@ -1053,7 +1055,7 @@ export function UpdateActions(self: DanteInstance): void {
 					({ name, device, ips }): SomeCompanionActionInputField<keyof SetOutputLevelOptions> => ({
 						type: 'dropdown',
 						label: 'Channel',
-						id: `channel_${name}`,
+						id: `channel_${sanitiseVariableId(name)}`,
 						choices: audioChannelChoices(self, device, 'rx'),
 						default: firstChoiceId(audioChannelChoices(self, device, 'rx'), 0),
 						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), name),

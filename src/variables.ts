@@ -2,11 +2,9 @@ import { createModuleLogger, type CompanionVariableDefinitions } from '@companio
 import { deviceProperty } from './api/index.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
+import { sanitiseVariableId } from './utils/sanitise.js'
 
 const logger = createModuleLogger('variables')
-
-export const sanitiseVariableId = (id: string, substitute: '' | '.' | '-' | '_' = '_'): string =>
-	id.replaceAll(/[^a-zA-Z0-9-_.]/gm, substitute)
 
 /** Builds and registers the set of variable definitions for all known devices. */
 export function UpdateVariableDefinitions(self: DanteInstance): void {

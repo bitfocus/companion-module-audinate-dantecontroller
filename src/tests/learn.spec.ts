@@ -410,3 +410,65 @@ describe('the 2.0 contract', () => {
 		expect(Object.keys(learnt).sort()).toEqual([...expected].sort())
 	})
 })
+
+describe('learn keys match the declared option ids', () => {
+	/**
+	 * A learn writes straight into the option store, so the key it returns has to be exactly the id
+	 * the field was declared with. Both are built from the device name, so a name needing sanitising
+	 * is where the two can drift apart - a learn would then appear to succeed and change nothing.
+	 */
+	const MESSY = 'Studio 1 (Rack A)'
+
+	/** The same network, with the source device renamed to something Companion cannot use as an id. */
+	function messyData(): DevicesData {
+		const data = devicesData()
+		;(data[A] as { name: string }).name = MESSY
+		const rx = (data[B] as { audioRx: Record<string, { sourceDevice?: string }> }).audioRx
+		rx[2].sourceDevice = MESSY
+		return data
+	}
+
+	/** Every option id the given action declares. */
+	function declaredIds(actionId: string, data: DevicesData): string[] {
+		return (definitions(data)[actionId].options ?? []).map((option: { id: string }) => option.id)
+	}
+
+	it('makeCrosspointDropDown learns into an id its own options declare', async () => {
+		const data = messyData()
+		const learnt = await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data)
+
+		expect(learnt.sourceDevice).toBe(MESSY)
+		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
+		expect(channelKey).toBe('sourceChannel_Studio_1__Rack_A_')
+		expect(declaredIds('makeCrosspointDropDown', data)).toContain(channelKey)
+	})
+
+	it('setSampleRate learns into an id its own options declare', async () => {
+		const data = messyData()
+		const learnt = await learn('setSampleRate', { device: A }, data)
+
+		const [key] = Object.keys(learnt)
+		expect(key).toBe('sr_Studio_1__Rack_A_')
+		expect(declaredIds('setSampleRate', data)).toContain(key)
+	})
+
+	it('setPullup learns into an id its own options declare', async () => {
+		const data = messyData()
+		const learnt = await learn('setPullup', { device: A }, data)
+
+		const [key] = Object.keys(learnt)
+		expect(key).toBe('pullup_Studio_1__Rack_A_')
+		expect(declaredIds('setPullup', data)).toContain(key)
+	})
+
+	it('routing_bg learns into an id its own feedback options declare', async () => {
+		const data = messyData()
+		const learnt = await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data)
+
+		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
+		expect(channelKey).toBe('sourceChannel_Studio_1__Rack_A_')
+
+		const declared = (feedbackDefinitions(data).routing_bg.options ?? []).map((option: { id: string }) => option.id)
+		expect(declared).toContain(channelKey)
+	})
+})
