@@ -283,6 +283,47 @@ export function channelTypeOption<Key extends string>(id: Key): CompanionInputFi
  * `isVisibleExpression` - for the one picker (Crosspoint Clear's destination channel) that must
  * also hide itself when its action's "clear every channel" checkbox is on.
  */
+/**
+ * Every device a per-device channel field should be built for: those on the network now, plus any
+ * whose channels are still remembered from before it went away.
+ *
+ * A per-device field exists only while its device has channels, so a device dropping out took its
+ * option id out of the definition - and an option id that is not in the definition loses the value
+ * stored against it. A device that blipped for one poll therefore came back with the channel
+ * selection on every action and feedback pointing at it silently emptied, which reads as the module
+ * having forgotten the device's channels. On a network where devices send no heartbeats, and mDNS is
+ * the only thing keeping them alive, that blip needs nothing more than three dropped responses.
+ *
+ * So the choice lists outlive the device record (`destroyDevice` no longer clears them) and this
+ * keeps emitting fields for what they remember. The device itself is still dropped from the device
+ * *dropdown*, so it cannot be picked for something new while it is away - this only preserves the
+ * fields that existing configuration already depends on.
+ *
+ * The stand-in carries just a name, which is all `mediaChannelChoices` reads, and no addresses -
+ * a saved action holding an address instead of a name is matched by the arms
+ * `deviceSelectedExpression` builds from the live record, which exists again the moment it returns.
+ */
+function channelFieldDevices(self: DanteInstance): NamedDevice[] {
+	const live = devicesByName(self)
+	const liveNames = new Set(live.map((named) => named.name))
+
+	const remembered: NamedDevice[] = []
+	for (const byDevice of [
+		self.rxChannelsChoices,
+		self.txChannelsChoices,
+		self.videoRxChannelsChoices ?? {},
+		self.videoTxChannelsChoices ?? {},
+	]) {
+		for (const name of Object.keys(byDevice)) {
+			if (liveNames.has(name)) continue
+			liveNames.add(name)
+			remembered.push({ name, device: { name }, ips: [] })
+		}
+	}
+
+	return [...live, ...remembered]
+}
+
 export function perDeviceChannelFields<Key extends string>(
 	self: DanteInstance,
 	devicePickerId: string,
@@ -295,7 +336,7 @@ export function perDeviceChannelFields<Key extends string>(
 	const fields: CompanionInputFieldDropdown<Key>[] = []
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
-		for (const { name, device, ips } of devicesByName(self)) {
+		for (const { name, device, ips } of channelFieldDevices(self)) {
 			const choices = mediaChannelChoices(self, device, direction, mediaType)
 			if (choices.length === 0) continue
 
@@ -362,7 +403,9 @@ export function perDeviceMissingChannelWarnings(
 	const fields: CompanionInputFieldStaticText[] = []
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
-		for (const { name, device, ips } of devicesByName(self)) {
+		// the same set perDeviceChannelFields builds from, so every device with a picker for one media
+		// type has an explanation for the type it lacks
+		for (const { name, device, ips } of channelFieldDevices(self)) {
 			if (mediaChannelChoices(self, device, direction, mediaType).length > 0) continue
 			const offeredAtAll = CHANNEL_MEDIA_TYPES.some(
 				(otherType) => mediaChannelChoices(self, device, direction, otherType).length > 0,

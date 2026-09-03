@@ -542,6 +542,13 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 		if (!self.devicesData[deviceIp]) {
 			return
 		}
+		// Answering us is proof the device is online, so this re-arms its offline timer. Without it,
+		// only an mDNS SRV answer and a HEARTBEAT multicast packet did - so a device in the middle of
+		// a conversation with this module could still be declared offline and destroyed because three
+		// polls' worth of discovery replies went missing, or because it emits no heartbeats at all.
+		// Destroying it drops its channel choices, which takes its per-device option fields out of
+		// every action and feedback until it is rediscovered and re-queried.
+		keepAlive(self, deviceIp)
 
 		const commandId = bufferToInt(reply, 6)
 
@@ -694,6 +701,8 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
 	// As in parseReply: mDNS discovery is the source of truth for a device's existence, so traffic
 	// from one not yet registered is ignored rather than allowed to stub in a devicesData entry.
 	if (!self.devicesData[deviceIp]) return
+	// see parseReply - a reply is proof of life, and re-arms the offline timer
+	keepAlive(self, deviceIp)
 
 	const commandId = bufferToInt(reply, 6)
 	let deviceData: Partial<DeviceData> | undefined
@@ -832,6 +841,8 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
 		if (!self.devicesData[deviceIp]) {
 			return
 		}
+		// see parseReply - a reply is proof of life, and re-arms the offline timer
+		keepAlive(self, deviceIp)
 
 		const payload = reply.subarray(24)
 		// the command id sits at payload offset 2, so a reply truncated inside the header carries none
@@ -1058,6 +1069,8 @@ export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.R
 		if (!self.devicesData[deviceIp]) {
 			return
 		}
+		// see parseReply - a reply is proof of life, and re-arms the offline timer
+		keepAlive(self, deviceIp)
 
 		const commandId = bufferToInt(reply, 6)
 		deviceData[deviceIp] = {}

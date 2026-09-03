@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
-import type { DevicesData } from '../api/index.js'
+import { destroyDevice, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
 
 /**
@@ -974,5 +974,117 @@ describe('option ids are sanitised', () => {
 		const options = built().actions.setSampleRate?.options ?? []
 		const field = options.find((option) => option.id === `sr_${CLEAN}`)
 		expect(field?.isVisibleExpression).toContain(`$(options:device) == '${MESSY}'`)
+	})
+})
+
+/**
+ * A device blipping must not empty the channel selection on configuration that points at it.
+ *
+ * The per-device channel field only exists while the device has channels, and an option id absent
+ * from a definition loses the value stored against it - so a device dropping out for one poll used
+ * to come back with every action and feedback pointing at it silently unset, which reads as the
+ * module having forgotten the device's channels. Nothing restores such a value: it stays broken
+ * until someone re-picks the channel by hand.
+ *
+ * Named after the hardware this was found on - a DAV-02HR decoder whose one video receive channel
+ * kept disappearing from the crosspoint actions.
+ */
+describe('per-device channel fields survive a device going offline', () => {
+	const NAME = 'DAV-02HR-Stage1'
+	const IP = '172.16.3.143'
+
+	/** The device online, with the 8 audio and 1 video receive channels the real one reports. */
+	function online(): DanteInstance {
+		const io = (count: number, prefix: string) => {
+			const channels: Record<string | number, unknown> = { count }
+			for (let i = 1; i <= count; i++) channels[i] = { number: i, name: `${prefix} ${i}` }
+			return channels
+		}
+		const data = {
+			[IP]: { name: NAME, ports: { ARC: 4440 }, audioRx: io(8, 'In'), videoRx: io(1, 'Video In') },
+		} as unknown as DevicesData
+
+		return {
+			devicesData: data,
+			devicesChoices: [{ id: NAME, label: NAME }],
+			rxChannelsChoices: { [NAME]: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, label: `In ${i + 1}` })) },
+			txChannelsChoices: {},
+			videoRxChannelsChoices: { [NAME]: [{ id: 1, label: 'Rear' }] },
+			videoTxChannelsChoices: {},
+			setActionDefinitions: vi.fn(),
+			setFeedbackDefinitions: vi.fn(),
+			log: vi.fn(),
+		} as unknown as DanteInstance
+	}
+
+	function optionIds(self: DanteInstance, actionId: string): string[] {
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			DefinitionLike
+		>
+		return (definitions[actionId]?.options ?? []).map((option) => option.id)
+	}
+
+	it('declares the video destination field while the device is online', () => {
+		expect(optionIds(online(), 'makeCrosspointDropDown')).toContain(`destinationChannelVideo_${NAME}`)
+	})
+
+	it('still declares it once the device has timed out', () => {
+		const self = online()
+		destroyDevice(self, IP)
+
+		const ids = optionIds(self, 'makeCrosspointDropDown')
+		expect(ids).toContain(`destinationChannelVideo_${NAME}`)
+		expect(ids).toContain(`destinationChannel_${NAME}`)
+	})
+
+	it('takes the device out of the dropdown, so it cannot be picked while it is away', () => {
+		const self = online()
+		destroyDevice(self, IP)
+		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('keeps the field visible for the device the action already names', () => {
+		// the visibility expression is what makes a saved action show its channel picker at all
+		const self = online()
+		destroyDevice(self, IP)
+
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			DefinitionLike
+		>
+		const field = (definitions.makeCrosspointDropDown?.options ?? []).find(
+			(option) => option.id === `destinationChannelVideo_${NAME}`,
+		)
+		expect(field?.isVisibleExpression).toContain(`$(options:destinationDevice) == '${NAME}'`)
+	})
+
+	it('offers the same channels it did before, not an empty dropdown', () => {
+		// an empty dropdown cannot hold a valid value, and Companion refuses to parse an action
+		// carrying one - so remembering the device is only useful if its choices come with it
+		const self = online()
+		destroyDevice(self, IP)
+
+		UpdateActions(self)
+		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			DefinitionLike
+		>
+		const field = (definitions.makeCrosspointDropDown?.options ?? []).find(
+			(option) => option.id === `destinationChannelVideo_${NAME}`,
+		)
+		expect(field?.choices).toEqual([{ id: 1, label: 'Rear' }])
+	})
+
+	it('does not duplicate a device that is both remembered and back online', () => {
+		const self = online()
+		destroyDevice(self, IP)
+		// rediscovered at a new address, as a device whose lease changed would be
+		self.devicesData['172.16.3.99'] = self.devicesData[IP] ?? {}
+
+		const ids = optionIds(self, 'makeCrosspointDropDown')
+		expect(ids.filter((id) => id === `destinationChannelVideo_${NAME}`)).toHaveLength(1)
 	})
 })

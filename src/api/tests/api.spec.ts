@@ -446,7 +446,21 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		expect(self.videoRxChannelsChoices['MyDevice']).toBeDefined()
 	})
 
-	it('destroying the last address holding a name does clear it', () => {
+	it('destroying the last address holding a name takes it out of the device dropdown', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		destroyDevice(self, '10.0.0.5')
+
+		// gone from the picker, so it cannot be chosen for something new while it is away
+		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('keeps the channel choices, so a blip does not empty configured channel selections', () => {
+		// These lists are what the per-device option fields are built from, and an option id missing
+		// from a definition loses the value stored against it. Clearing them here used to blank the
+		// channel selection on every action and feedback pointing at the device, permanently - for a
+		// device that had merely missed a few mDNS responses. See `channelFieldDevices` in choices.ts.
 		const self = createMockInstance()
 		registerDevice(self, '10.0.0.5', 'MyDevice')
 		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
@@ -456,12 +470,10 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 
 		destroyDevice(self, '10.0.0.5')
 
-		expect(self.devicesChoices).toEqual([])
-		// video too: a device's channels must not outlive it in any picker
-		expect(self.rxChannelsChoices['MyDevice']).toBeUndefined()
-		expect(self.txChannelsChoices['MyDevice']).toBeUndefined()
-		expect(self.videoRxChannelsChoices['MyDevice']).toBeUndefined()
-		expect(self.videoTxChannelsChoices['MyDevice']).toBeUndefined()
+		expect(self.rxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.txChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoRxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoTxChannelsChoices['MyDevice']).toBeDefined()
 	})
 
 	it('clearDeviceTimeouts disarms the pending offline timeout', () => {

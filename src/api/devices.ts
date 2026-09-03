@@ -514,15 +514,20 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 		deviceName !== undefined &&
 		Object.entries(self.devicesData).some(([ip, device]) => ip !== deviceIp && device.name === deviceName)
 
-	// delete channels name choices - video included, or a device's video channels stay on offer in
-	// every channel picker after it goes away, and `updateVideoChannelChoices` sees them as unchanged
-	// when it comes back, so no rebuild is scheduled for the ones it re-reads
-	if (deviceName !== undefined && !nameStillOnline) {
-		delete self.rxChannelsChoices[deviceName]
-		delete self.txChannelsChoices[deviceName]
-		delete self.videoRxChannelsChoices[deviceName]
-		delete self.videoTxChannelsChoices[deviceName]
-	}
+	// The channel choice lists are deliberately *kept*. They are what `channelFieldDevices` builds
+	// per-device option fields from, and an option id missing from a definition loses the value
+	// stored against it - so clearing them here silently emptied the channel selection on every
+	// action and feedback pointing at this device, permanently, for a device that had merely blipped.
+	// See `channelFieldDevices` in choices.ts for the full reasoning.
+	//
+	// They are bounded by the number of distinct device names seen, and `initConnection` clears them
+	// outright, so a decommissioned device is forgotten on the next reconnect rather than lingering
+	// for the life of the process.
+	//
+	// Note the consequence for the rebuild path: a device returning with unchanged channels no longer
+	// makes `updateChannelChoices`/`updateVideoChannelChoices` see a change, so neither schedules a
+	// rebuild. That is correct - the fields never went away, so there is nothing to rebuild - and
+	// registration still schedules one for the device dropdown below.
 
 	// delete device choice, which is keyed by name
 	if (deviceName !== undefined && !nameStillOnline) {
