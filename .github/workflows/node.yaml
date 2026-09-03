@@ -1,0 +1,77 @@
+name: Node CI
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 26.x
+        # This should match the version of Node.js you have defined in the manifest.json runtime field
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.x
+      - name: Prepare Environment
+        run: |
+          corepack enable
+      - name: Prepare module
+        run: |
+          yarn install
+        env:
+          CI: true
+      - name: Build and check types
+        run: |
+          yarn build
+        env:
+          CI: true
+      - name: Run lint
+        run: |
+          yarn lint
+        env:
+          CI: true
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 26.x
+        # This should match the version of Node.js you have defined in the manifest.json runtime field
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.x
+      - name: Prepare Environment
+        run: |
+          corepack enable
+      - name: Prepare module
+        run: |
+          yarn install
+        env:
+          CI: true
+      - name: Run tests
+        run: |
+          yarn test:coverage
+        env:
+          CI: true
+      - name: Send coverage
+        uses: codecov/codecov-action@v5
+        with:
+          # Optional for public repos, but uploads are rate-limited without it.
+          # Add CODECOV_TOKEN as a repository secret to make uploads reliable.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          # codecov-action defaults this to false, so a failed upload reports a
+          # warning rather than failing the build. Set true to make it blocking.
+          fail_ci_if_error: false
