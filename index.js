@@ -25,6 +25,7 @@ class danteInstance extends InstanceBase {
 
 
 		this.INTERVAL = null; //used to poll the clock every second
+		this.MDNS_RESTART_TIMEOUT = null;
 		this.CONNECTED = false; //used for friendly notifying of the user that we have not received data yet
 
 		this.devicesData = {};
@@ -37,6 +38,12 @@ class danteInstance extends InstanceBase {
 			clearInterval(self.INTERVAL);
 			self.INTERVAL = null;
 		}
+		if (self.MDNS_RESTART_TIMEOUT) {
+			clearTimeout(self.MDNS_RESTART_TIMEOUT);
+			self.MDNS_RESTART_TIMEOUT = null;
+		}
+		self.mdns?.destroy();
+		self.mdns = null;
 		for (const ip of Object.keys(self.devicesData)) {
 			this.destroyDevice(ip);
 		}

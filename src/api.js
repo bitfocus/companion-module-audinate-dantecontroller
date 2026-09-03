@@ -521,15 +521,28 @@ module.exports = {
 		
 		self.setupInterval(); 
 		
-		if (availableIps.includes(self.config.ip)) {
-			self.mdns = multidns({interface: self.config.ip});
-		} else {
-			self.mdns = multidns();
-		}
-		self.mdns.on('response', self.dante_discovery.bind(this));
-		
+		this.initMdns(availableIps);
+	},
 
-		// dante devices discover
+	initMdns: function(availableIps) {
+		let self = this;
+		self.mdns?.destroy();
+
+		const mdns = availableIps.includes(self.config.ip) ? multidns({interface: self.config.ip}) : multidns();
+		self.mdns = mdns;
+
+		mdns.on('response', self.dante_discovery.bind(self));
+		mdns.on('error', (error) => {
+			if (self.mdns !== mdns) return;
+
+			self.log('error', 'mDNS discovery error: ' + error.message + '. Restarting in 5s.');
+			self.mdns = null;
+			mdns.destroy();
+			clearTimeout(self.MDNS_RESTART_TIMEOUT);
+			self.MDNS_RESTART_TIMEOUT = setTimeout(() => self.initMdns(availableIps), 5000);
+		});
+
+		// Dante devices discover
 		this.getMdnsServices();
 	},
 	
