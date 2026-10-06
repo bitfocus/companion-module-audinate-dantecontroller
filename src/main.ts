@@ -11,7 +11,7 @@ import {
 	DanteConnection,
 	cancelCheckFeedbacks,
 	initConnection,
-	destroyDevice,
+	clearDeviceTimeouts,
 	cancelUpdateData,
 	scheduleUpdateData,
 	cancelCheckVariables,
@@ -123,10 +123,7 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	}
 
 	async destroy(): Promise<void> {
-		for (const ip of Object.keys(this.devicesData)) {
-			destroyDevice(this, ip)
-		}
-		// destroyDevice queues a rebuild per device; none of them should reach a torn-down instance
+		clearDeviceTimeouts(this)
 		cancelUpdateData(this)
 		cancelCheckVariables(this)
 		cancelCheckFeedbacks(this)
