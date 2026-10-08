@@ -1,0 +1,1792 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { InstanceStatus, type LoggingSink } from '@companion-module/base'
+import type dgram from 'node:dgram'
+import {
+	intToBuffer,
+	bufferToInt,
+	incrementBE,
+	parseString,
+	parseStringAtPointer,
+	getChannelSubscriptionName,
+	hasAudioRxChannels,
+	hasAudioTxChannels,
+	findDeviceIpByName,
+	findAudioTxChannelByName,
+	findAudioRxChannelByName,
+	checkConnections,
+	registerDevice,
+	destroyDevice,
+	keepAlive,
+	clearDeviceTimeouts,
+	scheduleUpdateData,
+	updateData,
+	UPDATE_DEBOUNCE_MS,
+	UPDATE_MAX_WAIT_MS,
+	scheduleCheckVariables,
+	cancelCheckVariables,
+	scheduleCheckFeedbacks,
+	cancelCheckFeedbacks,
+	trackFeedbackDevices,
+	untrackFeedback,
+	cancelUpdateData,
+	flushUpdateData,
+	sendCommand,
+	makeCommand,
+	makeSettingCommand,
+	setChannelName,
+	makeAudioCrosspoint,
+	clearAudioCrosspoint,
+	clearAllAudioCrosspoints,
+	macForDevice,
+	resolveDeviceIp,
+	deviceByIdentifier,
+	deviceOptionValue,
+	deviceSelectedExpression,
+	updateChannelChoices,
+	getRxChannels,
+	getTxChannels,
+	firstChoiceId,
+	currentChoiceId,
+	parseHeartbeatReply,
+	parseCmcReply,
+	parseReply,
+	parseSettingsReply,
+	type DevicesData,
+} from '../index.js'
+import { DANTE_CONST } from '../const.js'
+import type DanteInstance from '../../main.js'
+
+// Real packets captured from a live Dante network during development, used to exercise
+// the protocol/size/magic-string checks and byte-offset parsing against genuine data
+// rather than only hand-built synthetic buffers.
+const REAL_HEARTBEAT_HEX =
+	'fffe005426900000001dc1fffe2c87d6417564696e617465000800011000000000348000000400040cd0000000100000000200100005b0c100000ad00000000000000000000007d6000000000000000000000000'
+const REAL_SETTINGS_HEX =
+	'ffff0034051f0000001dc1fffe2c87d6417564696e617465073d008000000000001800010000bb800000bb80000100000000bb80'
+const REAL_CMC_HEX = '120000280010100100010000001dc1fffe2c87d600020000a9fe78b721fc0000ac1f78b821fc0000'
+const REAL_ARC_HEX = '2729001c000b20000001020000000000000000000000000000000000'
+const REAL_DEVICE_IP = '169.254.120.183'
+
+// api.ts logs through its own module-level logger (createModuleLogger), not self.log.
+// That logger checks global.COMPANION_LOGGER fresh on every call, so a spy installed here
+// catches log calls from code under test without needing to recreate the logger instance.
+let loggerSink: ReturnType<typeof vi.fn<LoggingSink>>
+
+beforeEach(() => {
+	loggerSink = vi.fn<LoggingSink>()
+	global.COMPANION_LOGGER = loggerSink
+})
+
+afterEach(() => {
+	global.COMPANION_LOGGER = undefined
+})
+
+function makeRinfo(address: string, size: number): dgram.RemoteInfo {
+	return { address, size, port: 0, family: 'IPv4' }
+}
+
+function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: DevicesData } = {}): DanteInstance {
+	const base = {
+		devicesData: {},
+		sockets: {},
+		devicesChoices: [],
+		txChannelsChoices: {},
+		rxChannelsChoices: {},
+		videoTxChannelsChoices: {},
+		videoRxChannelsChoices: {},
+		txFriendlyNameRefreshCounter: 0,
+		counter: Buffer.from('0000', 'hex'),
+		mac: Buffer.from('aabbccddeeff', 'hex'),
+		debug: false,
+		timeout: 3000,
+		activeConnections: {},
+		configError: null,
+		CONNECTED: false,
+		INTERVAL: null,
+		mdns: { query: vi.fn(), on: vi.fn(), removeAllListeners: vi.fn(), destroy: vi.fn() },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		log: vi.fn(),
+		updateStatus: vi.fn(),
+		checkFeedbacks: vi.fn(),
+		checkFeedbacksById: vi.fn(),
+		checkAllFeedbacks: vi.fn(),
+		setActionDefinitions: vi.fn(),
+		setFeedbackDefinitions: vi.fn(),
+		setVariableDefinitions: vi.fn(),
+		setVariableValues: vi.fn(),
+		...overrides,
+	}
+	return base as unknown as DanteInstance
+}
+
+describe('intToBuffer', () => {
+	it('encodes a 2-byte big-endian value by default', () => {
+		expect(intToBuffer(0x1234)).toEqual(Buffer.from('1234', 'hex'))
+	})
+
+	it('encodes a single byte', () => {
+		expect(intToBuffer(0x42, 1)).toEqual(Buffer.from('42', 'hex'))
+	})
+
+	it('encodes a 4-byte value', () => {
+		expect(intToBuffer(0x01020304, 4)).toEqual(Buffer.from('01020304', 'hex'))
+	})
+
+	it('right-aligns an odd byte width into the last 2 bytes', () => {
+		expect(intToBuffer(0x00ab, 3)).toEqual(Buffer.from('0000ab', 'hex'))
+	})
+})
+
+describe('bufferToInt', () => {
+	it('decodes a 2-byte big-endian value by default', () => {
+		expect(bufferToInt(Buffer.from('1234', 'hex'))).toBe(0x1234)
+	})
+
+	it('decodes a single byte', () => {
+		expect(bufferToInt(Buffer.from('42', 'hex'), 0, 1)).toBe(0x42)
+	})
+
+	it('decodes a 4-byte value', () => {
+		expect(bufferToInt(Buffer.from('01020304', 'hex'), 0, 4)).toBe(0x01020304)
+	})
+
+	it('reads from a non-zero offset', () => {
+		expect(bufferToInt(Buffer.from('ffff1234', 'hex'), 2)).toBe(0x1234)
+	})
+
+	it('round-trips with intToBuffer', () => {
+		expect(bufferToInt(intToBuffer(0xabcd, 2), 0, 2)).toBe(0xabcd)
+	})
+})
+
+describe('incrementBE', () => {
+	it('increments the least significant byte', () => {
+		const buf = Buffer.from('0000', 'hex')
+		incrementBE(buf)
+		expect(buf).toEqual(Buffer.from('0001', 'hex'))
+	})
+
+	it('carries into the next byte on overflow', () => {
+		const buf = Buffer.from('00ff', 'hex')
+		incrementBE(buf)
+		expect(buf).toEqual(Buffer.from('0100', 'hex'))
+	})
+
+	it('wraps around when the whole buffer overflows', () => {
+		const buf = Buffer.from('ffff', 'hex')
+		incrementBE(buf)
+		expect(buf).toEqual(Buffer.from('0000', 'hex'))
+	})
+})
+
+describe('parseStringAtPointer', () => {
+	const packet = Buffer.concat([Buffer.from('2729', 'hex'), Buffer.from('Talkback\u0000', 'utf8')])
+
+	it('reads the string a non-zero pointer refers to', () => {
+		expect(parseStringAtPointer(packet, 2)).toBe('Talkback')
+	})
+
+	it('treats a zero pointer as absent rather than reading the packet header', () => {
+		// an unrouted rx channel has a zero source pointer; dereferencing it yielded "')"
+		expect(parseStringAtPointer(packet, 0)).toBeUndefined()
+	})
+
+	it('treats a pointer past the end of the packet as absent', () => {
+		expect(parseStringAtPointer(packet, 999)).toBeUndefined()
+	})
+})
+
+describe('parseString', () => {
+	it('decodes a NUL-terminated UTF-8 string', () => {
+		const buf = Buffer.concat([Buffer.from('Hello', 'utf8'), Buffer.from([0x00]), Buffer.from('trailing')])
+		// offset 0 is a valid fixed offset here - only packet-supplied *pointers* treat 0 as absent,
+		// which is what parseStringAtPointer is for
+		expect(parseString(buf, 0)).toBe('Hello')
+	})
+
+	it('runs to the end of the buffer when there is no terminator', () => {
+		expect(parseString(Buffer.from('Hello', 'utf8'), 0)).toBe('Hello')
+	})
+
+	it('returns undefined for an offset past the end', () => {
+		expect(parseString(Buffer.from('Hello', 'utf8'), 99)).toBeUndefined()
+	})
+
+	it('returns undefined when startIndex is past the end of the buffer', () => {
+		expect(parseString(Buffer.from('Hi', 'utf8'), 10)).toBeUndefined()
+	})
+})
+
+describe('getChannelSubscriptionName', () => {
+	it('prefers the friendly name over the plain name', () => {
+		expect(getChannelSubscriptionName({ friendlyName: 'Mic 1', name: 'Input 1' })).toBe('Mic 1')
+	})
+
+	it('falls back to the plain name when there is no friendly name', () => {
+		expect(getChannelSubscriptionName({ name: 'Input 1' })).toBe('Input 1')
+	})
+
+	it('returns undefined for an undefined channel', () => {
+		expect(getChannelSubscriptionName(undefined)).toBeUndefined()
+	})
+})
+
+describe('hasAudioRxChannels / hasAudioTxChannels', () => {
+	it('is true when the device has a positive channel count', () => {
+		expect(hasAudioRxChannels({ audioRx: { count: 2 } })).toBe(true)
+		expect(hasAudioTxChannels({ audioTx: { count: 1 } })).toBe(true)
+	})
+
+	it('is false when the count is zero, missing, or the device is undefined', () => {
+		expect(hasAudioRxChannels({ audioRx: { count: 0 } })).toBe(false)
+		expect(hasAudioRxChannels({})).toBe(false)
+		expect(hasAudioRxChannels(undefined)).toBe(false)
+		expect(hasAudioTxChannels({})).toBe(false)
+	})
+})
+
+describe('findDeviceIpByName / findAudioTxChannelByName / findAudioRxChannelByName', () => {
+	function createSelfWithDevice(): DanteInstance {
+		return createMockInstance({
+			devicesData: {
+				'10.0.0.5': {
+					name: 'MyDevice',
+					audioTx: {
+						1: { number: 1, name: 'Input 1' },
+						2: { number: 2, name: 'Input 2', friendlyName: 'Mic 2' },
+						count: 2,
+					},
+					audioRx: { 1: { number: 1, name: 'Output 1' }, count: 1 },
+				},
+			},
+		})
+	}
+
+	it('finds a device ip by name', () => {
+		expect(findDeviceIpByName(createSelfWithDevice(), 'MyDevice')).toBe('10.0.0.5')
+	})
+
+	it('returns undefined for an unknown device name', () => {
+		expect(findDeviceIpByName(createSelfWithDevice(), 'Nope')).toBeUndefined()
+	})
+
+	it('finds a tx channel by name, identified by ip', () => {
+		expect(findAudioTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Input 1')?.number).toBe(1)
+	})
+
+	it('finds a tx channel by friendly name, identified by device name', () => {
+		expect(findAudioTxChannelByName(createSelfWithDevice(), 'MyDevice', 'Mic 2')?.number).toBe(2)
+	})
+
+	it('finds an rx channel by name', () => {
+		expect(findAudioRxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Output 1')?.number).toBe(1)
+	})
+
+	it('does not mistake the count property for a channel', () => {
+		expect(findAudioTxChannelByName(createSelfWithDevice(), '10.0.0.5', 'Nonexistent')).toBeUndefined()
+	})
+})
+
+describe('checkConnections', () => {
+	it('returns true without updating status when already connected and all services active', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: true,
+		})
+		expect(checkConnections(self)).toBe(true)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+
+	it('transitions to Ok when all services become active', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: false,
+		})
+		expect(checkConnections(self)).toBe(true)
+		expect(self.CONNECTED).toBe(true)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Ok)
+	})
+
+	it('returns false and transitions to Disconnected when a service is inactive', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: false, SETTINGS: true, HEARTBEAT: true },
+			CONNECTED: true,
+		})
+		expect(checkConnections(self)).toBe(false)
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Disconnected)
+	})
+
+	it('returns false and transitions to Disconnected when mDNS is inactive', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: false },
+			CONNECTED: true,
+		})
+		expect(checkConnections(self)).toBe(false)
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Disconnected)
+	})
+
+	it('reports BadConfig instead of Ok when the configured interface is unusable', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: false,
+			configError: 'No network interface selected',
+		})
+		expect(checkConnections(self)).toBe(true)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.BadConfig, 'No network interface selected')
+		expect(self.updateStatus).not.toHaveBeenCalledWith(InstanceStatus.Ok)
+	})
+
+	it('reports Ok once the interface problem is cleared', () => {
+		const self = createMockInstance({
+			activeConnections: { ARC: true, CMC: true, SETTINGS: true, HEARTBEAT: true, MDNS: true },
+			CONNECTED: false,
+			configError: null,
+		})
+		checkConnections(self)
+		expect(self.updateStatus).toHaveBeenCalledWith(InstanceStatus.Ok)
+	})
+
+	it('returns false without updating status when already disconnected', () => {
+		const self = createMockInstance({ activeConnections: {}, CONNECTED: false })
+		expect(checkConnections(self)).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+})
+
+describe('registerDevice / destroyDevice / keepAlive', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it('registers the device with the given name and adds it to devicesChoices', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		expect(self.devicesData['10.0.0.5']?.name).toBe('MyDevice')
+		// choices are keyed by device name, which survives an address change
+		expect(self.devicesChoices).toContainEqual({ id: 'MyDevice', label: 'MyDevice' })
+	})
+
+	it('arms an offline-destroy timeout when self.timeout > 0', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		expect(self.devicesData['10.0.0.5']?.timeoutArray).toBeDefined()
+	})
+
+	it('does not arm a timeout when self.timeout is 0', () => {
+		const self = createMockInstance({ timeout: 0 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		expect(self.devicesData['10.0.0.5']?.timeoutArray).toBeUndefined()
+	})
+
+	it('destroys the device automatically once the timeout elapses without a keepAlive', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		vi.advanceTimersByTime(3000)
+		expect(self.devicesData['10.0.0.5']).toBeUndefined()
+		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('keepAlive resets the destroy timer, keeping the device alive past the original deadline', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		vi.advanceTimersByTime(2000)
+		keepAlive(self, '10.0.0.5')
+		vi.advanceTimersByTime(2000) // 4000ms since registration, but only 2000ms since the keepAlive reset
+		expect(self.devicesData['10.0.0.5']).toBeDefined()
+
+		vi.advanceTimersByTime(1000) // 3000ms since the keepAlive reset
+		expect(self.devicesData['10.0.0.5']).toBeUndefined()
+	})
+
+	it('keepAlive is a no-op for a device with no armed timeout', () => {
+		const self = createMockInstance()
+		expect(() => keepAlive(self, '10.0.0.5')).not.toThrow()
+	})
+
+	it('destroyDevice removes the device from devicesData and devicesChoices immediately', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		destroyDevice(self, '10.0.0.5')
+		expect(self.devicesData['10.0.0.5']).toBeUndefined()
+		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('registering the same name at a second address offers it once', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		// the device moved, or a second network carries it - either way the name is already offered
+		registerDevice(self, '10.0.0.7', 'MyDevice')
+		expect(self.devicesChoices).toEqual([{ id: 'MyDevice', label: 'MyDevice' }])
+	})
+
+	it('destroying a stale address leaves the name alone while another address still has it', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
+		self.txChannelsChoices['MyDevice'] = [{ id: 1, label: 'Out 1' }]
+		self.videoRxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video In 1' }]
+
+		// the device changed address: it re-registers straight away, and the record for the old
+		// address is destroyed a timeout later. Both are keyed by name, so destroying the old one
+		// must not take the live device's channel choices or dropdown entry with it.
+		registerDevice(self, '10.0.0.7', 'MyDevice')
+		destroyDevice(self, '10.0.0.5')
+
+		expect(self.devicesData['10.0.0.7']).toBeDefined()
+		expect(self.devicesChoices).toEqual([{ id: 'MyDevice', label: 'MyDevice' }])
+		expect(self.rxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.txChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoRxChannelsChoices['MyDevice']).toBeDefined()
+	})
+
+	it('destroying the last address holding a name takes it out of the device dropdown', () => {
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		destroyDevice(self, '10.0.0.5')
+
+		// gone from the picker, so it cannot be chosen for something new while it is away
+		expect(self.devicesChoices).toEqual([])
+	})
+
+	it('keeps the channel choices, so a blip does not empty configured channel selections', () => {
+		// These lists are what the per-device option fields are built from, and an option id missing
+		// from a definition loses the value stored against it. Clearing them here used to blank the
+		// channel selection on every action and feedback pointing at the device, permanently - for a
+		// device that had merely missed a few mDNS responses. See `channelFieldDevices` in choices.ts.
+		const self = createMockInstance()
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		self.rxChannelsChoices['MyDevice'] = [{ id: 1, label: 'In 1' }]
+		self.txChannelsChoices['MyDevice'] = [{ id: 1, label: 'Out 1' }]
+		self.videoRxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video In 1' }]
+		self.videoTxChannelsChoices['MyDevice'] = [{ id: 1, label: 'Video Out 1' }]
+
+		destroyDevice(self, '10.0.0.5')
+
+		expect(self.rxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.txChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoRxChannelsChoices['MyDevice']).toBeDefined()
+		expect(self.videoTxChannelsChoices['MyDevice']).toBeDefined()
+	})
+
+	it('clearDeviceTimeouts disarms the pending offline timeout', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		clearDeviceTimeouts(self)
+		vi.advanceTimersByTime(10000)
+
+		expect(self.devicesData['10.0.0.5']).toBeDefined()
+	})
+
+	it('a re-init that clears timeouts does not later destroy a re-registered device', () => {
+		const self = createMockInstance({ timeout: 3000 })
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+
+		// what initConnection does on re-init: disarm the old timers, then drop the device table
+		clearDeviceTimeouts(self)
+		self.devicesData = {}
+		self.devicesChoices = []
+
+		// discovery immediately re-finds the same device
+		registerDevice(self, '10.0.0.5', 'MyDevice')
+		keepAlive(self, '10.0.0.5')
+
+		// the timer armed before the re-init must not reach across and delete the live entry
+		vi.advanceTimersByTime(2999)
+		expect(self.devicesData['10.0.0.5']).toBeDefined()
+		// choices are keyed by device name, which survives an address change
+		expect(self.devicesChoices).toContainEqual({ id: 'MyDevice', label: 'MyDevice' })
+	})
+})
+
+describe('updateData with nothing discovered', () => {
+	/**
+	 * `configUpdated` calls this directly because every other rebuild trigger needs a device -
+	 * registration, a name change, channel choices, a settings reply, destruction. A network with no
+	 * Dante devices reaches none of them, so this one call is all a connection ever gets.
+	 */
+	it('still registers actions, feedbacks and variables', () => {
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+		expect(self.setFeedbackDefinitions).toHaveBeenCalledTimes(1)
+		expect(self.setVariableDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	it('registers the global variables that do not depend on a device', () => {
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		const defined = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		// the device-names list is the one variable that exists before anything is discovered
+		expect(Object.keys(defined)).toContain('devices')
+	})
+
+	it('still registers everything when reached the way configUpdated reaches it', () => {
+		// configUpdated schedules rather than rebuilding directly, so on a network where nothing is
+		// ever discovered the debounce is the only thing that can register any definitions at all
+		vi.useFakeTimers()
+		try {
+			const self = createMockInstance({ devicesData: {} })
+			scheduleUpdateData(self)
+
+			expect(self.setActionDefinitions).not.toHaveBeenCalled()
+			vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
+
+			expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+			expect(self.setFeedbackDefinitions).toHaveBeenCalledTimes(1)
+			expect(self.setVariableDefinitions).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('leaves every action and feedback definition parseable with no devices', () => {
+		// a dropdown with no choices can never validate, which fails the whole entity - so the
+		// empty-network rebuild must still give every dropdown something to offer
+		const self = createMockInstance({ devicesData: {} })
+		updateData(self)
+
+		const groups = [
+			(self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+			(self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0],
+		]
+		for (const definitions of groups) {
+			for (const [id, definition] of Object.entries(definitions as Record<string, { options?: unknown[] }>)) {
+				for (const option of (definition.options ?? []) as { id: string; type?: string; choices?: unknown[] }[]) {
+					if (option.type !== 'dropdown') continue
+					expect(option.choices?.length, `${id}.${option.id}`).toBeGreaterThan(0)
+				}
+			}
+		}
+	})
+})
+
+describe('scheduleUpdateData', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it('coalesces a burst of requests into a single rebuild', () => {
+		const self = createMockInstance()
+		for (let i = 0; i < 50; i++) scheduleUpdateData(self)
+
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+		vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	/** A request cadence that never leaves a quiet debounce window, whatever the window is set to. */
+	const RESTLESS_STEP = Math.floor(UPDATE_DEBOUNCE_MS * 0.8)
+
+	it('does not rebuild while requests keep arriving inside the debounce window', () => {
+		const self = createMockInstance()
+		// stops short of maxWait, so the only thing that could fire a rebuild is the window settling
+		const steps = Math.floor(UPDATE_MAX_WAIT_MS / RESTLESS_STEP) - 1
+		for (let i = 0; i < steps; i++) {
+			scheduleUpdateData(self)
+			vi.advanceTimersByTime(RESTLESS_STEP)
+		}
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+	})
+
+	it('rebuilds anyway once maxWait elapses under sustained load', () => {
+		const self = createMockInstance()
+		// a steady stream that never leaves a quiet window, as during discovery on a large network
+		const elapsed = UPDATE_MAX_WAIT_MS * 2
+		for (let i = 0; i < elapsed / RESTLESS_STEP; i++) {
+			scheduleUpdateData(self)
+			vi.advanceTimersByTime(RESTLESS_STEP)
+		}
+		// twice maxWait of sustained requests must have produced rebuilds, but only a handful
+		expect(self.setActionDefinitions).toHaveBeenCalled()
+		expect((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThan(5)
+	})
+
+	it('cancelUpdateData drops a pending rebuild', () => {
+		const self = createMockInstance()
+		scheduleUpdateData(self)
+		cancelUpdateData(self)
+		vi.advanceTimersByTime(10000)
+		expect(self.setActionDefinitions).not.toHaveBeenCalled()
+	})
+
+	it('flushUpdateData runs a pending rebuild immediately', () => {
+		const self = createMockInstance()
+		scheduleUpdateData(self)
+		flushUpdateData(self)
+		expect(self.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+
+	it('keeps separate debounce state per instance', () => {
+		const a = createMockInstance()
+		const b = createMockInstance()
+		scheduleUpdateData(a)
+		cancelUpdateData(a)
+		scheduleUpdateData(b)
+		vi.advanceTimersByTime(UPDATE_DEBOUNCE_MS)
+		expect(a.setActionDefinitions).not.toHaveBeenCalled()
+		expect(b.setActionDefinitions).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe('scheduleCheckVariables', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function twoDevices() {
+		return createMockInstance({
+			devicesData: {
+				'10.0.0.5': { name: 'DeviceA', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+				'10.0.0.6': { name: 'DeviceB', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
+			},
+		})
+	}
+
+	function pushes(self: DanteInstance) {
+		return (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	it('pushes immediately on the leading edge', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		expect(pushes(self)).toHaveLength(1)
+	})
+
+	it('collapses a burst within the window into the leading push plus one trailing push', () => {
+		const self = twoDevices()
+		for (let i = 0; i < 20; i++) scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		expect(pushes(self)).toHaveLength(1) // leading only so far
+		vi.advanceTimersByTime(30)
+		expect(pushes(self)).toHaveLength(2) // trailing edge fires once
+	})
+
+	it('does not lose devices queued behind the leading edge', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'ip') // consumes the leading edge
+		scheduleCheckVariables(self, '10.0.0.5', 'rx_names')
+		scheduleCheckVariables(self, '10.0.0.6', 'rx_names')
+		vi.advanceTimersByTime(30)
+
+		// a last-args throttle would keep only DeviceB here and silently drop DeviceA's update
+		expect(pushes(self)).toHaveLength(2)
+		const last = pushes(self)[1][0]
+		expect(last).toHaveProperty('DeviceA_rx_names')
+		expect(last).toHaveProperty('DeviceB_rx_names')
+	})
+
+	it('unions requested types queued behind the leading edge into one push', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'ip') // consumes the leading edge
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		scheduleCheckVariables(self, '10.0.0.5', 'rx_names')
+		vi.advanceTimersByTime(30)
+
+		// the two queued requests coalesce into a single trailing push carrying both types
+		expect(pushes(self)).toHaveLength(2)
+		const last = pushes(self)[1][0]
+		expect(last).toHaveProperty('DeviceA_rx')
+		expect(last).toHaveProperty('DeviceA_rx_names')
+	})
+
+	it('an unscoped request widens the window to every device', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		scheduleCheckVariables(self) // all devices, all types
+		vi.advanceTimersByTime(30)
+
+		const last = pushes(self)[pushes(self).length - 1][0]
+		expect(last).toHaveProperty('DeviceA_ip')
+		expect(last).toHaveProperty('DeviceB_ip')
+	})
+
+	it('refreshes pullup on a default sweep', () => {
+		const self = twoDevices()
+		self.devicesData['10.0.0.5'].pullup = '0%'
+		scheduleCheckVariables(self)
+
+		const last = pushes(self)[pushes(self).length - 1][0]
+		expect(last).toHaveProperty('DeviceA_pullup', '0%')
+	})
+
+	it('cancelCheckVariables drops a pending trailing push', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self, '10.0.0.5', 'rx') // leading
+		scheduleCheckVariables(self, '10.0.0.6', 'rx') // queued for trailing
+		const before = pushes(self).length
+
+		cancelCheckVariables(self)
+		vi.advanceTimersByTime(1000)
+		expect(pushes(self)).toHaveLength(before)
+	})
+
+	it('keeps separate throttle state per instance', () => {
+		const a = twoDevices()
+		const b = twoDevices()
+		scheduleCheckVariables(a, '10.0.0.5', 'rx')
+		scheduleCheckVariables(b, '10.0.0.5', 'rx')
+		expect(pushes(a)).toHaveLength(1)
+		expect(pushes(b)).toHaveLength(1)
+	})
+})
+
+describe('scheduleCheckFeedbacks', () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function byId(self: DanteInstance) {
+		return (self.checkFeedbacksById as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	function byType(self: DanteInstance) {
+		return (self.checkAllFeedbacks as ReturnType<typeof vi.fn>).mock.calls
+	}
+
+	it('checks only the feedbacks that read the changed device', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.7', '10.0.0.8'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byId(self)[0]).toEqual(['fb-a'])
+	})
+
+	it('matches on the source device too, not just the destination', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		// a tx-channel rename on the *source* device must still re-check the feedback
+		scheduleCheckFeedbacks(self, '10.0.0.6')
+		expect(byId(self)[0]).toEqual(['fb-a'])
+	})
+
+	it('always includes wildcard feedbacks whose devices did not resolve', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-wild', ['10.0.0.9', undefined])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byId(self)[0]).toContain('fb-wild')
+		expect(byId(self)[0]).toContain('fb-a')
+	})
+
+	it('does not repeat a wildcard feedback that also matches on a resolved device', () => {
+		const self = createMockInstance()
+		// resolved on one end, unresolved on the other: present in both the wildcard set and the map
+		trackFeedbackDevices(self, 'fb-wild', ['10.0.0.9', undefined])
+
+		scheduleCheckFeedbacks(self, '10.0.0.9')
+		expect(byId(self)[0]).toEqual(['fb-wild'])
+	})
+
+	it('issues no check when no tracked feedback reads the changed device', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.99')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+		expect(byType(self)).toHaveLength(0)
+	})
+
+	it('falls back to a type-level check for an unattributable change', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6'])
+
+		scheduleCheckFeedbacks(self)
+		expect(byType(self)).toHaveLength(1)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('falls back to a type-level check when nothing has been tracked yet', () => {
+		const self = createMockInstance()
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		expect(byType(self)).toHaveLength(1)
+	})
+
+	it('unions devices queued behind the leading edge into one targeted check', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.6'])
+		trackFeedbackDevices(self, 'fb-c', ['10.0.0.7'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.7') // consumes the leading edge
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		scheduleCheckFeedbacks(self, '10.0.0.6')
+		vi.advanceTimersByTime(30)
+
+		expect(byId(self)).toHaveLength(2)
+		expect(byId(self)[1].sort()).toEqual(['fb-a', 'fb-b'])
+	})
+
+	it('re-tracking a feedback replaces its previous devices', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.6']) // user repointed the dropdown
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('re-tracking with resolved devices clears an earlier wildcard registration', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', undefined])
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5', '10.0.0.6']) // the device was discovered
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.9'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.9')
+		expect(byId(self)[0]).toEqual(['fb-b'])
+	})
+
+	it('untrackFeedback stops a removed feedback being checked', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		untrackFeedback(self, 'fb-a')
+
+		scheduleCheckFeedbacks(self, '10.0.0.5')
+		vi.advanceTimersByTime(30)
+		expect(byId(self)).toHaveLength(0)
+	})
+
+	it('cancelCheckFeedbacks drops a pending trailing check', () => {
+		const self = createMockInstance()
+		trackFeedbackDevices(self, 'fb-a', ['10.0.0.5'])
+		trackFeedbackDevices(self, 'fb-b', ['10.0.0.6'])
+
+		scheduleCheckFeedbacks(self, '10.0.0.5') // leading
+		scheduleCheckFeedbacks(self, '10.0.0.6') // queued
+		const before = byId(self).length
+
+		cancelCheckFeedbacks(self)
+		vi.advanceTimersByTime(1000)
+		expect(byId(self)).toHaveLength(before)
+	})
+})
+
+describe('firstChoiceId / currentChoiceId', () => {
+	// Sample rates as the module stores them: choice ids are strings, device.sr is a number.
+	const rates = [
+		{ id: '44100', label: '44.1 kHz' },
+		{ id: '48000', label: '48 kHz' },
+		{ id: '96000', label: '96 kHz' },
+	]
+	// Encodings: the device's current value is the decoded label, the choice id is the code.
+	const encodings = [
+		{ id: '16', label: 'PCM16' },
+		{ id: '24', label: 'PCM24' },
+		{ id: '32', label: 'PCM32' },
+	]
+
+	it('firstChoiceId takes the first entry of the list actually offered', () => {
+		expect(firstChoiceId(rates, 0)).toBe('44100')
+	})
+
+	it('firstChoiceId falls back when there is nothing to offer', () => {
+		expect(firstChoiceId([], 0)).toBe(0)
+		expect(firstChoiceId([], '')).toBe('')
+	})
+
+	it('currentChoiceId matches a numeric current value against string ids', () => {
+		// TAV-MINEOLA22XLR runs at 48k while supporting 44.1/48/88.2/96
+		expect(currentChoiceId(rates, 48000, 0)).toBe('48000')
+	})
+
+	it('currentChoiceId matches a decoded label against its code', () => {
+		// device.encoding is stored as 'PCM24', the choice id is '24'
+		expect(currentChoiceId(encodings, 'PCM24', 0)).toBe('24')
+	})
+
+	it('currentChoiceId falls back to the first choice when the current value is unknown', () => {
+		expect(currentChoiceId(rates, 192000, 0)).toBe('44100')
+		expect(currentChoiceId(rates, undefined, 0)).toBe('44100')
+	})
+
+	it('currentChoiceId falls back to the fallback when there are no choices', () => {
+		expect(currentChoiceId([], 48000, 0)).toBe(0)
+	})
+
+	it('prefers an id match over a label match', () => {
+		const ambiguous = [
+			{ id: 'a', label: 'b' },
+			{ id: 'b', label: 'c' },
+		]
+		expect(currentChoiceId(ambiguous, 'b', '')).toBe('b')
+	})
+})
+
+describe('channel query paging', () => {
+	function withCounts(rx: number, tx: number) {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: {
+				'10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count: rx }, audioTx: { count: tx } },
+			},
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('0001', 'hex'),
+		})
+		return { self, send }
+	}
+
+	/**
+	 * The starting channel a query asks for.
+	 *
+	 * makeCommand lays out protocol(2) length(2) counter(2) opcode(2) requestFlag(2) then the
+	 * arguments, so argument bytes 2-3 - which hold the channel as a big-endian u16 - are at packet
+	 * offset 12.
+	 */
+	const startingChannel = (packet: Buffer) => packet.readUInt16BE(12)
+
+	it('pages the receive query by the receive count', () => {
+		const { self, send } = withCounts(32, 8)
+		getRxChannels(self, '10.0.0.5')
+		expect(send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))).toEqual([1, 17])
+	})
+
+	it('pages the transmit query by 32', () => {
+		const { self, send } = withCounts(8, 64)
+		getTxChannels(self, '10.0.0.5')
+		expect(send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))).toEqual([1, 33])
+	})
+
+	it('sends one probe when the channel count is not yet known', () => {
+		const { self, send } = withCounts(0, 0)
+		getRxChannels(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(1)
+		expect(startingChannel(send.mock.calls[0][0] as Buffer)).toBe(1)
+	})
+
+	it('emits the exact bytes the devices are known to accept', () => {
+		const { self, send } = withCounts(4, 0)
+		getRxChannels(self, '10.0.0.5')
+		expect((send.mock.calls[0][0] as Buffer).toString('hex')).toBe('27290010000130000000000100010000')
+	})
+
+	it('pages past channel 255 rather than throwing', () => {
+		const { self, send } = withCounts(512, 0)
+		expect(() => getRxChannels(self, '10.0.0.5')).not.toThrow()
+
+		const starts = send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))
+		expect(starts).toHaveLength(32)
+		expect(starts[0]).toBe(1)
+		expect(starts[16]).toBe(257) // the page a single-byte write could not express
+		expect(starts[31]).toBe(497)
+	})
+
+	it('covers every channel of a 512-channel device exactly once', () => {
+		const { self, send } = withCounts(512, 0)
+		getRxChannels(self, '10.0.0.5')
+		const starts = send.mock.calls.map(([packet]) => startingChannel(packet as Buffer))
+		expect(starts).toEqual(Array.from({ length: 32 }, (_, i) => i * 16 + 1))
+	})
+})
+
+describe('macForDevice', () => {
+	const CHOSEN = Buffer.from('aaaaaaaaaaaa', 'hex')
+
+	it('uses the card recorded for that device', () => {
+		const self = createMockInstance({
+			mac: CHOSEN,
+			devicesData: { '10.0.0.5': { name: 'A', interfaceMac: 'bbbbbbbbbbbb' } },
+		})
+		expect(macForDevice(self, '10.0.0.5').toString('hex')).toBe('bbbbbbbbbbbb')
+	})
+
+	it('falls back to the instance card when the device has none recorded', () => {
+		const self = createMockInstance({ mac: CHOSEN, devicesData: { '10.0.0.5': { name: 'A' } } })
+		expect(macForDevice(self, '10.0.0.5')).toBe(CHOSEN)
+	})
+
+	it('falls back for a device that is not registered', () => {
+		const self = createMockInstance({ mac: CHOSEN, devicesData: {} })
+		expect(macForDevice(self, '10.0.0.9')).toBe(CHOSEN)
+	})
+
+	it('gives each device its own card when they are on different networks', () => {
+		// the case a single instance-wide address could not express: two Dante networks, where one
+		// address is wrong for whichever device did not happen to answer mDNS first
+		const self = createMockInstance({
+			mac: Buffer.alloc(6),
+			devicesData: {
+				'10.0.0.5': { name: 'A', interfaceMac: 'aaaaaaaaaaaa' },
+				'192.168.7.9': { name: 'B', interfaceMac: 'cccccccccccc' },
+			},
+		})
+		expect(macForDevice(self, '10.0.0.5').toString('hex')).toBe('aaaaaaaaaaaa')
+		expect(macForDevice(self, '192.168.7.9').toString('hex')).toBe('cccccccccccc')
+	})
+
+	it('embeds the per-device card in the settings command itself', () => {
+		const self = createMockInstance({
+			mac: Buffer.alloc(6),
+			counter: Buffer.from('0001', 'hex'),
+			devicesData: {
+				'10.0.0.5': { name: 'A', interfaceMac: 'aaaaaaaaaaaa' },
+				'192.168.7.9': { name: 'B', interfaceMac: 'cccccccccccc' },
+			},
+		})
+		const a = makeSettingCommand(self, 0x0081, Buffer.alloc(4), '10.0.0.5')
+		const b = makeSettingCommand(self, 0x0081, Buffer.alloc(4), '192.168.7.9')
+
+		// the hardware address sits at offset 8, after protocol, length, counter and the start block
+		expect(a.subarray(8, 14).toString('hex')).toBe('aaaaaaaaaaaa')
+		expect(b.subarray(8, 14).toString('hex')).toBe('cccccccccccc')
+	})
+
+	it('uses the instance card when no device is named', () => {
+		const self = createMockInstance({ mac: CHOSEN, counter: Buffer.from('0001', 'hex'), devicesData: {} })
+		expect(makeSettingCommand(self, 0x0081, Buffer.alloc(4)).subarray(8, 14)).toEqual(CHOSEN)
+	})
+})
+
+describe('resolveDeviceIp / deviceByIdentifier', () => {
+	function twoDevices() {
+		return createMockInstance({
+			devicesData: {
+				'10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } },
+				'10.0.0.6': { name: 'DeviceB', ports: { ARC: 4440 } },
+			},
+		})
+	}
+
+	it('resolves a device name, which is what dropdowns now store', () => {
+		expect(resolveDeviceIp(twoDevices(), 'DeviceB')).toBe('10.0.0.6')
+	})
+
+	it('resolves an address, which is what actions saved earlier store', () => {
+		expect(resolveDeviceIp(twoDevices(), '10.0.0.5')).toBe('10.0.0.5')
+	})
+
+	it('returns undefined for an unknown device and for an empty identifier', () => {
+		expect(resolveDeviceIp(twoDevices(), 'Nope')).toBeUndefined()
+		expect(resolveDeviceIp(twoDevices(), '')).toBeUndefined()
+	})
+
+	it('follows a device to its new address after renumbering', () => {
+		// the point of keying by name: link-local and DHCP reassign addresses, names persist
+		const renumbered = createMockInstance({
+			devicesData: { '169.254.99.1': { name: 'DeviceA', ports: { ARC: 4440 } } },
+		})
+		expect(resolveDeviceIp(renumbered, 'DeviceA')).toBe('169.254.99.1')
+	})
+
+	it('deviceByIdentifier returns the same record either way', () => {
+		const self = twoDevices()
+		expect(deviceByIdentifier(self, 'DeviceA')).toBe(self.devicesData['10.0.0.5'])
+		expect(deviceByIdentifier(self, '10.0.0.5')).toBe(self.devicesData['10.0.0.5'])
+		expect(deviceByIdentifier(self, 'Nope')).toBeUndefined()
+	})
+
+	it('sendCommand accepts a name as well as an address', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		const buf = Buffer.from('aabb', 'hex')
+
+		sendCommand(self, buf, 'DeviceA')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
+
+		send.mockClear()
+		sendCommand(self, buf, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
+	})
+})
+
+describe('updateChannelChoices', () => {
+	function withChannels(channelType: 'rx' | 'tx', count: number) {
+		const io: Record<string | number, unknown> = { count }
+		for (let i = 1; i <= count; i++) io[i] = { number: i, name: `Ch ${i}` }
+		const field = channelType === 'rx' ? 'audioRx' : 'audioTx'
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: {}, [field]: io } },
+		})
+	}
+
+	it('offers one entry per channel, numbered from 1', () => {
+		const self = withChannels('rx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toEqual([
+			{ id: 1, label: 'Ch 1' },
+			{ id: 2, label: 'Ch 2' },
+			{ id: 3, label: 'Ch 3' },
+		])
+	})
+
+	it('offers no "None" entry, which would only mean "do nothing"', () => {
+		const self = withChannels('rx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev.map((choice) => choice.id)).not.toContain(0)
+	})
+
+	it('so the first choice is a real channel rather than a no-op default', () => {
+		const self = withChannels('tx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'tx')
+		expect(self.txChannelsChoices.Dev[0].id).toBe(1)
+	})
+
+	it('builds tx choices without leaving a gap where "None" used to sit', () => {
+		// the tx branch assigned by index, which relied on the None entry occupying index 0
+		const self = withChannels('tx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'tx')
+		expect(self.txChannelsChoices.Dev).toHaveLength(3)
+		expect(self.txChannelsChoices.Dev.every((choice) => choice !== undefined)).toBe(true)
+	})
+
+	it('rebuilds when a channel is renamed', () => {
+		const self = withChannels('rx', 2)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		;(self.devicesData['10.0.0.5'].audioRx as Record<number, { name: string }>)[2].name = 'Renamed'
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev[1].label).toBe('Renamed')
+	})
+
+	it('rebuilds when the channel count shrinks', () => {
+		const self = withChannels('rx', 3)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		const io = self.devicesData['10.0.0.5'].audioRx as { count: number }
+		io.count = 1
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toHaveLength(1)
+	})
+
+	it('produces an empty list for a device with no channels', () => {
+		const self = withChannels('rx', 0)
+		updateChannelChoices(self, '10.0.0.5', 'rx')
+		expect(self.rxChannelsChoices.Dev).toEqual([])
+	})
+})
+
+describe('deviceOptionValue / deviceSelectedExpression', () => {
+	function self() {
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: {} } },
+		})
+	}
+
+	it('reads a value stored under the device name', () => {
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', 'DeviceA', 0)).toBe(3)
+	})
+
+	it('reads a value stored under the device address, as older actions hold it', () => {
+		expect(deviceOptionValue(self(), { 'channel_10.0.0.5': 7 }, 'channel', '10.0.0.5', 0)).toBe(7)
+	})
+
+	it('finds the name-keyed value even when the picker still holds an address', () => {
+		// the state right after a device is re-picked: picker updated, old key not yet cleared
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', '10.0.0.5', 0)).toBe(3)
+	})
+
+	it('prefers the name-keyed value over a stale address-keyed one', () => {
+		const options = { channel_DeviceA: 3, 'channel_10.0.0.5': 7 }
+		expect(deviceOptionValue(self(), options, 'channel', '10.0.0.5', 0)).toBe(3)
+	})
+
+	it('falls back when neither key is present', () => {
+		expect(deviceOptionValue(self(), {}, 'channel', 'DeviceA', 0)).toBe(0)
+		expect(deviceOptionValue(self(), {}, 'sr', 'DeviceA', '')).toBe('')
+	})
+
+	it('builds an expression matching either the name or the address', () => {
+		expect(deviceSelectedExpression('device', 'DeviceA', '10.0.0.5')).toBe(
+			"$(options:device) == 'DeviceA' || $(options:device) == '10.0.0.5'",
+		)
+	})
+})
+
+describe('sendCommand', () => {
+	it('sends via the port learned for the given service', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		const buf = Buffer.from('aabb', 'hex')
+		sendCommand(self, buf, '10.0.0.5')
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 4440, '10.0.0.5', expect.any(Function))
+	})
+
+	it('uses forcePort when given, overriding the learned port', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { ports: { CMC: 8800 } } },
+			sockets: { CMC: { send } as unknown as dgram.Socket },
+		})
+		const buf = Buffer.from('aabb', 'hex')
+		sendCommand(self, buf, '10.0.0.5', 'CMC', 9999)
+		expect(send).toHaveBeenCalledWith(buf, 0, buf.length, 9999, '10.0.0.5', expect.any(Function))
+	})
+
+	it('logs an error and sends nothing when no port is known', () => {
+		const send = vi.fn()
+		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+		expect(send).not.toHaveBeenCalled()
+		expect(loggerSink).toHaveBeenCalledWith('api:connection', 'error', expect.stringContaining('Undefined port'))
+	})
+})
+
+/**
+ * A failed send must not be allowed to reach the socket's own 'error' handler.
+ *
+ * That handler marks the service down, and nothing sets it back up short of a fresh bind - so one
+ * undeliverable datagram would otherwise latch the connection into Disconnected for good. Passing a
+ * callback to `dgram.send` is what keeps the error here instead.
+ */
+describe('sendCommand failure handling', () => {
+	/** A socket whose send fails the given number of times, then succeeds. */
+	function failingSocket(error: NodeJS.ErrnoException, failures = Infinity) {
+		let sent = 0
+		const send = vi.fn(
+			(
+				_buf: Buffer,
+				_offset: number,
+				_length: number,
+				_port: number,
+				_address: string,
+				callback: (error: Error | null) => void,
+			) => {
+				sent++
+				callback(sent <= failures ? error : null)
+			},
+		)
+		return send
+	}
+
+	function instanceWith(send: ReturnType<typeof vi.fn>) {
+		return createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'DeviceA', ports: { ARC: 4440 } } } as unknown as DevicesData,
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			activeConnections: { ARC: true },
+			CONNECTED: true,
+		})
+	}
+
+	const unreachable: NodeJS.ErrnoException = Object.assign(new Error('send EHOSTUNREACH'), { code: 'EHOSTUNREACH' })
+
+	it('passes a callback, so dgram reports the error there rather than on the socket', () => {
+		const send = failingSocket(unreachable)
+		sendCommand(instanceWith(send), Buffer.from('aa', 'hex'), '10.0.0.5')
+		expect(send.mock.calls[0][5]).toBeTypeOf('function')
+	})
+
+	it('leaves the service up and the status alone when a send fails', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		expect(self.activeConnections.ARC).toBe(true)
+		expect(self.CONNECTED).toBe(true)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+
+	it('reports the failure once, naming the device', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		expect(loggerSink).toHaveBeenCalledWith(
+			'api:connection',
+			'warn',
+			expect.stringContaining('ARC send to DeviceA (10.0.0.5) failed'),
+		)
+	})
+
+	it('does not repeat itself while the same failure persists', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		// a channel query is up to sixteen datagrams; one line, not sixteen
+		for (let i = 0; i < 16; i++) sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(1)
+	})
+
+	it('reports again after a success, so a device that comes and goes is not silenced', () => {
+		// fails, succeeds, then fails again
+		const self = instanceWith(failingSocket(unreachable, 1))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const sendAgain = failingSocket(unreachable)
+		self.sockets.ARC = { send: sendAgain } as unknown as dgram.Socket
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(2)
+	})
+
+	it('reports a different error code separately, since it is different news', () => {
+		const self = instanceWith(failingSocket(unreachable))
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const refused: NodeJS.ErrnoException = Object.assign(new Error('send EPERM'), { code: 'EPERM' })
+		self.sockets.ARC = { send: failingSocket(refused) } as unknown as dgram.Socket
+		sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')
+
+		const warnings = loggerSink.mock.calls.filter(([, level]) => level === 'warn')
+		expect(warnings).toHaveLength(2)
+	})
+
+	it('survives a send that throws synchronously, as a closed socket does', () => {
+		const send = vi.fn(() => {
+			throw Object.assign(new Error('Not running'), { code: 'ERR_SOCKET_DGRAM_NOT_RUNNING' })
+		})
+		const self = instanceWith(send)
+
+		expect(() => sendCommand(self, Buffer.from('aa', 'hex'), '10.0.0.5')).not.toThrow()
+		expect(self.activeConnections.ARC).toBe(true)
+		expect(loggerSink).toHaveBeenCalledWith('api:connection', 'warn', expect.stringContaining('Not running'))
+	})
+})
+
+describe('makeCommand', () => {
+	it('builds an ARC command with the CONTROL protocol marker and increments the counter', () => {
+		const self = createMockInstance({ counter: Buffer.from('0000', 'hex') })
+		const buf = makeCommand(self, 0x1002)
+		expect(buf.readUInt16BE(0)).toBe(DANTE_CONST.PROTOCOL.CONTROL)
+		expect(buf.readUInt16BE(2)).toBe(buf.length) // length field matches the actual payload size
+		expect(buf.readUInt16BE(6)).toBe(0x1002) // commandType
+		expect(self.counter).toEqual(Buffer.from('0001', 'hex'))
+	})
+
+	it('includes the given command arguments in the payload', () => {
+		const self = createMockInstance()
+		const args = Buffer.from('deadbeef', 'hex')
+		const buf = makeCommand(self, 0x1002, args)
+		expect(buf.subarray(10, 14)).toEqual(args)
+	})
+})
+
+describe('makeSettingCommand', () => {
+	it('builds a SETTINGS command embedding the protocol marker, mac address, and commandType', () => {
+		const mac = Buffer.from('aabbccddeeff', 'hex')
+		const self = createMockInstance({ counter: Buffer.from('0000', 'hex'), mac })
+		const buf = makeSettingCommand(self, 0x0081)
+		expect(buf.readUInt16BE(0)).toBe(DANTE_CONST.PROTOCOL.SETTINGS)
+		expect(buf.subarray(8, 14)).toEqual(mac)
+		expect(buf.readUInt16BE(26)).toBe(0x0081)
+		expect(self.counter).toEqual(Buffer.from('0001', 'hex'))
+	})
+})
+
+describe('setChannelName', () => {
+	it("throws for a channel type that isn't 'rx' or 'tx'", () => {
+		const self = createMockInstance()
+		expect(() => setChannelName(self, '10.0.0.5', 'name', 'bogus' as 'rx', 1)).toThrow(
+			"Invalid Channel Type - must be 'tx' or 'rx'",
+		)
+	})
+
+	it('sends a command for a valid rx channel rename', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		setChannelName(self, '10.0.0.5', 'NewName', 'rx', 3)
+		expect(send).toHaveBeenCalled()
+	})
+})
+
+describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
+	it('makeAudioCrosspoint logs an error and sends nothing when the destination device cannot be resolved', () => {
+		const send = vi.fn()
+		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
+		makeAudioCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')
+		expect(send).not.toHaveBeenCalled()
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
+	})
+
+	it('makeAudioCrosspoint resolves an IP-address destination directly, without a name lookup', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dest', ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		makeAudioCrosspoint(self, '10.0.0.5', 'Input 1', 'SourceDevice', '1')
+		expect(send).toHaveBeenCalledWith(expect.any(Buffer), 0, expect.any(Number), 4440, '10.0.0.5', expect.any(Function))
+	})
+
+	it('clearAudioCrosspoint logs an error when the destination device cannot be resolved', () => {
+		const self = createMockInstance()
+		clearAudioCrosspoint(self, 'UnknownDevice', '1')
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
+	})
+})
+
+describe('clearAllAudioCrosspoints', () => {
+	function withRx(count: number) {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('4242', 'hex'),
+		})
+		return { self, send }
+	}
+
+	it('clears a whole device in a single packet', () => {
+		const { self, send } = withRx(8)
+		clearAllAudioCrosspoints(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(1)
+	})
+
+	it('emits the byte layout the device accepts', () => {
+		const { self, send } = withRx(2)
+		clearAllAudioCrosspoints(self, '10.0.0.5')
+
+		// protocol, length, counter, opcode 0x3014, then [count u32][channel u32...] and a trailing 0.
+		// The count's high half comes from makeCommand's two zero request-flag bytes.
+		expect((send.mock.calls[0][0] as Buffer).toString('hex')).toBe('272900154242301400000002000000010000000200')
+	})
+
+	it('splits a high channel count across packets rather than one huge datagram', () => {
+		const { self, send } = withRx(40)
+		clearAllAudioCrosspoints(self, '10.0.0.5')
+		expect(send).toHaveBeenCalledTimes(3) // 16 + 16 + 8
+
+		const channelsIn = (call: number) => {
+			const packet = send.mock.calls[call][0] as Buffer
+			// count is a u32 spanning offsets 8-11; its low half sits at 10
+			return packet.readUInt16BE(10)
+		}
+		expect([channelsIn(0), channelsIn(1), channelsIn(2)]).toEqual([16, 16, 8])
+	})
+
+	it('covers every channel exactly once across the batches', () => {
+		const { self, send } = withRx(40)
+		clearAllAudioCrosspoints(self, '10.0.0.5')
+
+		const seen: number[] = []
+		for (const [packet] of send.mock.calls as [Buffer][]) {
+			const count = packet.readUInt16BE(10)
+			for (let i = 0; i < count; i++) seen.push(packet.readUInt32BE(12 + 4 * i))
+		}
+		expect(seen).toEqual(Array.from({ length: 40 }, (_, i) => i + 1))
+	})
+
+	it('sends nothing when the device has no known receive channels', () => {
+		const { self, send } = withRx(0)
+		clearAllAudioCrosspoints(self, '10.0.0.5')
+		expect(send).not.toHaveBeenCalled()
+	})
+
+	it('resolves a device name as well as an IP', () => {
+		const { self, send } = withRx(4)
+		clearAllAudioCrosspoints(self, 'Dev')
+		expect(send).toHaveBeenCalledTimes(1)
+	})
+
+	it('logs an error for an unknown device', () => {
+		const { self, send } = withRx(4)
+		clearAllAudioCrosspoints(self, 'NoSuchDevice')
+		expect(send).not.toHaveBeenCalled()
+		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining('NoSuchDevice'))
+	})
+})
+
+describe('parseHeartbeatReply', () => {
+	it('keeps the sending device online on a valid packet (real capture)', () => {
+		const self = createMockInstance({
+			devicesData: { [REAL_DEVICE_IP]: { name: 'DeviceA', ports: {}, timeoutArray: [] } } as unknown as DevicesData,
+		})
+		const reply = Buffer.from(REAL_HEARTBEAT_HEX, 'hex')
+		parseHeartbeatReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		// keepAlive re-arms the device's offline timer
+		expect(self.devicesData[REAL_DEVICE_IP].timeoutArray?.[0]).toBeDefined()
+	})
+
+	it('does not report the status itself, leaving that to checkConnections', () => {
+		// forcing Ok from one socket's traffic is what made the status flap - see the handler
+		const self = createMockInstance({ CONNECTED: false })
+		const reply = Buffer.from(REAL_HEARTBEAT_HEX, 'hex')
+		parseHeartbeatReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+
+	it('ignores a packet with the wrong protocol marker', () => {
+		const self = createMockInstance({ CONNECTED: false })
+		const reply = Buffer.alloc(84)
+		parseHeartbeatReply(self, reply, makeRinfo(REAL_DEVICE_IP, 84))
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+})
+
+describe('parseCmcReply', () => {
+	it('learns the SETTINGS port for an already-registered device (real capture)', () => {
+		const self = createMockInstance({
+			devicesData: { [REAL_DEVICE_IP]: { name: 'NAM-262de4', ports: {} } },
+		})
+		const reply = Buffer.from(REAL_CMC_HEX, 'hex')
+		parseCmcReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		expect(self.devicesData[REAL_DEVICE_IP]?.ports?.SETTINGS).toBe(8700)
+	})
+
+	it('ignores CMC traffic from a device not yet registered via mDNS discovery', () => {
+		const self = createMockInstance({ devicesData: {} })
+		const reply = Buffer.from(REAL_CMC_HEX, 'hex')
+		parseCmcReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		expect(self.devicesData[REAL_DEVICE_IP]).toBeUndefined()
+	})
+})
+
+describe('parseReply (ARC)', () => {
+	it('ignores ARC traffic from a device not yet registered via mDNS discovery', () => {
+		const self = createMockInstance({ devicesData: {} })
+		const reply = Buffer.from(REAL_ARC_HEX, 'hex')
+		expect(() => parseReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))).not.toThrow()
+		expect(self.devicesData[REAL_DEVICE_IP]).toBeUndefined()
+	})
+
+	it('processes ARC traffic for an already-registered device without throwing (real capture)', () => {
+		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'NAM-262de4' } } })
+		const reply = Buffer.from(REAL_ARC_HEX, 'hex')
+		expect(() => parseReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))).not.toThrow()
+	})
+})
+
+describe('parseReply (ARC) - malformed packet handling', () => {
+	const IP = '10.0.0.5'
+
+	/**
+	 * Builds an ARC channel-query reply: 0x2729 header, declared length, then a body claiming
+	 * `recCount` records while actually carrying `records`.
+	 */
+	function arcReply(opcode: number, recCount: number, records: Buffer): Buffer {
+		const head = Buffer.alloc(12)
+		head.writeUInt16BE(0x2729, 0) // protocol
+		head.writeUInt16BE(12 + records.length, 2) // length, must equal rinfo.size
+		head.writeUInt16BE(0, 4) // counter
+		head.writeUInt16BE(opcode, 6)
+		head.writeUInt8(recCount, 11)
+		return Buffer.concat([head, records])
+	}
+
+	function registered() {
+		return createMockInstance({ devicesData: { [IP]: { name: 'Dev', ports: { ARC: 4440 } } } })
+	}
+
+	it('survives an rx reply claiming more records than the packet contains', () => {
+		// one 20-byte record present, but the count byte claims 16
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 16, Buffer.alloc(20))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('survives an rx reply truncated mid-record', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 8, Buffer.alloc(30))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('survives a tx reply whose sample-rate pointer runs past the end of the packet', () => {
+		// record 0: channel 1, group pointer 0xFFF0 (far outside the buffer), name pointer 0
+		const record = Buffer.alloc(8)
+		record.writeUInt16BE(1, 0)
+		record.writeUInt16BE(0xfff0, 4)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+		expect(self.devicesData[IP]?.audioTx?.[1]?.sampleRate).toBeUndefined()
+	})
+
+	it('survives a tx reply whose sample-rate pointer lands within 4 bytes of the end', () => {
+		const record = Buffer.alloc(8)
+		record.writeUInt16BE(1, 0)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		// point at the last two bytes, so a 4-byte read would overrun
+		record.writeUInt16BE(reply.length - 2, 4)
+		const reply2 = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply2, makeRinfo(IP, reply2.length))).not.toThrow()
+	})
+
+	it('survives a device-settings reply whose value pointer runs past the end', () => {
+		// the settings parser dereferences a device-supplied offset, the same trap the channel
+		// parsers had
+		const record = Buffer.alloc(4)
+		record.writeUInt16BE(0x8020, 0) // sample rate
+		record.writeUInt16BE(0xfff0, 2) // pointer far outside the packet
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 1, record)
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+		expect(self.devicesData[IP]?.sr).toBeUndefined()
+	})
+
+	it('survives a device-settings reply claiming more records than it carries', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 8, Buffer.alloc(4))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('still reads a well-formed device-settings reply', () => {
+		// one record: sample rate, pointing at a u32 appended after it
+		const record = Buffer.alloc(4)
+		record.writeUInt16BE(0x8020, 0)
+		record.writeUInt16BE(16, 2)
+		const value = Buffer.alloc(4)
+		value.writeUInt32BE(48000, 0)
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY, 1, Buffer.concat([record, value]))
+		const self = registered()
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.sr).toBe(48000)
+	})
+
+	it('survives a friendly-names reply claiming more records than it carries', () => {
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY, 32, Buffer.alloc(6))
+		const self = registered()
+		expect(() => parseReply(self, reply, makeRinfo(IP, reply.length))).not.toThrow()
+	})
+
+	it('still parses a well-formed rx record', () => {
+		const record = Buffer.alloc(20)
+		record.writeUInt16BE(1, 0) // channel number
+		record.writeUInt16BE(10, 14) // subscription status
+		const reply = arcReply(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 1, record)
+		const self = registered()
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.audioRx?.[1]?.subscriptionStatus).toBe(10)
+	})
+})
+
+describe('parseReply (ARC) - channel count', () => {
+	const IP = '10.0.0.5'
+
+	/** A real 56-byte channel-count reply captured from NAM-262de4 (8 tx, 8 rx, unlocked). */
+	const REAL_COUNT_HEX =
+		'272900380001100000010ff90008000800000040004000200020000800010002000000000000000000000000000000000000000100000001'
+
+	function registered() {
+		return createMockInstance({ devicesData: { [IP]: { name: 'Dev', ports: { ARC: 4440 } } } })
+	}
+
+	it('reads tx and rx counts from a real reply', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.audioTx?.count).toBe(8)
+		expect(self.devicesData[IP]?.audioRx?.count).toBe(8)
+	})
+
+	it('reports an unlocked device as unlocked', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.locked).toBe(false)
+	})
+
+	it('reports a locked device as locked', () => {
+		const self = registered()
+		const reply = Buffer.from(REAL_COUNT_HEX, 'hex')
+		reply.writeUInt16BE(1, 34) // flip the lock flag
+		parseReply(self, reply, makeRinfo(IP, reply.length))
+		expect(self.devicesData[IP]?.locked).toBe(true)
+	})
+
+	it('leaves lock state undefined on a reply too short to carry the field', () => {
+		const self = registered()
+		const short = Buffer.from(REAL_COUNT_HEX, 'hex').subarray(0, 30)
+		short.writeUInt16BE(30, 2) // keep the declared length consistent with rinfo.size
+		expect(() => parseReply(self, short, makeRinfo(IP, short.length))).not.toThrow()
+		expect(self.devicesData[IP]?.locked).toBeUndefined()
+	})
+})
+
+describe('parseSettingsReply', () => {
+	it('does not report the status itself, leaving that to checkConnections', () => {
+		// This used to force Ok here, and did so even for an unregistered device, to say "the network
+		// is alive". That job now belongs to `noteTraffic` on the settings socket, which likewise runs
+		// regardless of registration - see socket-errors.spec.ts. Doing it here as well declared the
+		// whole connection healthy from one socket, against services that were still marked down.
+		const self = createMockInstance({ CONNECTED: false, devicesData: {} })
+		const reply = Buffer.from(REAL_SETTINGS_HEX, 'hex')
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		expect(self.CONNECTED).toBe(false)
+		expect(self.updateStatus).not.toHaveBeenCalled()
+	})
+
+	it('ignores SETTINGS traffic from a device not yet registered via mDNS discovery', () => {
+		const self = createMockInstance({ devicesData: {} })
+		const reply = Buffer.from(REAL_SETTINGS_HEX, 'hex')
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+		expect(self.devicesData[REAL_DEVICE_IP]).toBeUndefined()
+	})
+
+	/**
+	 * A real change notification, captured from a decoder the moment a video crosspoint was set.
+	 *
+	 * Devices multicast these on the SETTINGS group whenever their channels change, whoever made the
+	 * change - Dante Controller, another Companion, or this module. They carry no state, so the
+	 * module answers them by re-reading the affected directory; this is the only thing that keeps it
+	 * in step with routing it did not perform itself.
+	 */
+	const REAL_RX_CHANNEL_CHANGE_HEX =
+		'ffff004102150000186696fffe110910417564696e6174650738010200000000000000000000000100000000' +
+		'0000000000000000000000000000000000000000000000000000'
+
+	function changeNotification(commandId: number): Buffer {
+		const reply = Buffer.from(REAL_RX_CHANNEL_CHANGE_HEX, 'hex')
+		reply.writeUInt16BE(commandId, 26) // payload starts at 24, command id is 2 bytes in
+		reply.writeUInt16BE(reply.length, 2) // keep the declared length honest
+		return reply
+	}
+
+	/** The opcodes of every command the module sent while handling a reply. */
+	function sentOpcodes(send: ReturnType<typeof vi.fn>): number[] {
+		return send.mock.calls.map((call) => (call[0] as Buffer).readUInt16BE(6))
+	}
+
+	function withSocket() {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { [REAL_DEVICE_IP]: { name: 'Decoder-001', ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+			counter: Buffer.from('0000', 'hex'),
+		})
+		return { self, send }
+	}
+
+	it('re-reads both the audio and the video rx directory on an rx channel change', () => {
+		// A video crosspoint change raises this same audio-named notification - confirmed live - so
+		// re-reading only the audio directory left every video feedback and variable stale.
+		const { self, send } = withSocket()
+		const reply = changeNotification(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_CHANGE)
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY)
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY)
+	})
+
+	it('re-reads both the audio and the video tx directory on a tx channel change', () => {
+		const { self, send } = withSocket()
+		const reply = changeNotification(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_CHANGE)
+		parseSettingsReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
+
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_QUERY)
+		expect(sentOpcodes(send)).toContain(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_TX_CHANNEL_QUERY)
+	})
+})

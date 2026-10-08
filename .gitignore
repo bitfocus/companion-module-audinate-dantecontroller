@@ -1,6 +1,17 @@
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
 node_modules/
 .DS_Store
 package-lock.json
 /pkg
 /pkg.tz
+/dist
 *.tgz
+DEBUG-*
+
+/coverage
