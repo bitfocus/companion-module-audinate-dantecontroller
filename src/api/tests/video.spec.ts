@@ -249,12 +249,13 @@ describe('getVideoRxChannels / getVideoTxChannels', () => {
 })
 
 describe('makeVideoCrosspoint / clearVideoCrosspoint', () => {
-	it('logs an error and sends nothing when the destination device cannot be resolved', () => {
+	it('throws and sends nothing when the destination device cannot be resolved', () => {
 		const send = vi.fn()
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
-		makeVideoCrosspoint(self, 'UnknownDevice', '01', 'Encoder-001', 1)
+		expect(() => makeVideoCrosspoint(self, 'UnknownDevice', '01', 'Encoder-001', 1)).toThrow(
+			"Can't find UnknownDevice IP address",
+		)
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
 	})
 
 	it('reproduces a real captured subscribe command byte-for-byte, mod protocol and counter', () => {
@@ -287,9 +288,8 @@ describe('makeVideoCrosspoint / clearVideoCrosspoint', () => {
 			devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910', ports: { ARC: 4440 } } },
 			sockets: { ARC: { send } as unknown as dgram.Socket },
 		})
-		makeVideoCrosspoint(self, REAL_DEVICE_IP, '01', 'DAV-110b52', 0)
-		expect(send).not.toHaveBeenCalled()
-		clearVideoCrosspoint(self, REAL_DEVICE_IP, 0)
+		expect(() => makeVideoCrosspoint(self, REAL_DEVICE_IP, '01', 'DAV-110b52', 0)).toThrow('No channel selected')
+		expect(() => clearVideoCrosspoint(self, REAL_DEVICE_IP, 0)).toThrow('No channel selected')
 		expect(send).not.toHaveBeenCalled()
 	})
 })

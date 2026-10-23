@@ -11,6 +11,7 @@ import { keepAlive, registerDevice, scheduleCheckVariables, scheduleUpdateData }
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { addressOnInterface } from '../config.js'
+import { rememberTxChannelNames } from './identity.js'
 
 const logger = createModuleLogger('api:discovery')
 
@@ -205,5 +206,6 @@ function noteDeviceId(self: DanteInstance, deviceName: string, deviceId: string,
 		logger.debug(`${deviceName} has device id ${deviceId}`)
 	}
 	ids[deviceName] = deviceId
+	rememberTxChannelNames(self, deviceIp)
 	scheduleCheckVariables(self, deviceIp, 'device_id')
 }

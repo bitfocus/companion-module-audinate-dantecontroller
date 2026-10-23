@@ -1432,12 +1432,23 @@ describe('setChannelName', () => {
 })
 
 describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
-	it('makeAudioCrosspoint logs an error and sends nothing when the destination device cannot be resolved', () => {
+	it('makeAudioCrosspoint throws and sends nothing when the destination device cannot be resolved', () => {
 		const send = vi.fn()
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
-		makeAudioCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')
+		expect(() => makeAudioCrosspoint(self, 'UnknownDevice', 'Input 1', 'SourceDevice', '1')).toThrow(
+			"Can't find UnknownDevice IP address",
+		)
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
+	})
+
+	it('makeAudioCrosspoint refuses a locked device', () => {
+		const send = vi.fn()
+		const self = createMockInstance({
+			devicesData: { '10.0.0.5': { name: 'Dest', locked: true, ports: { ARC: 4440 } } },
+			sockets: { ARC: { send } as unknown as dgram.Socket },
+		})
+		expect(() => makeAudioCrosspoint(self, 'Dest', 'Input 1', 'SourceDevice', '1')).toThrow('is locked')
+		expect(send).not.toHaveBeenCalled()
 	})
 
 	it('makeAudioCrosspoint resolves an IP-address destination directly, without a name lookup', () => {
@@ -1450,10 +1461,9 @@ describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
 		expect(send).toHaveBeenCalledWith(expect.any(Buffer), 0, expect.any(Number), 4440, '10.0.0.5', expect.any(Function))
 	})
 
-	it('clearAudioCrosspoint logs an error when the destination device cannot be resolved', () => {
+	it('clearAudioCrosspoint throws when the destination device cannot be resolved', () => {
 		const self = createMockInstance()
-		clearAudioCrosspoint(self, 'UnknownDevice', '1')
-		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining("Can't find"))
+		expect(() => clearAudioCrosspoint(self, 'UnknownDevice', '1')).toThrow("Can't find UnknownDevice IP address")
 	})
 })
 
@@ -1520,11 +1530,10 @@ describe('clearAllAudioCrosspoints', () => {
 		expect(send).toHaveBeenCalledTimes(1)
 	})
 
-	it('logs an error for an unknown device', () => {
+	it('throws for an unknown device', () => {
 		const { self, send } = withRx(4)
-		clearAllAudioCrosspoints(self, 'NoSuchDevice')
+		expect(() => clearAllAudioCrosspoints(self, 'NoSuchDevice')).toThrow("Can't find NoSuchDevice IP address")
 		expect(send).not.toHaveBeenCalled()
-		expect(loggerSink).toHaveBeenCalledWith('api:commands', 'error', expect.stringContaining('NoSuchDevice'))
 	})
 })
 

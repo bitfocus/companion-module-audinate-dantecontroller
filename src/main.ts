@@ -15,6 +15,7 @@ import {
 	cancelUpdateData,
 	scheduleUpdateData,
 	cancelCheckVariables,
+	cancelPendingCommands,
 	type DevicesData,
 	type DanteSockets,
 	type ConnectionName,
@@ -133,6 +134,7 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 		cancelUpdateData(this)
 		cancelCheckVariables(this)
 		cancelCheckFeedbacks(this)
+		cancelPendingCommands(this)
 
 		this.connection.close()
 	}

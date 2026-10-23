@@ -30,6 +30,51 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED,
 ]
 
+/**
+ * Readable names for rx subscription status codes, for error messages. From the netaudio project's
+ * catalogue; only the connected ones above, 0x0001 (unresolved) and 0x001c (seen for a refused
+ * self-route on an Ultimo X2) have been observed here.
+ */
+const SUBSCRIPTION_STATUS_NAMES: Readonly<Record<number, string>> = {
+	0x0000: 'no subscription',
+	0x0001: 'unresolved',
+	0x0002: 'resolved, connecting',
+	0x0003: 'resolve failed',
+	0x0005: 'resolved to nothing',
+	0x0007: 'idle',
+	0x0008: 'connecting',
+	0x000f: 'no connection',
+	0x0010: 'channel format mismatch',
+	0x0011: 'bundle format mismatch',
+	0x0012: 'no receive resources',
+	0x0013: 'receive failure',
+	0x0014: 'no transmit resources',
+	0x0015: 'transmit failure',
+	0x0016: 'receive QoS failure',
+	0x0017: 'transmit QoS failure',
+	0x0018: 'transmitter rejected the address',
+	0x0019: 'invalid message',
+	0x001a: 'latency too low',
+	0x001b: 'different clock domain',
+	0x001c: 'unsupported',
+	0x001d: 'receive link down',
+	0x001e: 'transmit link down',
+	0x0020: 'invalid channel',
+	0x0022: 'self-subscription not allowed',
+	0x0025: 'transmitter flow limit reached',
+	0x0026: 'transmit channel encrypted',
+	0x0060: 'transmit access denied',
+	0x0061: 'transmit access pending',
+	0x00ff: 'system failure',
+}
+
+/** A subscription status as a message names it: `unresolved (0x0001)`. */
+export function subscriptionStatusLabel(status: number | undefined): string {
+	if (status === undefined) return 'unknown status'
+	const code = `0x${status.toString(16).padStart(4, '0')}`
+	return SUBSCRIPTION_STATUS_NAMES[status] ? `${SUBSCRIPTION_STATUS_NAMES[status]} (${code})` : code
+}
+
 /** True if `status` (rx record offset 14) indicates a live subscription. */
 export function isSubscriptionConnected(status: number | undefined): boolean {
 	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)

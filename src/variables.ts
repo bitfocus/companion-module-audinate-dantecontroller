@@ -5,6 +5,7 @@ import {
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
+	resolveSubscriptionSource,
 	type DeviceData,
 } from './api/index.js'
 import { routingVariablesEnabled } from './config.js'
@@ -70,6 +71,9 @@ function addRoutingDefinitions(
 		for (const choice of self.rxChannelsChoices[name] ?? []) {
 			variables[`${id}_rx_${choice.id}_name`] = { name: `${name} audio receive channel ${choice.id} name` }
 			variables[`${id}_rx_${choice.id}_source`] = { name: `${name} audio receive channel ${choice.id} source` }
+			variables[`${id}_rx_${choice.id}_source_id`] = {
+				name: `${name} audio receive channel ${choice.id} source id`,
+			}
 		}
 		for (const choice of self.txChannelsChoices[name] ?? []) {
 			variables[`${id}_tx_${choice.id}_name`] = { name: `${name} audio transmit channel ${choice.id} name` }
@@ -78,6 +82,9 @@ function addRoutingDefinitions(
 			variables[`${id}_rx_video_${choice.id}_name`] = { name: `${name} video receive channel ${choice.id} name` }
 			variables[`${id}_rx_video_${choice.id}_source`] = {
 				name: `${name} video receive channel ${choice.id} source`,
+			}
+			variables[`${id}_rx_video_${choice.id}_source_id`] = {
+				name: `${name} video receive channel ${choice.id} source id`,
 			}
 		}
 		for (const choice of self.videoTxChannelsChoices?.[name] ?? []) {
@@ -169,6 +176,9 @@ const ROUTING_TYPES = new Set<string>([
 	'device_id',
 ])
 
+/** The categories of one device that can change another device's source ids. */
+const SOURCE_ID_TYPES = new Set<string>(['tx', 'tx_names', 'tx_video', 'tx_names_video', 'device_id'])
+
 /**
  * Recomputes and pushes current variable values to Companion.
  * @param ipAddress If given, restricts the update to the device at this IP; otherwise all known devices are updated.
@@ -181,8 +191,14 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 		routingVariablesEnabled(self.config) &&
 		(variableTypes.length === 0 || variableTypes.some((type) => ROUTING_TYPES.has(type)))
 	) {
+		// A source id names the transmitting device, so a change to one device's transmit channels or
+		// id can change other devices' values - those are re-resolved everywhere, and the publisher
+		// sends only the ones that moved.
+		const resolveEverywhere =
+			ipAddress === undefined || variableTypes.length === 0 || variableTypes.some((type) => SOURCE_ID_TYPES.has(type))
 		for (const [ip, device] of Object.entries(self.devicesData)) {
 			if (ipAddress === undefined || ip === ipAddress) addRoutingValues(self, ip, device, variableValues)
+			else if (resolveEverywhere) addSourceIdValues(self, ip, device, variableValues)
 		}
 	}
 
@@ -218,6 +234,7 @@ function addRoutingValues(
 		variableValues[`${id}_rx_${channel}_name`] = device.audioRx?.[channel]?.name ?? ''
 		variableValues[`${id}_rx_${channel}_source`] = subscriptionValue(getAudioRxChannelSource(self, ip, channel))
 	}
+	addSourceIdValues(self, ip, device, variableValues)
 	for (let channel = 1; channel <= (device.audioTx?.count ?? 0); channel++) {
 		variableValues[`${id}_tx_${channel}_name`] = getChannelSubscriptionName(device.audioTx?.[channel]) ?? ''
 	}
@@ -227,6 +244,26 @@ function addRoutingValues(
 	}
 	for (let channel = 1; channel <= (device.videoTx?.count ?? 0); channel++) {
 		variableValues[`${id}_tx_video_${channel}_name`] = device.videoTx?.[channel]?.name ?? ''
+	}
+}
+
+/** One device's `_source_id` values. See `resolveSubscriptionSource`. */
+function addSourceIdValues(
+	self: DanteInstance,
+	ip: string,
+	device: DeviceData,
+	variableValues: Partial<DanteVariableValues>,
+): void {
+	if (!device.name) return
+	const id = sanitiseVariableId(device.name)
+	const resolve = (source: { deviceName: string; channelName: string } | undefined, mediaType: 'audio' | 'video') =>
+		source ? (resolveSubscriptionSource(self, source, mediaType) ?? '') : ''
+
+	for (let channel = 1; channel <= (device.audioRx?.count ?? 0); channel++) {
+		variableValues[`${id}_rx_${channel}_source_id`] = resolve(getAudioRxChannelSource(self, ip, channel), 'audio')
+	}
+	for (let channel = 1; channel <= (device.videoRx?.count ?? 0); channel++) {
+		variableValues[`${id}_rx_video_${channel}_source_id`] = resolve(getVideoRxChannelSource(self, ip, channel), 'video')
 	}
 }
 

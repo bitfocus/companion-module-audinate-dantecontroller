@@ -14,8 +14,8 @@ import {
 	CHANNEL_MEDIA_TYPE_LABELS,
 	clearAllAudioCrosspoints,
 	clearAllVideoCrosspoints,
-	clearAudioCrosspoint,
-	clearVideoCrosspoint,
+	clearAudioCrosspointConfirmed,
+	clearVideoCrosspointConfirmed,
 	currentChoiceId,
 	DANTE_CONST,
 	deviceByIdentifier,
@@ -32,8 +32,9 @@ import {
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
-	makeAudioCrosspoint,
-	makeVideoCrosspoint,
+	DanteCommandError,
+	makeAudioCrosspointConfirmed,
+	makeVideoCrosspointConfirmed,
 	object2choices,
 	object2PartialChoices,
 	orPlaceholder,
@@ -253,7 +254,7 @@ export function UpdateActions(self: DanteInstance): void {
 			callback: async (action) => {
 				const opt = action.options
 				if (opt.channelType === 'video') {
-					makeVideoCrosspoint(
+					await makeVideoCrosspointConfirmed(
 						self,
 						opt.destinationDeviceAddress,
 						opt.sourceChannelName,
@@ -262,7 +263,7 @@ export function UpdateActions(self: DanteInstance): void {
 					)
 					return
 				}
-				makeAudioCrosspoint(
+				await makeAudioCrosspointConfirmed(
 					self,
 					opt.destinationDeviceAddress,
 					opt.sourceChannelName,
@@ -372,11 +373,10 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (destinationChannel === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
 							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
 					)
-					return
 				}
 
 				const sourceChannelNumber = deviceOptionValue<number | undefined>(
@@ -387,17 +387,16 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (sourceChannelNumber === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} source channel available on '${opt.sourceDevice}' ` +
 							`- it may have no ${opt.channelType} transmit channels`,
 					)
-					return
 				}
 
 				// No source means no route: clear the destination rather than subscribing it to nothing.
 				if (!sourceChannelNumber) {
-					if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
-					else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
+					if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+					else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
 					return
 				}
 
@@ -406,7 +405,7 @@ export function UpdateActions(self: DanteInstance): void {
 						deviceByIdentifier(self, opt.sourceDevice)?.videoTx?.[sourceChannelNumber] ??
 						findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
 					const sourceChannelName = sourceChannel?.name || String(sourceChannelNumber)
-					makeVideoCrosspoint(
+					await makeVideoCrosspointConfirmed(
 						self,
 						opt.destinationDevice,
 						sourceChannelName,
@@ -420,7 +419,7 @@ export function UpdateActions(self: DanteInstance): void {
 					deviceByIdentifier(self, opt.sourceDevice)?.audioTx?.[sourceChannelNumber] ??
 					findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
 				const sourceChannelName = getChannelSubscriptionName(sourceChannel) || String(sourceChannelNumber)
-				makeAudioCrosspoint(
+				await makeAudioCrosspointConfirmed(
 					self,
 					opt.destinationDevice,
 					sourceChannelName,
@@ -469,10 +468,10 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 				if (isVideo) {
-					clearVideoCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+					await clearVideoCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 					return
 				}
-				clearAudioCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+				await clearAudioCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			},
 		},
 
@@ -537,15 +536,14 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (destinationChannel === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
 							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
 					)
-					return
 				}
 
-				if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
-				else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
+				if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+				else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
 			},
 		},
 

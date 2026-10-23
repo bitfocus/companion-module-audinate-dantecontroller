@@ -66,13 +66,18 @@ export interface DanteDeviceVariables {
  * - `<device>_device_id` - the 64-bit Dante device id from the device's mDNS TXT record. It
  *   survives renames and address changes, unlike everything else that identifies a device.
  * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
- *   subscribed to, as `channel@device`, or empty when it is not subscribed.
+ *   subscribed to, as `channel@device`, or empty when it is not subscribed. These are the names the
+ *   receiver subscribed with, which it keeps after the transmitter is renamed.
+ * - `<device>_rx_<n>_source_id`, `<device>_rx_video_<n>_source_id` - the same subscription as
+ *   `<device id>/<transmit channel number>`, which survives renames. Empty when it cannot be
+ *   resolved - see `resolveSubscriptionSource`.
  * - `<device>_rx_<n>_name`, `<device>_tx_<n>_name` and their `_video_` forms - one channel's name.
  *   A transmit channel's is the name subscriptions use, so its friendly name when it has one.
  */
 export interface DanteRoutingVariables {
 	device_id: string
 	source: string
+	source_id: string
 	name: string
 }
 

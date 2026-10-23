@@ -25,6 +25,7 @@ import {
 	scheduleCheckVariables,
 	scheduleUpdateData,
 } from './devices.js'
+import { notifyRxStateChanged } from './requests.js'
 import {
 	getRxChannels,
 	getSettings,
@@ -681,6 +682,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'rx':
+					notifyRxStateChanged(self, deviceIp)
 					scheduleCheckVariables(self, deviceIp, 'rx', 'rx_names')
 					updateChannelChoices(self, deviceIp, 'rx')
 					// routes into this device changed - only feedbacks reading it can have flipped
@@ -769,6 +771,7 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
 	if (channelDirection) updateVideoChannelChoices(self, deviceIp, channelDirection)
 
 	if (channelDirection === 'rx') {
+		notifyRxStateChanged(self, deviceIp)
 		scheduleCheckVariables(self, deviceIp, 'rx_video', 'rx_names_video')
 	} else if (channelDirection === 'tx') {
 		scheduleCheckVariables(self, deviceIp, 'tx_video', 'tx_names_video')

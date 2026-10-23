@@ -4,6 +4,7 @@ import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateActions } from '../actions.js'
 import { DANTE_CONST, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { answeringSend } from './fake-device.js'
 
 /**
  * Combined-scope tests for the video/audio channelType toggle across the crosspoint actions and
@@ -285,9 +286,28 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		return (self.sockets.ARC as unknown as { send: ReturnType<typeof vi.fn> }).send
 	}
 
+	/** A destination that applies each crosspoint it acknowledges, so the action can confirm it. */
+	function answering(self: DanteInstance, apply?: () => void) {
+		const sendFn = answeringSend(self, (command) =>
+			command.readUInt16BE(6) === DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL ||
+			command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscription
+				? { apply }
+				: undefined,
+		)
+		self.sockets = { ARC: { send: sendFn } as unknown as dgram.Socket }
+		return sendFn
+	}
+
 	it('makeCrosspointDropDown sends a video crosspoint command when channelType is video', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => {
+			self.devicesData[DEST].videoRx![2] = {
+				number: 2,
+				name: 'Video In 2',
+				sourceDevice: 'DeviceB',
+				sourceChannel: 'Cam 1',
+			}
+		})
 		await actionDefinition(self, 'makeCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
@@ -308,8 +328,9 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 	})
 
 	it('makeCrosspointDropDown still sends a plain audio command when channelType is audio', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		// DeviceA rx 1 already reports 01@DeviceB as connected, so the acknowledgement is all it waits for
+		const self = instance()
+		const sendFn = answering(self)
 		await actionDefinition(self, 'makeCrosspointDropDown').callback({
 			options: {
 				channelType: 'audio',
@@ -326,8 +347,10 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 	})
 
 	it('clearCrosspointDropDown sends a video clear command when channelType is video', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => {
+			self.devicesData[DEST].videoRx![1] = { number: 1, name: 'Video In 1' }
+		})
 		await actionDefinition(self, 'clearCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
@@ -342,13 +365,15 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(refreshes(sendFn)).toEqual([DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY])
 	})
 
-	it('logs a clear message and sends nothing when the destination channel option is missing', async () => {
+	it('fails with a clear message and sends nothing when the destination channel option is missing', async () => {
 		const sendFn = vi.fn()
 		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
 		// DeviceB has no video rx channels, so destinationChannelVideo_DeviceB was never rendered
-		await actionDefinition(self, 'clearCrosspointDropDown').callback({
-			options: { channelType: 'video', destinationDevice: 'DeviceB', clearAll: false },
-		})
+		await expect(
+			actionDefinition(self, 'clearCrosspointDropDown').callback({
+				options: { channelType: 'video', destinationDevice: 'DeviceB', clearAll: false },
+			}),
+		).rejects.toThrow("No Video destination channel available on 'DeviceB'")
 
 		expect(sendFn).not.toHaveBeenCalled()
 	})

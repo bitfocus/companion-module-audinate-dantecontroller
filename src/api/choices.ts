@@ -21,6 +21,7 @@ import {
 	scheduleUpdateData,
 } from './devices.js'
 import { sanitiseVariableId } from '../utils/sanitise.js'
+import { rememberTxChannelNames } from './identity.js'
 
 const logger = createModuleLogger('api:choices')
 
@@ -653,6 +654,7 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: string, chan
 
 	const deviceName = device?.name
 	if (deviceName === undefined) return
+	if (channelType === 'tx') rememberTxChannelNames(self, deviceIp)
 
 	// No "None" entry: every action taking a channel acts on that one channel, so a "none" selection
 	// only means "do nothing". It also sorted first, which made it the default - so a freshly added
@@ -694,6 +696,7 @@ export function updateVideoChannelChoices(self: DanteInstance, deviceIp: string,
 
 	const deviceName = self.devicesData[deviceIp].name
 	if (deviceName === undefined) return
+	if (channelType === 'tx') rememberTxChannelNames(self, deviceIp)
 	const ioObject = self.devicesData[deviceIp][videoChannelType]
 	if (ioObject === undefined) return
 
