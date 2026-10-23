@@ -5,8 +5,8 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 
 ## Config
 
-- **Network card** — the interface on the Dante network. _Automatic_ uses whichever card reaches each
-  device; picking one pins the module to it. The choice is stored by MAC address, so it survives an IP
+- **Network card** — the interface on the Dante network. _Automatic_ discovers on every card, including
+  one plugged in later, and uses whichever card reaches each device; picking one pins the module to it. The choice is stored by MAC address, so it survives an IP
   change (link-local or DHCP). If the card is missing, discovery still works but device settings stay
   empty and the connection reports an error.
 - **Update Interval** — how often the module sweeps the network for devices (250 ms – 60 s, default

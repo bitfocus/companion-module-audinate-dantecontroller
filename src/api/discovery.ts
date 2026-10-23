@@ -7,6 +7,7 @@ import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import type { MdnsResponsePacket, MdnsTxtAnswer, ServiceName } from './types.js'
+import type { MdnsSender } from './mdns-group.js'
 import { keepAlive, registerDevice, scheduleCheckVariables, scheduleUpdateData } from './devices.js'
 import {
 	noteDeviceName,
@@ -66,7 +67,12 @@ function onChosenCard(self: DanteInstance, sourceIp: string): boolean {
  * registers/updates the announcing device and its per-service port, kicking off follow-up
  * queries (channel count/settings for ARC, settings port for CMC) when a port is newly learned.
  */
-export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket, rinfo: dgram.RemoteInfo): void {
+export function danteDiscovery(
+	self: DanteInstance,
+	response: MdnsResponsePacket,
+	rinfo: dgram.RemoteInfo,
+	via: MdnsSender = self.mdns,
+): void {
 	if (!onChosenCard(self, rinfo.address)) return
 
 	const answers = [...response.answers, ...response.additionals]
@@ -77,7 +83,8 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 			if (self.debug) {
 				logger.debug(`mDNS PTR from ${rinfo.address} : ${name} -> ${answer.data}, asking for its SRV record`)
 			}
-			self.mdns.query(
+			// back out the card the response came in on, which is the one that reaches the device
+			via.query(
 				{
 					// TXT as well, for the device id the CMC service carries - see `danteDeviceIdFromTxt`
 					questions: [
