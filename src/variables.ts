@@ -5,7 +5,10 @@ import {
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
+	isVideoSubscriptionActive,
 	resolveSubscriptionSource,
+	subscriptionStatusLabel,
+	videoSubscriptionStatusLabel,
 	type DeviceData,
 } from './api/index.js'
 import { routingVariablesEnabled, variableKeysOf } from './config.js'
@@ -90,6 +93,12 @@ function addRoutingDefinitions(
 			variables[`${id}_rx_${choice.id}_source_id`] = {
 				name: `${name} audio receive channel ${choice.id} source id`,
 			}
+			variables[`${id}_rx_${choice.id}_connected`] = {
+				name: `${name} audio receive channel ${choice.id} subscription connected`,
+			}
+			variables[`${id}_rx_${choice.id}_status`] = {
+				name: `${name} audio receive channel ${choice.id} subscription status`,
+			}
 		}
 		for (const choice of self.txChannelsChoices[deviceId] ?? []) {
 			variables[`${id}_tx_${choice.id}_name`] = { name: `${name} audio transmit channel ${choice.id} name` }
@@ -101,6 +110,12 @@ function addRoutingDefinitions(
 			}
 			variables[`${id}_rx_video_${choice.id}_source_id`] = {
 				name: `${name} video receive channel ${choice.id} source id`,
+			}
+			variables[`${id}_rx_video_${choice.id}_connected`] = {
+				name: `${name} video receive channel ${choice.id} subscription connected`,
+			}
+			variables[`${id}_rx_video_${choice.id}_status`] = {
+				name: `${name} video receive channel ${choice.id} subscription status`,
 			}
 		}
 		for (const choice of self.videoTxChannelsChoices?.[deviceId] ?? []) {
@@ -246,16 +261,31 @@ function addRoutingValues(
 	variableValues[`${id}_device_name`] = device.name
 
 	for (const channel of channelNumbers(device.audioRx?.count)) {
+		const source = getAudioRxChannelSource(self, ip, channel)
 		variableValues[`${id}_rx_${channel}_name`] = device.audioRx?.[channel]?.name ?? ''
-		variableValues[`${id}_rx_${channel}_source`] = subscriptionValue(getAudioRxChannelSource(self, ip, channel))
+		variableValues[`${id}_rx_${channel}_source`] = subscriptionValue(source)
+		// The health of the subscription `_source` names. Every rx directory reply - a crosspoint's
+		// confirmation, a change notification, a refresh - lands here, so these follow the device's
+		// own status rather than what an action last asked for.
+		variableValues[`${id}_rx_${channel}_connected`] = source?.connected === true
+		variableValues[`${id}_rx_${channel}_status`] = source
+			? subscriptionStatusLabel(device.audioRx?.[channel]?.subscriptionStatus)
+			: ''
 	}
 	addSourceIdValues(self, ip, device, variableValues)
 	for (const channel of channelNumbers(device.audioTx?.count)) {
 		variableValues[`${id}_tx_${channel}_name`] = getChannelSubscriptionName(device.audioTx?.[channel]) ?? ''
 	}
 	for (const channel of channelNumbers(device.videoRx?.count)) {
-		variableValues[`${id}_rx_video_${channel}_name`] = device.videoRx?.[channel]?.name ?? ''
-		variableValues[`${id}_rx_video_${channel}_source`] = subscriptionValue(getVideoRxChannelSource(self, ip, channel))
+		const record = device.videoRx?.[channel]
+		const source = getVideoRxChannelSource(self, ip, channel)
+		variableValues[`${id}_rx_video_${channel}_name`] = record?.name ?? ''
+		variableValues[`${id}_rx_video_${channel}_source`] = subscriptionValue(source)
+		variableValues[`${id}_rx_video_${channel}_connected`] =
+			source !== undefined && isVideoSubscriptionActive(record?.subscriptionActive)
+		variableValues[`${id}_rx_video_${channel}_status`] = source
+			? videoSubscriptionStatusLabel(record?.subscriptionResolved, record?.subscriptionActive)
+			: ''
 	}
 	for (const channel of channelNumbers(device.videoTx?.count)) {
 		variableValues[`${id}_tx_video_${channel}_name`] = device.videoTx?.[channel]?.name ?? ''

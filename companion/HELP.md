@@ -21,8 +21,9 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Create Module Variables** — on by default. Turn it off to skip the per-device property variables and
   read the same values through the Device Property feedback instead.
 - **Create Routing Variables** — on by default. Publishes each channel's name, each receive channel's
-  subscription, and each device's id and name. Router integrations such as Bitfocus Buttons read these.
-  Only values that change are sent, so a large network costs little to keep up to date.
+  subscription and whether it is connected, and each device's id and name. Router integrations such
+  as Bitfocus Buttons read these. Only values that change are sent, so a large network costs little
+  to keep up to date.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
 
 ## Devices
@@ -127,6 +128,17 @@ Per device, with the same `<device>` prefix:
   to as `channel@device`, the names it subscribed with; empty when it is not subscribed
 - Receive channel source id (`_rx_<n>_source_id`, `_rx_video_<n>_source_id`) - the same subscription
   as `<device id>/<transmit channel number>`, which still resolves after the transmitter is renamed
+- Receive channel connected (`_rx_<n>_connected`, `_rx_video_<n>_connected`) - `true` only when the
+  channel is subscribed and the receiver reports media arriving; `false` otherwise, including when it
+  is not subscribed. A source shows in `_source` as soon as the receiver takes the subscription, even
+  one it then refuses or cannot resolve - this says whether it is actually working, as Dante
+  Controller's error marker does
+- Receive channel status (`_rx_<n>_status`, `_rx_video_<n>_status`) - why, as the receiver reports
+  it; empty when it is not subscribed. Audio shows the status code with its name, such as
+  `connected (0x0009)`, `unresolved (0x0001)` (source not on the network, as with pre-patching) or
+  `unsupported (0x001c)` (a refused self-route). Video shows `active`, `not active` (source found
+  but sending nothing) or `unresolved`. Both update whenever the device reports a change, not only
+  after an action
 - Transmit channel name (`_tx_<n>_name`, `_tx_video_<n>_name`) - the name subscriptions use
 
 ## Feedbacks

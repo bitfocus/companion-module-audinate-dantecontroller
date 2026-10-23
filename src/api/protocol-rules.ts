@@ -31,13 +31,19 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 ]
 
 /**
- * Readable names for rx subscription status codes, for error messages. From the netaudio project's
- * catalogue; only the connected ones above, 0x0001 (unresolved) and 0x001c (seen for a refused
- * self-route on an Ultimo X2) have been observed here.
+ * Readable names for rx subscription status codes, for error messages and the `_rx_<n>_status`
+ * variables. From the netaudio project's catalogue; only the connected ones above, 0x0001
+ * (unresolved) and 0x001c (seen for a refused self-route on an Ultimo X2) have been observed here.
+ *
+ * The connected codes are all plain `connected`: the code beside it says which kind.
  */
 const SUBSCRIPTION_STATUS_NAMES: Readonly<Record<number, string>> = {
 	0x0000: 'no subscription',
 	0x0001: 'unresolved',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF]: 'connected',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST]: 'connected',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST]: 'connected',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED]: 'connected',
 	0x0002: 'resolved, connecting',
 	0x0003: 'resolve failed',
 	0x0005: 'resolved to nothing',
@@ -99,6 +105,22 @@ export const VIDEO_SUBSCRIPTION_ACTIVE: readonly number[] = [1]
  */
 export function isVideoSubscriptionActive(active: number | undefined): boolean {
 	return active !== undefined && VIDEO_SUBSCRIPTION_ACTIVE.includes(active)
+}
+
+/**
+ * A video subscription's state in words, the counterpart of {@link subscriptionStatusLabel}.
+ *
+ * Video rx records carry two flags rather than a status code, so this names the combinations:
+ * `active` when media is flowing; otherwise `unresolved` while the source has not been located,
+ * and `not active` once it has (Dante Controller's "Subscription is not active"). `resolved` lags a
+ * source going away, so an absent source can read `not active` for a while before `unresolved` -
+ * the `active` test, which is the one that matters, does not lag. `unknown status` when the
+ * device has not reported the flags at all.
+ */
+export function videoSubscriptionStatusLabel(resolved: number | undefined, active: number | undefined): string {
+	if (active === undefined) return 'unknown status'
+	if (isVideoSubscriptionActive(active)) return 'active'
+	return resolved === 0 ? 'unresolved' : 'not active'
 }
 
 /** Longest name a Dante device accepts, for both device and channel names. */

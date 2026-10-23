@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+	cancelCheckVariables,
 	cancelUpdateData,
 	danteDiscovery,
 	danteDeviceIdFromTxt,
+	DANTE_CONST,
+	parseReply,
+	type AudioRxChannel,
 	type DevicesData,
 	type MdnsResponsePacket,
 } from '../api/index.js'
@@ -38,7 +42,17 @@ function devicesData(): DevicesData {
 				1: { number: ch(1), name: 'Left', sourceDevice: 'Stage Box', sourceChannel: 'Mic 1', subscriptionStatus: 9 },
 				2: { number: ch(2), name: 'Right' },
 			},
-			videoRx: { count: 1, 1: { number: ch(1), name: 'HDMI', sourceDevice: 'Encoder', sourceChannel: 'Cam' } },
+			videoRx: {
+				count: 1,
+				1: {
+					number: ch(1),
+					name: 'HDMI',
+					sourceDevice: 'Encoder',
+					sourceChannel: 'Cam',
+					subscriptionResolved: 1,
+					subscriptionActive: 1,
+				},
+			},
 		},
 	}
 }
@@ -229,12 +243,18 @@ describe.each([
 				`${amp}_rx_1_name`,
 				`${amp}_rx_1_source`,
 				`${amp}_rx_1_source_id`,
+				`${amp}_rx_1_connected`,
+				`${amp}_rx_1_status`,
 				`${amp}_rx_2_name`,
 				`${amp}_rx_2_source`,
 				`${amp}_rx_2_source_id`,
+				`${amp}_rx_2_connected`,
+				`${amp}_rx_2_status`,
 				`${amp}_rx_video_1_name`,
 				`${amp}_rx_video_1_source`,
 				`${amp}_rx_video_1_source_id`,
+				`${amp}_rx_video_1_connected`,
+				`${amp}_rx_video_1_status`,
 				`${stage}_device_id`,
 				`${stage}_device_name`,
 				`${stage}_tx_1_name`,
@@ -254,9 +274,15 @@ describe.each([
 			[`${amp}_rx_1_name`]: 'Left',
 			[`${amp}_rx_1_source`]: 'Mic 1@Stage Box',
 			[`${amp}_rx_1_source_id`]: `${STAGE_ID}/1`,
+			[`${amp}_rx_1_connected`]: true,
+			[`${amp}_rx_1_status`]: 'connected (0x0009)',
 			[`${amp}_rx_2_name`]: 'Right',
+			// not subscribed: false, and its status stays at the '' every new variable starts as
+			[`${amp}_rx_2_connected`]: false,
 			[`${amp}_rx_video_1_name`]: 'HDMI',
 			[`${amp}_rx_video_1_source`]: 'Cam@Encoder',
+			[`${amp}_rx_video_1_connected`]: true,
+			[`${amp}_rx_video_1_status`]: 'active',
 			[`${stage}_device_id`]: STAGE_ID,
 			[`${stage}_device_name`]: 'Stage Box',
 			[`${stage}_tx_1_name`]: 'Mic 1',
@@ -281,6 +307,8 @@ describe.each([
 		expect(valueCalls(self)[1][0]).toEqual({
 			[`${amp}_rx_2_source`]: '02@Stage Box',
 			[`${amp}_rx_2_source_id`]: `${STAGE_ID}/2`,
+			[`${amp}_rx_2_connected`]: true,
+			[`${amp}_rx_2_status`]: 'connected (0x0009)',
 		})
 	})
 
@@ -333,5 +361,198 @@ describe('routing variables keyed by id', () => {
 		CheckVariables(self, STAGE, 'tx_names')
 
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({ [`${STAGE_ID}_device_name`]: 'Stage Box B' })
+	})
+})
+
+/**
+ * `_connected` and `_status` say whether the subscription `_source` names is actually carrying
+ * anything. `_source` follows what the receiver was asked for, so a refused or unresolved route
+ * moves it all the same - these are what tell such a route from a working one.
+ */
+describe.each([
+	{ mode: 'ids', amp: AMP_ID },
+	{ mode: 'names', amp: 'Amp' },
+])('subscription health variables keyed by $mode', ({ mode, amp }) => {
+	const keyed = () => instance({ variableKeys: mode })
+
+	/** Replaces one of Amp's receive channels, as a new rx directory reply would. */
+	function setRx(self: DanteInstance, channel: 1 | 2, record: Omit<AudioRxChannel, 'number'>) {
+		self.devicesData[AMP].audioRx![channel] = { number: ch(channel), ...record }
+	}
+
+	/** Every value published so far, the last one for each id winning - what the host now holds. */
+	function published(self: DanteInstance): Record<string, unknown> {
+		return Object.assign({}, ...valueCalls(self).map(([values]) => values))
+	}
+
+	it('reports a connected route as connected, with its status', () => {
+		const self = keyed()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		expect(published(self)).toMatchObject({
+			[`${amp}_rx_1_connected`]: true,
+			[`${amp}_rx_1_status`]: 'connected (0x0009)',
+		})
+	})
+
+	it('reports a refused self-route as not connected, saying why, while _source still names it', () => {
+		const self = keyed()
+		// as an Ultimo X2 reports a self-route it will not make: the '.' shorthand, status 0x001c
+		setRx(self, 2, { name: 'Right', sourceDevice: '.', sourceChannel: 'Left', subscriptionStatus: 0x001c })
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		expect(published(self)).toMatchObject({
+			[`${amp}_rx_2_source`]: 'Left@Amp',
+			[`${amp}_rx_2_connected`]: false,
+			[`${amp}_rx_2_status`]: 'unsupported (0x001c)',
+		})
+	})
+
+	it('reports an unsubscribed channel as not connected, with an empty status', () => {
+		const self = keyed()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+		// connect it, then clear it again, so '' is a value sent rather than the host's initial one
+		setRx(self, 2, { name: 'Right', sourceDevice: 'Stage Box', sourceChannel: '02', subscriptionStatus: 9 })
+		CheckVariables(self, AMP, 'rx')
+		setRx(self, 2, { name: 'Right', subscriptionStatus: 0 })
+		CheckVariables(self, AMP, 'rx')
+
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({
+			[`${amp}_rx_2_source`]: '',
+			[`${amp}_rx_2_source_id`]: '',
+			[`${amp}_rx_2_connected`]: false,
+			[`${amp}_rx_2_status`]: '',
+		})
+	})
+
+	it('follows a pre-patched route to an offline source coming online, sending only that channel', () => {
+		const self = keyed()
+		// pre-patched: the receiver keeps the name and waits for a transmitter by it to appear
+		setRx(self, 1, { name: 'Left', sourceDevice: 'Stage Box', sourceChannel: 'Mic 1', subscriptionStatus: 0x0001 })
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+		expect(published(self)).toMatchObject({
+			[`${amp}_rx_1_connected`]: false,
+			[`${amp}_rx_1_status`]: 'unresolved (0x0001)',
+		})
+
+		setRx(self, 1, { name: 'Left', sourceDevice: 'Stage Box', sourceChannel: 'Mic 1', subscriptionStatus: 0x0009 })
+		CheckVariables(self, AMP, 'rx')
+
+		// the source did not move, so neither did _source: just the two health values
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({
+			[`${amp}_rx_1_connected`]: true,
+			[`${amp}_rx_1_status`]: 'connected (0x0009)',
+		})
+		// a status change is a value change, never a definitions resend
+		expect(definitionCalls(self)).toHaveLength(1)
+	})
+
+	it('reports a video subscription by its active flag', () => {
+		const self = keyed()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+		expect(published(self)).toMatchObject({
+			[`${amp}_rx_video_1_connected`]: true,
+			[`${amp}_rx_video_1_status`]: 'active',
+		})
+
+		// resolved, but the source sending nothing: Dante Controller's "Subscription is not active"
+		self.devicesData[AMP].videoRx![1].subscriptionActive = 0
+		CheckVariables(self, AMP, 'rx_video')
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({
+			[`${amp}_rx_video_1_connected`]: false,
+			[`${amp}_rx_video_1_status`]: 'not active',
+		})
+
+		self.devicesData[AMP].videoRx![1].subscriptionResolved = 0
+		CheckVariables(self, AMP, 'rx_video')
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({ [`${amp}_rx_video_1_status`]: 'unresolved' })
+	})
+})
+
+/**
+ * An rx channel-query reply, as the device sends it in answer to a query - including the one the
+ * module makes on each rx change notification, which is how a subscription's status reaches it.
+ */
+function rxReply(channels: { number: number; name: string; source?: string; channel?: string; status: number }[]) {
+	const RECORD = 20
+	const head = Buffer.alloc(12)
+	const records = Buffer.alloc(RECORD * channels.length)
+	const strings: Buffer[] = []
+	let stringOffset = 12 + records.length
+	const intern = (value: string | undefined): number => {
+		if (!value) return 0
+		const at = stringOffset
+		const buffer = Buffer.from(`${value}\0`, 'ascii')
+		strings.push(buffer)
+		stringOffset += buffer.length
+		return at
+	}
+	channels.forEach((channel, index) => {
+		const base = index * RECORD
+		records.writeUInt16BE(channel.number, base + 0)
+		records.writeUInt16BE(1, base + 4)
+		records.writeUInt16BE(intern(channel.channel), base + 6)
+		records.writeUInt16BE(intern(channel.source), base + 8)
+		records.writeUInt16BE(intern(channel.name), base + 10)
+		records.writeUInt16BE(channel.status, base + 14)
+	})
+	const body = Buffer.concat([records, ...strings])
+	head.writeUInt16BE(DANTE_CONST.PROTOCOL.CONTROL, 0)
+	head.writeUInt16BE(12 + body.length, 2)
+	head.writeUInt16BE(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 6)
+	head.writeUInt8(channels.length, 11)
+	return Buffer.concat([head, body])
+}
+
+describe('subscription health from the device', () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it('follows a status change in an rx reply, with no crosspoint action involved', () => {
+		vi.useFakeTimers()
+		const self = Object.assign(instance(), {
+			counter: Buffer.from('0000', 'hex'),
+			sockets: {},
+			debug: false,
+			checkFeedbacks: vi.fn(),
+			checkFeedbacksById: vi.fn(),
+			checkAllFeedbacks: vi.fn(),
+			setActionDefinitions: vi.fn(),
+			setFeedbackDefinitions: vi.fn(),
+			setPresetDefinitions: vi.fn(),
+		}) as DanteInstance
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		const deliver = (status: number) => {
+			const reply = rxReply([
+				{ number: 1, name: 'Left', source: 'Stage Box', channel: 'Mic 1', status },
+				{ number: 2, name: 'Right', status: 0 },
+			])
+			parseReply(self, reply, { address: AMP, family: 'IPv4', port: 4440, size: reply.length })
+			vi.advanceTimersByTime(1000)
+		}
+
+		// the transmitter went away: same subscription, now unresolved
+		deliver(0x0001)
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({
+			[`${AMP_ID}_rx_1_connected`]: false,
+			[`${AMP_ID}_rx_1_status`]: 'unresolved (0x0001)',
+		})
+
+		// and back
+		deliver(0x0009)
+		expect(valueCalls(self).at(-1)?.[0]).toEqual({
+			[`${AMP_ID}_rx_1_connected`]: true,
+			[`${AMP_ID}_rx_1_status`]: 'connected (0x0009)',
+		})
+		cancelCheckVariables(self)
+		cancelUpdateData(self)
 	})
 })
