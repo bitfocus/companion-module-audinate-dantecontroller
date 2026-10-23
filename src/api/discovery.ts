@@ -212,7 +212,12 @@ export function danteDeviceIdFromTxt(data: MdnsTxtAnswer['data']): DanteDeviceId
  * choice lists, the per-device option fields - so a device whose id arrives after it registered
  * gets all of those now, and has none of them before.
  */
-function noteDeviceId(self: DanteInstance, deviceName: DeviceName, deviceId: DanteDeviceId, deviceIp: DeviceIp): void {
+export function noteDeviceId(
+	self: DanteInstance,
+	deviceName: DeviceName,
+	deviceId: DanteDeviceId,
+	deviceIp: DeviceIp,
+): void {
 	const previous = self.deviceIdsByName?.[deviceName]
 	noteDeviceName(self, deviceId, deviceName)
 

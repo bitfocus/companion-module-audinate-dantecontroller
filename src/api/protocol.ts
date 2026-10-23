@@ -26,6 +26,7 @@ import {
 	scheduleUpdateData,
 } from './devices.js'
 import { notifyRxStateChanged } from './requests.js'
+import { noteDeviceId } from './discovery.js'
 import {
 	getRxChannels,
 	getSettings,
@@ -35,7 +36,7 @@ import {
 	getVideoTxChannels,
 	refreshSettings,
 } from './queries.js'
-import { asChannelNumber, asDeviceName, type DeviceIp, deviceIpOf } from './ids.js'
+import { asChannelNumber, asDeviceName, type DeviceIp, deviceIpOf, parseDanteDeviceId } from './ids.js'
 
 const logger = createModuleLogger('api:protocol')
 
@@ -835,7 +836,17 @@ export function parseHeartbeatReply(self: DanteInstance, reply: Buffer, rinfo: d
 		// `checkConnections` saw a service still marked down and said Disconnected again.
 
 		// device is online
-		keepAlive(self, deviceIpOf(rinfo))
+		const deviceIp = deviceIpOf(rinfo)
+		keepAlive(self, deviceIp)
+
+		// The device id rides in every heartbeat (bytes 8-15, ahead of the `Audinate` marker), so a
+		// device whose CMC TXT record was missed still gets its id within a second. Checked against
+		// a capture: the same id the device's TXT record carries.
+		const device = self.devicesData[deviceIp]
+		const deviceId = parseDanteDeviceId(reply.subarray(8, 16).toString('hex'))
+		if (device?.name !== undefined && deviceId !== undefined && device.id !== deviceId) {
+			noteDeviceId(self, device.name, deviceId, deviceIp)
+		}
 	}
 }
 
