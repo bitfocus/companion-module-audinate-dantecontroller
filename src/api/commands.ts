@@ -82,7 +82,8 @@ export function setChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -126,7 +127,8 @@ export function setAudioRxChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -155,7 +157,8 @@ export function setAudioTxChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return

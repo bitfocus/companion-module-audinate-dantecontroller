@@ -182,10 +182,10 @@ export const DANTE_NAME_MAX_LENGTH = 31
  * digits and hyphens only, and no leading or trailing hyphen. Channel names may additionally
  * contain a colon, which separates a channel from its device in subscription strings.
  *
- * `allowSpace` is for `AV_EXTENDED` video channel names specifically: real hardware ships with
- * (and accepted, live) names like "Decoder Video Channel" that this rule would otherwise reject -
- * video channel naming evidently allows spaces even though the netaudio-derived audio rule above
- * does not, and there is no equivalent reference for it to mirror instead.
+ * `allowSpace` is for channel names, audio and video. Real hardware ships with (and accepted, live)
+ * names like "Decoder Video Channel" on video channels, and Neutrik units carry audio channel names
+ * like "01 IMAG-MIX-XLR-L", set in Dante Controller. Rejecting the space made those names impossible
+ * to set again - including renaming a channel back to what it was. Device names stay without spaces.
  *
  * An empty name is accepted here because the module uses it to mean "reset to default".
  */
@@ -211,7 +211,7 @@ export function validateDanteName(
 		return `may only contain ${parts.join(', ')} and ${last}`
 	}
 
-	const edges = options.allowColon ? ['-', ':'] : ['-']
+	const edges = ['-', ...(options.allowColon ? [':'] : []), ...(options.allowSpace ? [' '] : [])]
 	for (const edge of edges) {
 		if (name.startsWith(edge) || name.endsWith(edge)) {
 			return `may not start or end with '${edge}'`

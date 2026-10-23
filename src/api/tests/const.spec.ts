@@ -125,6 +125,16 @@ describe('validateDanteName', () => {
 		expect(validateDanteName(':CH1', { allowColon: true })).toMatch(/start or end/)
 		expect(validateDanteName('CH1:', { allowColon: true })).toMatch(/start or end/)
 	})
+
+	it('allows a space inside a channel name, as devices report them', () => {
+		// a Neutrik NA2-D-LINE's own name for a channel - which renaming it back has to be able to set
+		const channel = { allowColon: true, allowSpace: true }
+		expect(validateDanteName('01 IMAG-LTC-XLR-LOCALBACKUP', channel)).toBeUndefined()
+		expect(validateDanteName(' CH1', channel)).toMatch(/start or end/)
+		expect(validateDanteName('CH1 ', channel)).toMatch(/start or end/)
+		// device names still may not
+		expect(validateDanteName('IMAG IO2')).toBeDefined()
+	})
 })
 
 describe('channelDisplayLabel', () => {
