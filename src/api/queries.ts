@@ -8,8 +8,9 @@ import type DanteInstance from '../main.js'
 import { incrementBE, intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import { setEncoding, setSampleRate } from './commands.js'
-import { deviceLabel, macForDevice, markChannelsSettling } from './devices.js'
-import { asDeviceIp, brandedEntries, brandedKeys, type DeviceIp } from './ids.js'
+import { channelsAreSettling, deviceLabel, macForDevice, markChannelsSettling } from './devices.js'
+import { asDeviceIp, brandedEntries, brandedKeys, channelNumbers, type DeviceIp } from './ids.js'
+import type { AudioRxChannels, AudioTxChannels } from './types.js'
 
 const logger = createModuleLogger('api:queries')
 
@@ -50,6 +51,8 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: Device
 			delete channel.friendlyName
 		}
 	}
+	// cleared by the reply, so a query the device dropped can be told from one it answered with none
+	device.txFriendlyNamesPending = true
 	sendChannelQuery(
 		self,
 		ipaddress,
@@ -163,6 +166,77 @@ export function retryMissingVideoDirectories(self: DanteInstance): void {
 
 			if (direction === 'rx') getVideoRxChannels(self, ipaddress)
 			else getVideoTxChannels(self, ipaddress)
+		}
+	}
+}
+
+/** How many times a device is re-asked for an audio directory it has not fully answered. */
+const AUDIO_DIRECTORY_ATTEMPTS = 5
+
+/** Attempts spent per `<ip>:<directory>`, weakly held so a discarded instance is still collectable. */
+const audioDirectoryAttempts = new WeakMap<DanteInstance, Map<string, number>>()
+
+/** True when the device has reported channels but not the name of every one of them. */
+function missingChannelNames(channels: AudioTxChannels | AudioRxChannels | undefined): boolean {
+	return channelNumbers(channels?.count).some((channel) => channels?.[channel]?.name === undefined)
+}
+
+/**
+ * Re-asks for audio channel directories that are incomplete, once per discovery sweep.
+ *
+ * The channel queries are one-shot, and some devices drop requests rather than queue them: a
+ * Neutrik NA2-D-LINE answers about the first five of a burst and silently discards the rest. The
+ * burst a device gets once its channel counts arrive - receive, transmit and friendly-name
+ * queries, on top of the four discovery sent - is past that, so after a reconnect a device could
+ * keep its channel counts with no names behind them. Its transmit names are re-read only on a
+ * rename, so they stayed empty, and every receiver subscribed to it read as having no source.
+ *
+ * A directory is re-asked while a counted channel has no name, or while a friendly-names query is
+ * unanswered. Its budget is released once it is complete, so a later loss is retried too.
+ */
+export function retryMissingAudioDirectories(self: DanteInstance): void {
+	let attempts = audioDirectoryAttempts.get(self)
+	if (!attempts) {
+		attempts = new Map()
+		audioDirectoryAttempts.set(self, attempts)
+	}
+
+	// release the budget of anything no longer on the network, so a device that returns starts over
+	for (const key of [...attempts.keys()]) {
+		if (!self.devicesData[asDeviceIp(key.slice(0, key.lastIndexOf(':')))]) attempts.delete(key)
+	}
+
+	for (const [ipaddress, device] of brandedEntries(self.devicesData)) {
+		if (!device?.ports?.ARC) continue
+		// Replies to the last queries may still be on their way, and asking again now would only add
+		// to the burst the device is dropping from. Every channel query opens this window.
+		if (channelsAreSettling(self, ipaddress)) continue
+
+		const incomplete = {
+			tx: missingChannelNames(device.audioTx) || device.txFriendlyNamesPending === true,
+			rx: missingChannelNames(device.audioRx),
+		}
+		for (const direction of ['rx', 'tx'] as const) {
+			const key = `${ipaddress}:${direction}`
+			if (!incomplete[direction]) {
+				attempts.delete(key)
+				continue
+			}
+
+			const spent = attempts.get(key) ?? 0
+			if (spent >= AUDIO_DIRECTORY_ATTEMPTS) continue
+			attempts.set(key, spent + 1)
+
+			if (self.debug) {
+				logger.debug(`Re-asking ${deviceLabel(self, ipaddress)} for its audio ${direction} directory`)
+			}
+
+			if (direction === 'rx') {
+				getRxChannels(self, ipaddress)
+			} else {
+				getTxChannels(self, ipaddress)
+				getTxChannelFriendlyNames(self, ipaddress)
+			}
 		}
 	}
 }

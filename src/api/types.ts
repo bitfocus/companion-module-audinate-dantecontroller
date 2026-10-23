@@ -125,6 +125,11 @@ export interface DeviceData {
 	interfaceMac?: string
 	ports?: Partial<Record<ServiceName, number>>
 	audioTx?: AudioTxChannels
+	/**
+	 * True from sending a tx friendly-names query until a reply to it arrives. A device answers even
+	 * when it has no friendly names, so a query still pending at the next sweep was dropped.
+	 */
+	txFriendlyNamesPending?: boolean
 	audioRx?: AudioRxChannels
 	videoTx?: VideoTxChannels
 	videoRx?: VideoRxChannels

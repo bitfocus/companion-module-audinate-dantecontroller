@@ -27,7 +27,7 @@ import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSett
 import { cancelPendingCommands, handleCommandReply, handleSendFailure } from './requests.js'
 import { resetChannelNameHistory } from './identity.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
-import { retryMissingVideoDirectories } from './queries.js'
+import { retryMissingAudioDirectories, retryMissingVideoDirectories } from './queries.js'
 import { type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:connection')
@@ -252,7 +252,8 @@ export class DanteConnection {
 		if (period > 0) {
 			this.interval = setInterval(() => {
 				getMdnsServices(this.self)
-				// rides the same tick rather than owning a timer - see retryMissingVideoDirectories
+				// ride the same tick rather than owning a timer - see retryMissingVideoDirectories
+				retryMissingAudioDirectories(this.self)
 				retryMissingVideoDirectories(this.self)
 			}, period)
 			// module plumbing rather than network news - the same call as the port announcements

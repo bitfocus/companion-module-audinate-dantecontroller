@@ -649,7 +649,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 
 			// txChannelFriendlyNames
 			case DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY: {
-				deviceData[deviceIp] = parseTxFriendlyNames(reply)
+				deviceData[deviceIp] = { ...parseTxFriendlyNames(reply), txFriendlyNamesPending: false }
 				updateFlags.push('tx')
 				break
 			}
