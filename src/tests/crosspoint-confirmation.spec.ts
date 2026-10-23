@@ -25,6 +25,8 @@ const STAGE_ID = id(2)
 
 /** Fast enough that every failure path finishes in a few tens of milliseconds. */
 const FAST = { ack: { attemptTimeoutMs: 5, attempts: 3 }, confirm: { timeoutMs: 40, requeryMs: 10 } }
+/** A confirmation timeout long enough that finishing well inside it shows the wait ended early. */
+const SLOW = { ack: FAST.ack, confirm: { timeoutMs: 2000, requeryMs: 10 } }
 
 function devicesData(): DevicesData {
 	return {
@@ -84,6 +86,7 @@ function instance(respond: (command: Buffer, ip: string) => FakeAnswer | undefin
 }
 
 const isSubscribe = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscription
+const isRxQuery = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY
 
 /** Applies a subscription to Amp's rx channel 1 the way the device would report it. */
 function subscribe(self: DanteInstance, sourceChannel: string | undefined, subscriptionStatus: number) {
@@ -179,6 +182,43 @@ describe('confirmed crosspoints', () => {
 		await expect(makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
 			`is subscribed to Mic 1@Stage Box but not connected: ${label}`,
 		)
+	})
+
+	it('fails a refused route as soon as a reply shows the refusal, not after the timeout', async () => {
+		const { self } = instance((command) => {
+			if (isSubscribe(command)) return { apply: subscribe(self, 'Mic 1', 0x001c) }
+			return isRxQuery(command) ? {} : undefined
+		})
+
+		const started = Date.now()
+		await expect(makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)).rejects.toThrow(
+			'is subscribed to Mic 1@Stage Box but not connected: unsupported (0x001c)',
+		)
+		expect(Date.now() - started).toBeLessThan(SLOW.confirm.timeoutMs / 4)
+	})
+
+	it('does not fail on a refusal the channel reported before the route was sent', async () => {
+		// An earlier attempt left the same subscription refused; the device then connects it
+		const { self } = instance((command) => {
+			if (isSubscribe(command)) return {}
+			return isRxQuery(command) ? { apply: subscribe(self, 'Mic 1', 0x0009) } : undefined
+		})
+		subscribe(self, 'Mic 1', 0x001c)()
+
+		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+	})
+
+	it('keeps waiting while an online source is still unresolved', async () => {
+		const { self } = instance((command) => {
+			if (isSubscribe(command)) return { apply: subscribe(self, 'Mic 1', 0x0001) }
+			return isRxQuery(command) ? {} : undefined
+		})
+
+		const started = Date.now()
+		await expect(makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
+			'not connected: unresolved (0x0001)',
+		)
+		expect(Date.now() - started).toBeGreaterThanOrEqual(FAST.confirm.timeoutMs - 5)
 	})
 
 	it('accepts a route to a source that is not on the network, which Dante resolves later', async () => {

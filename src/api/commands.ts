@@ -3,7 +3,7 @@
  */
 
 import { DANTE_CONST } from './const.js'
-import { subscriptionStatusLabel, validateDanteName } from './protocol-rules.js'
+import { isSubscriptionRefused, subscriptionStatusLabel, validateDanteName } from './protocol-rules.js'
 import { createModuleLogger } from '@companion-module/base'
 import type DanteInstance from '../main.js'
 import { intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
@@ -470,16 +470,20 @@ async function confirmAudioConnected(
 	if (sent.mediaType !== 'audio' || !sent.expected) return
 	if (findDeviceIpByName(self, sent.expected.deviceName) === undefined) return
 
-	const connected = await awaitRxState(
-		self,
-		sent.ip,
-		() => getAudioRxChannelSource(self, sent.ip, sent.channel)?.connected === true,
-		() => getRxChannels(self, sent.ip),
-		options,
-	)
-	if (connected) return
+	const isConnected = () => getAudioRxChannelSource(self, sent.ip, sent.channel)?.connected === true
+	const statusNow = () => self.devicesData[sent.ip]?.audioRx?.[sent.channel]?.subscriptionStatus
+	// A refusal (0x001c for a self-route, say) ends the wait at once instead of after the timeout.
+	// Only a reply that arrives during the wait can refuse: the first check sees what the device
+	// reported before, which for a repeated route can be the refusal of an earlier attempt.
+	let checks = 0
+	const settled = () => {
+		checks += 1
+		return isConnected() || (checks > 1 && isSubscriptionRefused(statusNow()))
+	}
+	await awaitRxState(self, sent.ip, settled, () => getRxChannels(self, sent.ip), options)
+	if (isConnected()) return
 
-	const status = self.devicesData[sent.ip]?.audioRx?.[sent.channel]?.subscriptionStatus
+	const status = statusNow()
 	throw new DanteCommandError(
 		`${sent.destination} audio channel ${sent.channel} is subscribed to ${wanted} but not connected: ` +
 			subscriptionStatusLabel(status),

@@ -81,6 +81,34 @@ export function subscriptionStatusLabel(status: number | undefined): string {
 	return SUBSCRIPTION_STATUS_NAMES[status] ? `${SUBSCRIPTION_STATUS_NAMES[status]} (${code})` : code
 }
 
+/**
+ * Rx subscription status codes that will not turn into a connection by waiting: the receiver or
+ * transmitter refused the subscription, or the two cannot carry it. Only 0x001c (a refused
+ * self-route on an Ultimo X2) has been observed; the rest are the refusals from the netaudio
+ * catalogue. Transient states (unresolved, connecting, link down, a failed resolve) are left out, so
+ * a source that is still appearing or recovering keeps its full wait.
+ */
+const SUBSCRIPTION_STATUS_REFUSED: ReadonlySet<number> = new Set([
+	0x0010, // channel format mismatch
+	0x0011, // bundle format mismatch
+	0x0012, // no receive resources
+	0x0014, // no transmit resources
+	0x0018, // transmitter rejected the address
+	0x001a, // latency too low
+	0x001b, // different clock domain
+	0x001c, // unsupported
+	0x0020, // invalid channel
+	0x0022, // self-subscription not allowed
+	0x0025, // transmitter flow limit reached
+	0x0026, // transmit channel encrypted
+	0x0060, // transmit access denied
+])
+
+/** True if `status` (rx record offset 14) is a refusal that waiting will not change. */
+export function isSubscriptionRefused(status: number | undefined): boolean {
+	return status !== undefined && SUBSCRIPTION_STATUS_REFUSED.has(status)
+}
+
 /** True if `status` (rx record offset 14) indicates a live subscription. */
 export function isSubscriptionConnected(status: number | undefined): boolean {
 	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
