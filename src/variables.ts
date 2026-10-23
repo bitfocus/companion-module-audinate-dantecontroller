@@ -1,25 +1,96 @@
 import { createModuleLogger, type CompanionVariableDefinitions } from '@companion-module/base'
-import { deviceProperty } from './api/index.js'
+import {
+	channelFieldDevices,
+	deviceProperty,
+	getAudioRxChannelSource,
+	getChannelSubscriptionName,
+	getVideoRxChannelSource,
+	type DeviceData,
+} from './api/index.js'
+import { routingVariablesEnabled } from './config.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 import { sanitiseVariableId } from './utils/sanitise.js'
+import { VariablePublisher } from './variable-publisher.js'
 
 const logger = createModuleLogger('variables')
 
-/** Builds and registers the set of variable definitions for all known devices. */
+const publishers = new WeakMap<DanteInstance, VariablePublisher>()
+
+/**
+ * The instance's publisher. Every variable push goes through it, so a value that has not changed
+ * is never sent twice. Created on first use so test doubles of the instance need no setup.
+ */
+export function variablePublisher(self: DanteInstance): VariablePublisher {
+	let publisher = publishers.get(self)
+	if (!publisher) {
+		publisher = new VariablePublisher(self)
+		publishers.set(self, publisher)
+	}
+	return publisher
+}
+
+/**
+ * Builds the set of variable definitions for all known devices and publishes it, if it changed.
+ *
+ * The schema makes `devices` a required key, which is why a set without it needs the cast. An
+ * empty set is still published, so turning both options off removes the variables a previous run
+ * created.
+ */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
-	if (!self.config.variables) {
-		// Publish an empty set rather than simply returning, so turning the option off actually
-		// removes variables a previous run created. The schema makes `devices` a required key, which
-		// is why expressing "no variables at all" needs the cast.
-		self.setVariableDefinitions({} as CompanionVariableDefinitions<DanteVariableValues>)
-		return
+	const variables = {} as CompanionVariableDefinitions<DanteVariableValues>
+
+	if (self.config.variables) {
+		variables.devices = { name: 'Dante Devices' }
+		addDevicePropertyDefinitions(self, variables)
+	}
+	if (routingVariablesEnabled(self.config)) {
+		addRoutingDefinitions(self, variables)
 	}
 
-	const variables: CompanionVariableDefinitions<DanteVariableValues> = {
-		devices: { name: 'Dante Devices' },
-	}
+	variablePublisher(self).setDefinitions(variables)
+}
 
+/**
+ * Definitions for the routing variables, built from the same device set the per-device action
+ * fields are (live devices plus ones whose channels are remembered), so a device that blips keeps
+ * its variables and their last values.
+ *
+ * Definition names carry the device name but never a channel name: a channel rename then changes
+ * one value, instead of re-sending every definition on the network.
+ */
+function addRoutingDefinitions(
+	self: DanteInstance,
+	variables: CompanionVariableDefinitions<DanteVariableValues>,
+): void {
+	for (const { name } of channelFieldDevices(self)) {
+		const id = sanitiseVariableId(name)
+		variables[`${id}_device_id`] = { name: `Dante device id of ${name}` }
+
+		for (const choice of self.rxChannelsChoices[name] ?? []) {
+			variables[`${id}_rx_${choice.id}_name`] = { name: `${name} audio receive channel ${choice.id} name` }
+			variables[`${id}_rx_${choice.id}_source`] = { name: `${name} audio receive channel ${choice.id} source` }
+		}
+		for (const choice of self.txChannelsChoices[name] ?? []) {
+			variables[`${id}_tx_${choice.id}_name`] = { name: `${name} audio transmit channel ${choice.id} name` }
+		}
+		for (const choice of self.videoRxChannelsChoices?.[name] ?? []) {
+			variables[`${id}_rx_video_${choice.id}_name`] = { name: `${name} video receive channel ${choice.id} name` }
+			variables[`${id}_rx_video_${choice.id}_source`] = {
+				name: `${name} video receive channel ${choice.id} source`,
+			}
+		}
+		for (const choice of self.videoTxChannelsChoices?.[name] ?? []) {
+			variables[`${id}_tx_video_${choice.id}_name`] = { name: `${name} video transmit channel ${choice.id} name` }
+		}
+	}
+}
+
+/** Definitions for the per-device property variables. */
+function addDevicePropertyDefinitions(
+	self: DanteInstance,
+	variables: CompanionVariableDefinitions<DanteVariableValues>,
+): void {
 	for (const device of Object.values(self.devicesData)) {
 		if (!device.name) continue
 		// Device names can contain characters Companion rejects in a variable id (spaces most often), so
@@ -52,8 +123,6 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 		variables[`${id}_dante_software_build`] = { name: 'Dante software build of ' + device.name }
 		variables[`${id}_hardware_build`] = { name: 'Hardware build of ' + device.name }
 	}
-
-	self.setVariableDefinitions(variables)
 }
 
 /**
@@ -81,7 +150,24 @@ export const ALL_VARIABLE_TYPES = [
 	'output_levels',
 	'manf',
 	'versions',
+	'device_id',
 ] as const
+
+/**
+ * The categories whose replies can change a routing variable. A request for any of them refreshes
+ * the device's routing values; the publisher then sends only the ones that differ.
+ */
+const ROUTING_TYPES = new Set<string>([
+	'rx',
+	'tx',
+	'rx_names',
+	'tx_names',
+	'rx_video',
+	'tx_video',
+	'rx_names_video',
+	'tx_names_video',
+	'device_id',
+])
 
 /**
  * Recomputes and pushes current variable values to Companion.
@@ -89,12 +175,68 @@ export const ALL_VARIABLE_TYPES = [
  * @param variableTypes Which variable categories to refresh; defaults to all categories if none are given.
  */
 export function CheckVariables(self: DanteInstance, ipAddress?: string, ...variableTypes: string[]): void {
-	// Device properties are still tracked; they are just not published as variables. The Device
-	// Property feedback reads them through the same accessor either way.
-	if (!self.config.variables) return
+	const variableValues: Partial<DanteVariableValues> = {}
 
-	const variableValues: Partial<DanteVariableValues> = { devices: [] }
+	if (
+		routingVariablesEnabled(self.config) &&
+		(variableTypes.length === 0 || variableTypes.some((type) => ROUTING_TYPES.has(type)))
+	) {
+		for (const [ip, device] of Object.entries(self.devicesData)) {
+			if (ipAddress === undefined || ip === ipAddress) addRoutingValues(self, ip, device, variableValues)
+		}
+	}
 
+	// Device properties are still tracked when their variables are off; the Device Property
+	// feedback reads them through the same accessor either way.
+	if (self.config.variables) addDevicePropertyValues(self, variableValues, ipAddress, variableTypes)
+
+	try {
+		variablePublisher(self).setValues(variableValues)
+	} catch (error) {
+		logger.error('Error setting variables: ' + error)
+	}
+}
+
+/** A subscription as the routing variables show it: `channel@device`, Dante's own notation. */
+function subscriptionValue(source: { channelName: string; deviceName: string } | undefined): string {
+	return source ? `${source.channelName}@${source.deviceName}` : ''
+}
+
+/** One device's routing values. See `DanteRoutingVariables`. */
+function addRoutingValues(
+	self: DanteInstance,
+	ip: string,
+	device: DeviceData,
+	variableValues: Partial<DanteVariableValues>,
+): void {
+	if (!device.name) return
+	const id = sanitiseVariableId(device.name)
+
+	variableValues[`${id}_device_id`] = self.deviceIdsByName?.[device.name] ?? ''
+
+	for (let channel = 1; channel <= (device.audioRx?.count ?? 0); channel++) {
+		variableValues[`${id}_rx_${channel}_name`] = device.audioRx?.[channel]?.name ?? ''
+		variableValues[`${id}_rx_${channel}_source`] = subscriptionValue(getAudioRxChannelSource(self, ip, channel))
+	}
+	for (let channel = 1; channel <= (device.audioTx?.count ?? 0); channel++) {
+		variableValues[`${id}_tx_${channel}_name`] = getChannelSubscriptionName(device.audioTx?.[channel]) ?? ''
+	}
+	for (let channel = 1; channel <= (device.videoRx?.count ?? 0); channel++) {
+		variableValues[`${id}_rx_video_${channel}_name`] = device.videoRx?.[channel]?.name ?? ''
+		variableValues[`${id}_rx_video_${channel}_source`] = subscriptionValue(getVideoRxChannelSource(self, ip, channel))
+	}
+	for (let channel = 1; channel <= (device.videoTx?.count ?? 0); channel++) {
+		variableValues[`${id}_tx_video_${channel}_name`] = device.videoTx?.[channel]?.name ?? ''
+	}
+}
+
+/** The per-device property values, plus the `devices` list. */
+function addDevicePropertyValues(
+	self: DanteInstance,
+	variableValues: Partial<DanteVariableValues>,
+	ipAddress: string | undefined,
+	variableTypes: string[],
+): void {
 	if (!(variableTypes.length > 0)) {
 		variableTypes = [...ALL_VARIABLE_TYPES]
 	}
@@ -191,10 +333,4 @@ export function CheckVariables(self: DanteInstance, ipAddress?: string, ...varia
 	}
 
 	variableValues.devices = devices
-
-	try {
-		self.setVariableValues(variableValues)
-	} catch (error) {
-		logger.error('Error setting variables: ' + error)
-	}
 }

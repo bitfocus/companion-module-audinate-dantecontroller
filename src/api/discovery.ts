@@ -6,8 +6,8 @@ import { DANTE_CONST } from './const.js'
 import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
-import type { MdnsResponsePacket, ServiceName } from './types.js'
-import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
+import type { MdnsResponsePacket, MdnsTxtAnswer, ServiceName } from './types.js'
+import { keepAlive, registerDevice, scheduleCheckVariables, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { addressOnInterface } from '../config.js'
@@ -62,11 +62,13 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 			}
 			self.mdns.query(
 				{
+					// TXT as well, for the device id the CMC service carries - see `danteDeviceIdFromTxt`
 					questions: [
 						{
 							name: answer.data,
 							type: 'SRV',
 						},
+						...(name === DANTE_CONST.SERVICES.CMC ? [{ name: answer.data, type: 'TXT' as const }] : []),
 					],
 				},
 				(error) => {
@@ -75,6 +77,11 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 					}
 				},
 			)
+		} else if (answer.type == 'TXT') {
+			const dotIndex = name.indexOf('.')
+			if (name.slice(dotIndex + 1) !== DANTE_CONST.SERVICES.CMC) return
+			const deviceId = danteDeviceIdFromTxt(answer.data)
+			if (deviceId !== undefined) noteDeviceId(self, name.slice(0, dotIndex), deviceId, rinfo.address)
 		} else if (answer.type == 'SRV') {
 			// register services and port
 			for (const [id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
@@ -164,4 +171,39 @@ export function getMdnsServices(self: DanteInstance): void {
 			}
 		},
 	)
+}
+
+/**
+ * The Dante device id from a `_netaudio-cmc` TXT record's `id` key: 16 hex digits, lower-cased.
+ *
+ * It is the one identifier a device keeps across renames and address changes. A device's name is
+ * what Dante routes by and what it reports in subscriptions, but a rename makes routing treat it as
+ * a different device. On hardware the id is the device's MAC address followed by a process number,
+ * so two Dante devices sharing one host (a soundcard and a controller, say) still differ.
+ */
+export function danteDeviceIdFromTxt(data: MdnsTxtAnswer['data']): string | undefined {
+	for (const entry of Array.isArray(data) ? data : [data]) {
+		const text = typeof entry === 'string' ? entry : entry.toString('utf8')
+		const match = /^id=([0-9a-f]{16})$/i.exec(text.trim())
+		if (match) return match[1].toLowerCase()
+	}
+	return undefined
+}
+
+/**
+ * Records a device's id. Keyed by name, which is how everything else about a device is keyed, and
+ * kept while the device is offline - see `DanteInstance.deviceIdsByName`.
+ */
+function noteDeviceId(self: DanteInstance, deviceName: string, deviceId: string, deviceIp: string): void {
+	const ids = (self.deviceIdsByName ??= {})
+	if (ids[deviceName] === deviceId) return
+
+	if (ids[deviceName] !== undefined) {
+		// Same name, different hardware: a replacement device, or a name moved between devices
+		logger.info(`${deviceName} is now device id ${deviceId} (was ${ids[deviceName]})`)
+	} else if (self.debug) {
+		logger.debug(`${deviceName} has device id ${deviceId}`)
+	}
+	ids[deviceName] = deviceId
+	scheduleCheckVariables(self, deviceIp, 'device_id')
 }

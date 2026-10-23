@@ -53,6 +53,7 @@ import {
 	parseSettingsReply,
 	type DevicesData,
 } from '../index.js'
+import { UpdateVariableDefinitions } from '../../variables.js'
 import { DANTE_CONST } from '../const.js'
 import type DanteInstance from '../../main.js'
 
@@ -653,12 +654,16 @@ describe('scheduleCheckVariables', () => {
 	})
 
 	function twoDevices() {
-		return createMockInstance({
+		const self = createMockInstance({
 			devicesData: {
 				'10.0.0.5': { name: 'DeviceA', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
 				'10.0.0.6': { name: 'DeviceB', ports: {}, audioRx: { count: 1, 1: { number: 1, name: 'In 1' } } },
 			},
+			rxChannelsChoices: { DeviceA: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
 		})
+		// values are only published for defined variables, as in a running module
+		UpdateVariableDefinitions(self)
+		return self
 	}
 
 	function pushes(self: DanteInstance) {
@@ -673,10 +678,26 @@ describe('scheduleCheckVariables', () => {
 
 	it('collapses a burst within the window into the leading push plus one trailing push', () => {
 		const self = twoDevices()
-		for (let i = 0; i < 20; i++) scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		const channel = self.devicesData['10.0.0.5'].audioRx![1]
+		for (let i = 0; i < 20; i++) {
+			channel.name = `In ${i}`
+			scheduleCheckVariables(self, '10.0.0.5', 'rx')
+		}
 		expect(pushes(self)).toHaveLength(1) // leading only so far
 		vi.advanceTimersByTime(30)
 		expect(pushes(self)).toHaveLength(2) // trailing edge fires once
+		expect(pushes(self)[1][0]).toEqual({ DeviceA_rx_1_name: 'In 19' })
+	})
+
+	it('sends nothing when a refresh finds nothing changed', () => {
+		const self = twoDevices()
+		scheduleCheckVariables(self)
+		vi.advanceTimersByTime(30)
+		const before = pushes(self).length
+
+		scheduleCheckVariables(self)
+		vi.advanceTimersByTime(30)
+		expect(pushes(self)).toHaveLength(before)
 	})
 
 	it('does not lose devices queued behind the leading edge', () => {

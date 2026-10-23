@@ -37,7 +37,19 @@ export type ModuleConfig = {
 	 * the same values - it simply does not create variables for them.
 	 */
 	variables: boolean
+	/**
+	 * Whether to publish the per-channel routing variables (see `DanteRoutingVariables`). Separate
+	 * from {@link variables} because a router integration needs these and not the device
+	 * properties. Unset counts as on, so connections saved before the option existed get them too -
+	 * read it through `routingVariablesEnabled`.
+	 */
+	routingVariables?: boolean
 	verbose: boolean
+}
+
+/** See {@link ModuleConfig.routingVariables}. */
+export function routingVariablesEnabled(config: Pick<ModuleConfig, 'routingVariables'> | undefined): boolean {
+	return config?.routingVariables !== false
 }
 
 /** One IPv4 address on one network card. */
@@ -222,6 +234,17 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			description:
 				'Publish a variable for every device property. Turn this off to keep the connection light ' +
 				'and read device properties through the Device Property feedback instead.',
+			width: 12,
+			default: true,
+		},
+
+		{
+			type: 'checkbox',
+			id: 'routingVariables',
+			label: 'Create Routing Variables',
+			description:
+				'Publish a variable per channel with its name and, for receive channels, what it is ' +
+				'subscribed to, plus each device id. Router integrations such as Bitfocus Buttons read these.',
 			width: 12,
 			default: true,
 		},

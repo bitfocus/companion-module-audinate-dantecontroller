@@ -303,7 +303,7 @@ export function channelTypeOption<Key extends string>(id: Key): CompanionInputFi
  * a saved action holding an address instead of a name is matched by the arms
  * `deviceSelectedExpression` builds from the live record, which exists again the moment it returns.
  */
-function channelFieldDevices(self: DanteInstance): NamedDevice[] {
+export function channelFieldDevices(self: DanteInstance): NamedDevice[] {
 	const live = devicesByName(self)
 	const liveNames = new Set(live.map((named) => named.name))
 

@@ -59,6 +59,23 @@ export interface DanteDeviceVariables {
 	hardware_build: number
 }
 
+/**
+ * The routing variables, published when the `routingVariables` config option is on. Built for a
+ * router integration, so each one is a single value that changes on its own:
+ *
+ * - `<device>_device_id` - the 64-bit Dante device id from the device's mDNS TXT record. It
+ *   survives renames and address changes, unlike everything else that identifies a device.
+ * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
+ *   subscribed to, as `channel@device`, or empty when it is not subscribed.
+ * - `<device>_rx_<n>_name`, `<device>_tx_<n>_name` and their `_video_` forms - one channel's name.
+ *   A transmit channel's is the name subscriptions use, so its friendly name when it has one.
+ */
+export interface DanteRoutingVariables {
+	device_id: string
+	source: string
+	name: string
+}
+
 /** A `<deviceName>_<suffix>` variable id for one of the {@link DanteDeviceVariables} suffixes. */
 export type DanteDeviceVariableId = `${string}_${keyof DanteDeviceVariables & string}`
 
@@ -79,6 +96,8 @@ export type DanteVariableValues = {
 	devices: string[]
 } & {
 	[Suffix in keyof DanteDeviceVariables as `${string}_${Suffix & string}`]: DanteDeviceVariables[Suffix] | undefined
+} & {
+	[Suffix in keyof DanteRoutingVariables as `${string}_${Suffix & string}`]: DanteRoutingVariables[Suffix] | undefined
 }
 
 export interface DanteModuleTypes {

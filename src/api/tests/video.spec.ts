@@ -16,6 +16,7 @@ import {
 	DANTE_CONST,
 	type DevicesData,
 } from '../index.js'
+import { UpdateVariableDefinitions } from '../../variables.js'
 import type DanteInstance from '../../main.js'
 
 /**
@@ -163,8 +164,11 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		debug: false,
 		log: vi.fn(),
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		rxChannelsChoices: {},
+		txChannelsChoices: {},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
+		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		checkAllFeedbacks: vi.fn(),
@@ -398,6 +402,7 @@ describe('parseAvReply', () => {
 
 	it('schedules only the video tx variable types for a tx reply', () => {
 		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'Encoder-001' } } })
+		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_TX_DIRECTORY_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
 
@@ -427,6 +432,7 @@ describe('parseAvReply', () => {
 
 	it('schedules only the video rx variable types, not a full refresh', () => {
 		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910' } } })
+		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_ALL_ROUTED_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
 

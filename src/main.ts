@@ -41,6 +41,12 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	rxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	videoTxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
 	videoRxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
+	/**
+	 * Dante device ids by device name, from each device's `_netaudio-cmc` TXT record. Kept for
+	 * offline devices like the channel choice lists, so the id a router keys a device on does not
+	 * disappear when the device blips.
+	 */
+	deviceIdsByName: Record<string, string> = {}
 	txFriendlyNameRefreshCounter = 0
 
 	debug = false

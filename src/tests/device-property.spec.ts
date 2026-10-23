@@ -61,6 +61,7 @@ function instance(data: DevicesData = devicesData()) {
 		rxChannelsChoices: {},
 		txChannelsChoices: {},
 		setFeedbackDefinitions: vi.fn(),
+		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		log: vi.fn(),
@@ -244,6 +245,7 @@ describe('Device Property feedback', () => {
 describe('the feedback and the variables cannot disagree', () => {
 	it('reports the same value the corresponding variable holds', () => {
 		const self = instance()
+		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
@@ -299,7 +301,7 @@ describe('property changes schedule a feedback check', () => {
 describe('the Create Module Variables option', () => {
 	function withVariables(enabled: boolean) {
 		const self = instance()
-		self.config = { ...self.config, variables: enabled }
+		self.config = { ...self.config, variables: enabled, routingVariables: enabled }
 		self.setVariableDefinitions = vi.fn()
 		self.setVariableValues = vi.fn()
 		return self
@@ -321,7 +323,7 @@ describe('the Create Module Variables option', () => {
 		expect(self.setVariableValues).not.toHaveBeenCalled()
 	})
 
-	it('clears the definitions when disabled, so variables from a previous run do not linger', () => {
+	it('clears the definitions when both options are off, so variables from a previous run do not linger', () => {
 		const self = withVariables(false)
 		UpdateVariableDefinitions(self)
 
@@ -379,6 +381,7 @@ describe('variable ids are sanitised', () => {
 
 	it('keeps the unsanitised name in the devices list, which reports real device names', () => {
 		const self = withMessyDeviceName()
+		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 
 		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]

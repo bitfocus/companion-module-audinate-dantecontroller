@@ -391,6 +391,7 @@ export function initConnection(self: DanteInstance): void {
 	self.rxChannelsChoices = {}
 	self.videoTxChannelsChoices = {}
 	self.videoRxChannelsChoices = {}
+	self.deviceIdsByName = {}
 	self.txFriendlyNameRefreshCounter = 0
 
 	// Resolve the configured network card. Matching by MAC as well as by address means a link-local
