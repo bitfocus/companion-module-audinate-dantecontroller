@@ -729,7 +729,7 @@ describe('scheduleCheckVariables', () => {
 		expect(pushes(self)).toHaveLength(1) // leading only so far
 		vi.advanceTimersByTime(30)
 		expect(pushes(self)).toHaveLength(2) // trailing edge fires once
-		expect(pushes(self)[1][0]).toEqual({ DeviceA_rx_1_name: 'In 19' })
+		expect(pushes(self)[1][0]).toEqual({ DeviceA_rx_1_name: 'In 19', DeviceA_rx_1_label: 'In 19' })
 	})
 
 	it('sends nothing when a refresh finds nothing changed', () => {

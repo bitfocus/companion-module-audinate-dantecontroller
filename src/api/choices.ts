@@ -22,6 +22,7 @@ import {
 } from './devices.js'
 import { sanitiseVariableId } from '../utils/sanitise.js'
 import { deviceIdForName, rememberTxChannelNames } from './identity.js'
+import { channelDisplayLabel } from './protocol-rules.js'
 import {
 	brandedEntries,
 	brandedKeys,
@@ -199,6 +200,17 @@ export function devicesWithOptions(
 	)
 }
 
+/**
+ * Channel choices as a dropdown shows them: each labelled by `channelDisplayLabel`, ids untouched.
+ *
+ * The stored lists keep the channel names themselves, because they are also the remembered names
+ * subscriptions are resolved against (see `rememberedTxChannelNumber`) - so the display label is
+ * applied here, where a list becomes a field, and nowhere earlier.
+ */
+export function displayChannelChoices(choices: DropdownChoice<ChannelNumber>[]): DropdownChoice<ChannelNumber>[] {
+	return choices.map((choice) => ({ id: choice.id, label: channelDisplayLabel(choice.label, choice.id) }))
+}
+
 /** A device's rx or tx audio channel choices, or an empty list if it has none yet. */
 export function audioChannelChoices(
 	self: DanteInstance,
@@ -351,7 +363,7 @@ export function perDeviceChannelFields<Key extends string>(
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
 		for (const { id, name, device, ips } of channelFieldDevices(self)) {
-			const choices = mediaChannelChoices(self, device, direction, mediaType)
+			const choices = displayChannelChoices(mediaChannelChoices(self, device, direction, mediaType))
 			if (choices.length === 0) continue
 
 			// deviceSelectedExpression contains `||`, which binds looser than `&&` - bracket it (and, if

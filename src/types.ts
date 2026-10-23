@@ -84,6 +84,9 @@ export interface DanteDeviceVariables {
  *   channel is not subscribed.
  * - `<device>_rx_<n>_name`, `<device>_tx_<n>_name` and their `_video_` forms - one channel's name.
  *   A transmit channel's is the name subscriptions use, so its friendly name when it has one.
+ * - `<device>_rx_<n>_label`, `<device>_tx_<n>_label` and their `_video_` forms - how to show the
+ *   channel: its name, or `Ch <n>` when the name is empty or a placeholder such as `01 n/a`
+ *   (`channelDisplayLabel`). Display only; the `_name` keeps the exact name Dante routes by.
  */
 export interface DanteRoutingVariables {
 	device_id: string
@@ -93,6 +96,7 @@ export interface DanteRoutingVariables {
 	connected: boolean
 	status: string
 	name: string
+	label: string
 }
 
 /** A `<deviceName>_<suffix>` variable id for one of the {@link DanteDeviceVariables} suffixes. */

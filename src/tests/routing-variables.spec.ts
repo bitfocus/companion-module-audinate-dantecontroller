@@ -241,16 +241,19 @@ describe.each([
 				`${amp}_device_id`,
 				`${amp}_device_name`,
 				`${amp}_rx_1_name`,
+				`${amp}_rx_1_label`,
 				`${amp}_rx_1_source`,
 				`${amp}_rx_1_source_id`,
 				`${amp}_rx_1_connected`,
 				`${amp}_rx_1_status`,
 				`${amp}_rx_2_name`,
+				`${amp}_rx_2_label`,
 				`${amp}_rx_2_source`,
 				`${amp}_rx_2_source_id`,
 				`${amp}_rx_2_connected`,
 				`${amp}_rx_2_status`,
 				`${amp}_rx_video_1_name`,
+				`${amp}_rx_video_1_label`,
 				`${amp}_rx_video_1_source`,
 				`${amp}_rx_video_1_source_id`,
 				`${amp}_rx_video_1_connected`,
@@ -258,7 +261,9 @@ describe.each([
 				`${stage}_device_id`,
 				`${stage}_device_name`,
 				`${stage}_tx_1_name`,
+				`${stage}_tx_1_label`,
 				`${stage}_tx_2_name`,
+				`${stage}_tx_2_label`,
 			].sort(),
 		)
 	})
@@ -272,22 +277,46 @@ describe.each([
 			[`${amp}_device_id`]: AMP_ID,
 			[`${amp}_device_name`]: 'Amp',
 			[`${amp}_rx_1_name`]: 'Left',
+			[`${amp}_rx_1_label`]: 'Left',
 			[`${amp}_rx_1_source`]: 'Mic 1@Stage Box',
 			[`${amp}_rx_1_source_id`]: `${STAGE_ID}/1`,
 			[`${amp}_rx_1_connected`]: true,
 			[`${amp}_rx_1_status`]: 'connected (0x0009)',
 			[`${amp}_rx_2_name`]: 'Right',
+			[`${amp}_rx_2_label`]: 'Right',
 			// not subscribed: false, and its status stays at the '' every new variable starts as
 			[`${amp}_rx_2_connected`]: false,
 			[`${amp}_rx_video_1_name`]: 'HDMI',
+			[`${amp}_rx_video_1_label`]: 'HDMI',
 			[`${amp}_rx_video_1_source`]: 'Cam@Encoder',
 			[`${amp}_rx_video_1_connected`]: true,
 			[`${amp}_rx_video_1_status`]: 'active',
 			[`${stage}_device_id`]: STAGE_ID,
 			[`${stage}_device_name`]: 'Stage Box',
 			[`${stage}_tx_1_name`]: 'Mic 1',
+			[`${stage}_tx_1_label`]: 'Mic 1',
 			[`${stage}_tx_2_name`]: '02',
+			[`${stage}_tx_2_label`]: '02',
 		})
+	})
+
+	it('labels placeholder channel names as Ch <n> and keeps the name itself', () => {
+		const self = keyed()
+		// What a Neutrik NA2-D-LINE reports for an unnamed channel, as both name and friendly name
+		self.devicesData[STAGE].audioTx![2] = {
+			...self.devicesData[STAGE].audioTx![2],
+			name: '02 n/a',
+			friendlyName: '02 n/a',
+		}
+		self.devicesData[AMP].audioRx![2] = { ...self.devicesData[AMP].audioRx![2], name: '' }
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		const values = valueCalls(self)[0][0]
+		expect(values[`${stage}_tx_2_name`]).toBe('02 n/a')
+		expect(values[`${stage}_tx_2_label`]).toBe('Ch 2')
+		expect(values[`${amp}_rx_2_label`]).toBe('Ch 2')
+		expect(values[`${stage}_tx_1_label`]).toBe('Mic 1')
 	})
 
 	it('sends one value when one subscription changes', () => {

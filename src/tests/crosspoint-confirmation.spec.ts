@@ -332,7 +332,9 @@ describe('source ids', () => {
 		expect(values.at(-1)?.[0]).toEqual({
 			[`${AMP_ID}_rx_1_source_id`]: `${STAGE_ID}/2`,
 			[`${STAGE_ID}_tx_1_name`]: '01',
+			[`${STAGE_ID}_tx_1_label`]: '01',
 			[`${STAGE_ID}_tx_2_name`]: 'Mic 1',
+			[`${STAGE_ID}_tx_2_label`]: 'Mic 1',
 		})
 	})
 })

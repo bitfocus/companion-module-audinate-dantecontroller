@@ -140,6 +140,10 @@ Per device, with the same `<device>` prefix:
   but sending nothing) or `unresolved`. Both update whenever the device reports a change, not only
   after an action
 - Transmit channel name (`_tx_<n>_name`, `_tx_video_<n>_name`) - the name subscriptions use
+- Channel label (`_rx_<n>_label`, `_tx_<n>_label` and the `_video_` forms) - how to show the channel:
+  its name, or `Ch <n>` when it has none or only a placeholder such as `01 n/a` (which some devices,
+  such as Neutrik NA2-D-LINE, report for an unnamed channel). The channel dropdowns use the same
+  label. Display only: the `_name` variables keep the exact name, because Dante subscribes by it
 
 ## Feedbacks
 

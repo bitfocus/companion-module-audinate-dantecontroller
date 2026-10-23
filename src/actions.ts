@@ -6,6 +6,7 @@ import {
 import {
 	array2choices,
 	audioChannelChoices,
+	displayChannelChoices,
 	audioDeviceChoices,
 	audioRxDeviceChoices,
 	channelOptionPrefix,
@@ -1065,7 +1066,7 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${id}`,
-						choices: audioChannelChoices(self, device, 'rx'),
+						choices: displayChannelChoices(audioChannelChoices(self, device, 'rx')),
 						default: firstChoiceId(audioChannelChoices(self, device, 'rx'), 0),
 						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), name),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -

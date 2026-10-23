@@ -123,6 +123,25 @@ export function videoSubscriptionStatusLabel(resolved: number | undefined, activ
 	return resolved === 0 ? 'unresolved' : 'not active'
 }
 
+/**
+ * A channel name some devices report in place of a real one: the channel number and `n/a`
+ * (`01 n/a`), or a bare `n/a`. Neutrik NA2-D-LINE units report this as both the channel name and
+ * the friendly name of an unnamed transmit channel.
+ */
+const PLACEHOLDER_CHANNEL_NAME = /^\s*(?:0*\d+\s+)?n\/a\s*$/i
+
+/**
+ * How a channel is shown to a person: its name, or `Ch <n>` when it has none worth showing - empty,
+ * or a placeholder (see {@link PLACEHOLDER_CHANNEL_NAME}).
+ *
+ * Display only. Dante subscribes by the exact name, placeholder or not (`01 n/a@IMAG-IO1`), so
+ * everything that routes, matches or is published as a `_name` keeps the name itself.
+ */
+export function channelDisplayLabel(name: string | undefined, channelNumber: number): string {
+	if (!name?.trim() || PLACEHOLDER_CHANNEL_NAME.test(name)) return `Ch ${channelNumber}`
+	return name
+}
+
 /** Longest name a Dante device accepts, for both device and channel names. */
 export const DANTE_NAME_MAX_LENGTH = 31
 
