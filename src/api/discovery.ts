@@ -8,10 +8,26 @@ import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import type { MdnsResponsePacket, MdnsTxtAnswer, ServiceName } from './types.js'
 import { keepAlive, registerDevice, scheduleCheckVariables, scheduleUpdateData } from './devices.js'
-import { updateDeviceChoice } from './choices.js'
+import {
+	noteDeviceName,
+	refreshDeviceChoices,
+	updateChannelChoices,
+	updateDeviceChoice,
+	updateVideoChannelChoices,
+} from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { addressOnInterface } from '../config.js'
 import { rememberTxChannelNames } from './identity.js'
+import {
+	asDeviceName,
+	brandedEntries,
+	brandedKeys,
+	deviceIpOf,
+	parseDanteDeviceId,
+	type DanteDeviceId,
+	type DeviceIp,
+	type DeviceName,
+} from './ids.js'
 
 const logger = createModuleLogger('api:discovery')
 
@@ -82,16 +98,16 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 			const dotIndex = name.indexOf('.')
 			if (name.slice(dotIndex + 1) !== DANTE_CONST.SERVICES.CMC) return
 			const deviceId = danteDeviceIdFromTxt(answer.data)
-			if (deviceId !== undefined) noteDeviceId(self, name.slice(0, dotIndex), deviceId, rinfo.address)
+			if (deviceId !== undefined) noteDeviceId(self, asDeviceName(name.slice(0, dotIndex)), deviceId, deviceIpOf(rinfo))
 		} else if (answer.type == 'SRV') {
 			// register services and port
 			for (const [id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
 				const dotIndex = name.indexOf('.')
-				const deviceName = name.slice(0, dotIndex)
+				const deviceName = asDeviceName(name.slice(0, dotIndex))
 				const serviceName = name.slice(dotIndex + 1)
 
 				if (serviceName == danteService) {
-					const deviceIp = rinfo.address
+					const deviceIp = deviceIpOf(rinfo)
 					if (self.debug) {
 						logger.debug(`mDNS SRV from ${deviceIp} : ${deviceName} offers ${id} on port ${answer.data.port}`)
 					}
@@ -106,12 +122,9 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 					}
 
 					if (currDevice.name != deviceName) {
-						// updateDeviceChoice reads the outgoing name off the device record to find the choice
-						// it must replace, so the record has to still hold it. Assigning first left the old
-						// entry in `devicesChoices` alongside the new one.
+						// records the new name and rebuilds the dropdown; it reads the outgoing name off the
+						// record for its log line, so the record must not be renamed first
 						updateDeviceChoice(self, deviceIp, deviceName)
-						currDevice.name = deviceName
-						scheduleUpdateData(self)
 					}
 					if (!currDevice.ports) {
 						currDevice.ports = {}
@@ -153,7 +166,7 @@ export function getMdnsServices(self: DanteInstance): void {
 	if (self.debug) {
 		logger.debug(
 			`mDNS discovery sweep: asking for ${DANTE_CONST.SERVICES_ARRAY.length} Dante service types` +
-				` (${Object.keys(self.devicesData).length} device(s) currently known)`,
+				` (${brandedKeys(self.devicesData).length} device(s) currently known)`,
 		)
 	}
 
@@ -182,30 +195,47 @@ export function getMdnsServices(self: DanteInstance): void {
  * a different device. On hardware the id is the device's MAC address followed by a process number,
  * so two Dante devices sharing one host (a soundcard and a controller, say) still differ.
  */
-export function danteDeviceIdFromTxt(data: MdnsTxtAnswer['data']): string | undefined {
+export function danteDeviceIdFromTxt(data: MdnsTxtAnswer['data']): DanteDeviceId | undefined {
 	for (const entry of Array.isArray(data) ? data : [data]) {
-		const text = typeof entry === 'string' ? entry : entry.toString('utf8')
-		const match = /^id=([0-9a-f]{16})$/i.exec(text.trim())
-		if (match) return match[1].toLowerCase()
+		const text = (typeof entry === 'string' ? entry : entry.toString('utf8')).trim()
+		if (!text.startsWith('id=')) continue
+		const id = parseDanteDeviceId(text.slice(3))
+		if (id !== undefined) return id
 	}
 	return undefined
 }
 
 /**
- * Records a device's id. Keyed by name, which is how everything else about a device is keyed, and
- * kept while the device is offline - see `DanteInstance.deviceIdsByName`.
+ * Records a device's id, and gives it to the device's record.
+ *
+ * Everything the device offers Companion is keyed by its id - the device dropdown, the channel
+ * choice lists, the per-device option fields - so a device whose id arrives after it registered
+ * gets all of those now, and has none of them before.
  */
-function noteDeviceId(self: DanteInstance, deviceName: string, deviceId: string, deviceIp: string): void {
-	const ids = (self.deviceIdsByName ??= {})
-	if (ids[deviceName] === deviceId) return
+function noteDeviceId(self: DanteInstance, deviceName: DeviceName, deviceId: DanteDeviceId, deviceIp: DeviceIp): void {
+	const previous = self.deviceIdsByName?.[deviceName]
+	noteDeviceName(self, deviceId, deviceName)
 
-	if (ids[deviceName] !== undefined) {
-		// Same name, different hardware: a replacement device, or a name moved between devices
-		logger.info(`${deviceName} is now device id ${deviceId} (was ${ids[deviceName]})`)
+	const unnamedRecords = brandedEntries(self.devicesData).filter(
+		([, device]) => device.name === deviceName && device.id !== deviceId,
+	)
+	if (previous === deviceId && unnamedRecords.length === 0) return
+
+	if (previous !== undefined && previous !== deviceId) {
+		// Same name, different hardware: a replacement unit, or a name moved between devices
+		logger.info(`${deviceName} is now device id ${deviceId} (was ${previous})`)
 	} else if (self.debug) {
 		logger.debug(`${deviceName} has device id ${deviceId}`)
 	}
-	ids[deviceName] = deviceId
-	rememberTxChannelNames(self, deviceIp)
+
+	for (const [ip, device] of unnamedRecords) {
+		device.id = deviceId
+		if (device.audioRx) updateChannelChoices(self, ip, 'rx')
+		if (device.audioTx) updateChannelChoices(self, ip, 'tx')
+		if (device.videoRx) updateVideoChannelChoices(self, ip, 'rx')
+		if (device.videoTx) updateVideoChannelChoices(self, ip, 'tx')
+		rememberTxChannelNames(self, ip)
+	}
+	refreshDeviceChoices(self)
 	scheduleCheckVariables(self, deviceIp, 'device_id')
 }

@@ -22,13 +22,13 @@ import {
 	clearDeviceTimeouts,
 	resetIdCollisionWarnings,
 	deviceLabel,
-	resolveDeviceIp,
 } from './devices.js'
 import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
 import { cancelPendingCommands, handleCommandReply, handleSendFailure } from './requests.js'
 import { resetChannelNameHistory } from './identity.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
 import { retryMissingVideoDirectories } from './queries.js'
+import { type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:connection')
 
@@ -235,8 +235,8 @@ export class DanteConnection {
 	}
 
 	/** Sends a prepared command to a device, over the socket and port for the given service. */
-	send(command: Buffer, host: string, service: ServiceName = 'ARC', forcePort?: number): void {
-		sendCommand(this.self, command, host, service, forcePort)
+	send(command: Buffer, ipaddress: DeviceIp, service: ServiceName = 'ARC', forcePort?: number): void {
+		sendCommand(this.self, command, ipaddress, service, forcePort)
 	}
 
 	/** Re-evaluates whether every socket and discovery are up, and updates the instance status. */
@@ -812,7 +812,7 @@ function handlePacket(self: DanteInstance, service: ConnectionName, source: stri
 const reportedSendFailures = new WeakMap<DanteInstance, Map<string, string>>()
 
 /** Identifies one send target for {@link reportedSendFailures}. */
-function sendFailureKey(service: ServiceName, ipaddress: string): string {
+function sendFailureKey(service: ServiceName, ipaddress: DeviceIp): string {
 	return `${service}:${ipaddress}`
 }
 
@@ -823,7 +823,7 @@ function sendFailureKey(service: ServiceName, ipaddress: string): string {
  * up to sixteen datagrams - so reporting each one would bury the first, which is the informative
  * one. Keyed on the error code as well as the target, so a failure that changes kind is still news.
  */
-function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress: string, error: Error): void {
+function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress: DeviceIp, error: Error): void {
 	let reported = reportedSendFailures.get(self)
 	if (!reported) {
 		reported = new Map()
@@ -848,7 +848,7 @@ function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress:
 export function sendCommand(
 	self: DanteInstance,
 	command: Buffer,
-	host: string,
+	ipaddress: DeviceIp,
 	service: ServiceName = 'ARC',
 	forcePort?: number,
 ): boolean {
@@ -857,9 +857,6 @@ export function sendCommand(
 		logger.debug(`${service} : Tx (${command.length}): ${command.toString('hex')}`)
 	}
 
-	// `host` may be a device name or an address: dropdowns store the name, older saved actions and
-	// internal callers pass the address. Resolving here covers every command path at once.
-	const ipaddress = resolveDeviceIp(self, host) ?? host
 	const port = forcePort ?? self.devicesData[ipaddress]?.ports?.[service]
 	const socket = self.sockets[service]
 	if (port && socket) {
@@ -890,7 +887,7 @@ export function sendCommand(
 		return true
 	}
 
-	const deviceId = self.devicesData[ipaddress]?.name ?? host
+	const deviceId = self.devicesData[ipaddress]?.name ?? ipaddress
 	logger.error(
 		port
 			? `No ${service} socket to reach ${deviceId} with`

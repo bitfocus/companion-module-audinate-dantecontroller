@@ -16,9 +16,12 @@ import {
 import type DanteInstance from '../main.js'
 import { CheckVariables, UpdateVariableDefinitions } from '../variables.js'
 import { ackFor, answeringSend, type FakeAnswer } from './fake-device.js'
+import { ch, id, ip, name } from './ids.js'
 
-const DEST = '10.0.0.5'
-const SOURCE = '10.0.0.6'
+const DEST = ip('10.0.0.5')
+const SOURCE = ip('10.0.0.6')
+const AMP_ID = id(1)
+const STAGE_ID = id(2)
 
 /** Fast enough that every failure path finishes in a few tens of milliseconds. */
 const FAST = { ack: { attemptTimeoutMs: 5, attempts: 3 }, confirm: { timeoutMs: 40, requeryMs: 10 } }
@@ -26,14 +29,20 @@ const FAST = { ack: { attemptTimeoutMs: 5, attempts: 3 }, confirm: { timeoutMs: 
 function devicesData(): DevicesData {
 	return {
 		[DEST]: {
-			name: 'Amp',
+			name: name('Amp'),
+			id: AMP_ID,
 			ports: { ARC: 4440 },
-			audioRx: { count: 2, 1: { number: 1, name: 'Left' }, 2: { number: 2, name: 'Right' } },
+			audioRx: { count: 2, 1: { number: ch(1), name: 'Left' }, 2: { number: ch(2), name: 'Right' } },
 		},
 		[SOURCE]: {
-			name: 'Stage Box',
+			name: name('Stage Box'),
+			id: STAGE_ID,
 			ports: { ARC: 4440 },
-			audioTx: { count: 2, 1: { number: 1, name: '01', friendlyName: 'Mic 1' }, 2: { number: 2, name: '02' } },
+			audioTx: {
+				count: 2,
+				1: { number: ch(1), name: '01', friendlyName: 'Mic 1' },
+				2: { number: ch(2), name: '02' },
+			},
 		},
 	}
 }
@@ -44,24 +53,25 @@ function instance(respond: (command: Buffer, ip: string) => FakeAnswer | undefin
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: false, verbose: false },
 		devicesData: devicesData(),
 		devicesChoices: [
-			{ id: 'Amp', label: 'Amp' },
-			{ id: 'Stage Box', label: 'Stage Box' },
+			{ id: AMP_ID, label: 'Amp' },
+			{ id: STAGE_ID, label: 'Stage Box' },
 		],
 		rxChannelsChoices: {
-			Amp: [
-				{ id: 1, label: 'Left' },
-				{ id: 2, label: 'Right' },
+			[AMP_ID]: [
+				{ id: ch(1), label: 'Left' },
+				{ id: ch(2), label: 'Right' },
 			],
 		},
 		txChannelsChoices: {
-			'Stage Box': [
-				{ id: 1, label: 'Mic 1' },
-				{ id: 2, label: '02' },
+			[STAGE_ID]: [
+				{ id: ch(1), label: 'Mic 1' },
+				{ id: ch(2), label: '02' },
 			],
 		},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		deviceIdsByName: { Amp: '001dc1fffe000001', 'Stage Box': '001dc1fffe000002' },
+		deviceIdsByName: { [name('Amp')]: AMP_ID, [name('Stage Box')]: STAGE_ID },
+		deviceNamesById: { [AMP_ID]: name('Amp'), [STAGE_ID]: name('Stage Box') },
 		counter: Buffer.from('0100', 'hex'),
 		debug: false,
 		setVariableDefinitions: vi.fn(),
@@ -79,7 +89,7 @@ const isSubscribe = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST
 function subscribe(self: DanteInstance, sourceChannel: string | undefined, subscriptionStatus: number) {
 	return () => {
 		self.devicesData[DEST].audioRx![1] = {
-			number: 1,
+			number: ch(1),
 			name: 'Left',
 			sourceDevice: sourceChannel === undefined ? undefined : 'Stage Box',
 			sourceChannel,
@@ -100,6 +110,25 @@ describe('confirmed crosspoints', () => {
 		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)
 
 		expect(subscribes(send)).toHaveLength(1)
+	})
+
+	it('addresses the destination by device id as well as by a name saved by 2.x', async () => {
+		const { self, send } = instance((command) =>
+			isSubscribe(command) ? { apply: subscribe(self, 'Mic 1', 0x0009) } : undefined,
+		)
+
+		await makeAudioCrosspointConfirmed(self, AMP_ID, 'Mic 1', 'Stage Box', 1, FAST)
+
+		expect(send.mock.calls[0][4]).toBe(DEST)
+	})
+
+	it('names an offline device by its last known name when it cannot be reached', async () => {
+		const { self } = instance()
+		delete self.devicesData[DEST]
+
+		await expect(makeAudioCrosspointConfirmed(self, AMP_ID, 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
+			`Can't find Amp (${AMP_ID}) - it may be offline`,
+		)
 	})
 
 	it('fails with the result code when the device rejects the command', async () => {
@@ -158,7 +187,7 @@ describe('confirmed crosspoints', () => {
 				? {
 						apply: () => {
 							self.devicesData[DEST].audioRx![1] = {
-								number: 1,
+								number: ch(1),
 								name: 'Left',
 								sourceDevice: 'Spare Rack',
 								sourceChannel: 'Out 1',
@@ -247,37 +276,37 @@ describe('source ids', () => {
 	it('resolves a subscription to the device id and transmit channel number', () => {
 		const self = withHistory()
 		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: 'Mic 1' }, 'audio')).toBe(
-			'001dc1fffe000002/1',
+			`${STAGE_ID}/1`,
 		)
 		// the factory name a subscription may predate the friendly name with
 		expect(resolveSubscriptionSource(self, { deviceName: 'stage box', channelName: '01' }, 'audio')).toBe(
-			'001dc1fffe000002/1',
+			`${STAGE_ID}/1`,
 		)
 	})
 
 	it('still resolves the names a receiver kept after the transmitter was renamed', () => {
 		const self = withHistory()
 		// device rename: the id stays and the old name stays mapped to it
-		self.devicesData[SOURCE].name = 'Stage Box B'
-		self.deviceIdsByName['Stage Box B'] = '001dc1fffe000002'
+		self.devicesData[SOURCE].name = name('Stage Box B')
+		self.deviceIdsByName[name('Stage Box B')] = STAGE_ID
 		// channel rename
-		self.devicesData[SOURCE].audioTx![2] = { number: 2, name: 'PROBE-TX' }
+		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: 'PROBE-TX' }
 		rememberTxChannelNames(self, SOURCE)
 
 		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: '02' }, 'audio')).toBe(
-			'001dc1fffe000002/2',
+			`${STAGE_ID}/2`,
 		)
 		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box B', channelName: 'PROBE-TX' }, 'audio')).toBe(
-			'001dc1fffe000002/2',
+			`${STAGE_ID}/2`,
 		)
 	})
 
 	it('prefers where a name is now over where it used to be', () => {
 		const self = withHistory()
-		self.devicesData[SOURCE].audioTx![1] = { number: 1, name: '02' }
-		self.devicesData[SOURCE].audioTx![2] = { number: 2, name: 'Spare' }
+		self.devicesData[SOURCE].audioTx![1] = { number: ch(1), name: '02' }
+		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: 'Spare' }
 		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: '02' }, 'audio')).toBe(
-			'001dc1fffe000002/1',
+			`${STAGE_ID}/1`,
 		)
 	})
 
@@ -293,17 +322,17 @@ describe('source ids', () => {
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		const values = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls
-		expect(values[0][0]).toMatchObject({ Amp_rx_1_source_id: '001dc1fffe000002/1' })
+		expect(values[0][0]).toMatchObject({ [`${AMP_ID}_rx_1_source_id`]: `${STAGE_ID}/1` })
 
 		// Mic 1 moves to channel 2 on the source: only Amp's source id changes
-		self.devicesData[SOURCE].audioTx![1] = { number: 1, name: '01' }
-		self.devicesData[SOURCE].audioTx![2] = { number: 2, name: '02', friendlyName: 'Mic 1' }
+		self.devicesData[SOURCE].audioTx![1] = { number: ch(1), name: '01' }
+		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: '02', friendlyName: 'Mic 1' }
 		CheckVariables(self, SOURCE, 'tx_names')
 
 		expect(values.at(-1)?.[0]).toEqual({
-			Amp_rx_1_source_id: '001dc1fffe000002/2',
-			Stage_Box_tx_1_name: '01',
-			Stage_Box_tx_2_name: 'Mic 1',
+			[`${AMP_ID}_rx_1_source_id`]: `${STAGE_ID}/2`,
+			[`${STAGE_ID}_tx_1_name`]: '01',
+			[`${STAGE_ID}_tx_2_name`]: 'Mic 1',
 		})
 	})
 })

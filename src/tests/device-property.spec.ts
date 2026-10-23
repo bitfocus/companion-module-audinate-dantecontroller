@@ -11,15 +11,19 @@ import {
 	type DevicesData,
 } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, id, ip, name } from './ids.js'
 
-const A = '10.0.0.5'
-const CONTROLLER = '10.0.0.1'
+const A = ip('10.0.0.5')
+const A_ID = id(5)
+const CONTROLLER = ip('10.0.0.1')
+const CONTROLLER_ID = id(1)
 
 function devicesData(): DevicesData {
 	return {
-		[CONTROLLER]: { name: 'AController', ports: {} },
+		[CONTROLLER]: { name: name('AController'), id: CONTROLLER_ID, ports: {} },
 		[A]: {
-			name: 'DeviceA',
+			name: name('DeviceA'),
+			id: A_ID,
 			ports: { ARC: 4440 },
 			locked: false,
 			sr: 48000,
@@ -44,10 +48,14 @@ function devicesData(): DevicesData {
 			hardwareVersionMajor: 4,
 			hardwareVersionMinor: 2,
 			hardwareVersionPatch: 3,
-			audioRx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
-			audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
-			videoRx: { count: 1, 1: { number: 1, name: 'Video In 1' } },
-			videoTx: { count: 2, 1: { number: 1, name: 'Cam 1' }, 2: { number: 2, name: 'Cam 2' } },
+			audioRx: { count: 2, 1: { number: ch(1), name: 'In 1' }, 2: { number: ch(2), name: 'In 2' } },
+			audioTx: {
+				count: 2,
+				1: { number: ch(1), name: '01' },
+				2: { number: ch(2), name: '02', friendlyName: 'Talkback' },
+			},
+			videoRx: { count: 1, 1: { number: ch(1), name: 'Video In 1' } },
+			videoTx: { count: 2, 1: { number: ch(1), name: 'Cam 1' }, 2: { number: ch(2), name: 'Cam 2' } },
 		},
 	}
 }
@@ -57,7 +65,7 @@ function instance(data: DevicesData = devicesData()) {
 		// a normal connection: variables enabled, as every existing one is after the upgrade
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		devicesData: data,
-		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
+		devicesChoices: Object.values(data).map((device) => ({ id: device.id!, label: device.name! })),
 		rxChannelsChoices: {},
 		txChannelsChoices: {},
 		setFeedbackDefinitions: vi.fn(),
@@ -76,7 +84,7 @@ function definition(self: DanteInstance = instance()) {
 }
 
 /** Runs the feedback callback for one device/property pair. */
-function read(property: string, device = 'DeviceA', self: DanteInstance = instance()) {
+function read(property: string, device: string = A_ID, self: DanteInstance = instance()) {
 	return definition(self).callback({ id: `fb-${property}`, options: { device, property } }, {})
 }
 
@@ -90,7 +98,8 @@ describe('Device Property feedback', () => {
 	it('offers every device, not only sources or destinations', () => {
 		// the controller has no channels at all and is still offered
 		const picker = definition().options.find((option: { id: string }) => option.id === 'device')
-		expect(picker.choices.map((choice: { id: string }) => choice.id)).toEqual(['AController', 'DeviceA'])
+		// by id, in the order of their names
+		expect(picker.choices.map((choice: { id: string }) => choice.id)).toEqual([CONTROLLER_ID, A_ID])
 	})
 
 	it('accepts a custom device value, as the actions do', () => {
@@ -176,7 +185,7 @@ describe('Device Property feedback', () => {
 	it('reports a zero build as 0, not as absent', () => {
 		// a real device reports build 0, which must not be confused with "not reported"
 		expect(read('software_build')).toBe(0)
-		expect(read('software_build', 'AController')).toBe('')
+		expect(read('software_build', CONTROLLER_ID)).toBe('')
 	})
 
 	it('falls back to the numeric product version when the string one is empty', () => {
@@ -188,11 +197,11 @@ describe('Device Property feedback', () => {
 			productVersionMinor: 3,
 			productVersionPatch: 67,
 		})
-		expect(read('product_version', 'DeviceA', instance(data))).toBe('4.3.67')
+		expect(read('product_version', A_ID, instance(data))).toBe('4.3.67')
 	})
 
 	it('reports nothing rather than "undefined.undefined.undefined" for an unreported version', () => {
-		expect(read('hardware_version', 'AController')).toBe('')
+		expect(read('hardware_version', CONTROLLER_ID)).toBe('')
 	})
 
 	it('reports channel names as the variables hold them', () => {
@@ -204,6 +213,10 @@ describe('Device Property feedback', () => {
 	it('reports video channel names separately from audio', () => {
 		expect(read('rx_names_video')).toEqual(['Video In 1'])
 		expect(read('tx_names_video')).toEqual(['Cam 1', 'Cam 2'])
+	})
+
+	it('still reads a feedback 2.x saved against the device name', () => {
+		expect(read('model_name', 'DeviceA')).toBe('Model One')
 	})
 
 	it('accepts a device stored by address, as older configurations hold it', () => {
@@ -219,13 +232,13 @@ describe('Device Property feedback', () => {
 	})
 
 	it('reports nothing rather than undefined for a property the device has not sent', () => {
-		expect(read('sr', 'AController')).toBe('')
+		expect(read('sr', CONTROLLER_ID)).toBe('')
 	})
 
 	it('records the device it reads, so a change to it re-checks this feedback by id', () => {
 		const self = instance()
 		// evaluating the feedback is what registers which device it depends on
-		definition(self).callback({ id: 'fb-sr', options: { device: 'DeviceA', property: 'sr' } }, {})
+		definition(self).callback({ id: 'fb-sr', options: { device: A_ID, property: 'sr' } }, {})
 
 		scheduleCheckFeedbacks(self, A)
 		const checked = (self.checkFeedbacksById as ReturnType<typeof vi.fn>).mock.calls.flat()
@@ -234,7 +247,7 @@ describe('Device Property feedback', () => {
 
 	it('is not re-checked when an unrelated device changes', () => {
 		const self = instance()
-		definition(self).callback({ id: 'fb-sr', options: { device: 'DeviceA', property: 'sr' } }, {})
+		definition(self).callback({ id: 'fb-sr', options: { device: A_ID, property: 'sr' } }, {})
 
 		scheduleCheckFeedbacks(self, CONTROLLER)
 		const checked = (self.checkFeedbacksById as ReturnType<typeof vi.fn>).mock.calls.flat()
@@ -243,15 +256,19 @@ describe('Device Property feedback', () => {
 })
 
 describe('the feedback and the variables cannot disagree', () => {
-	it('reports the same value the corresponding variable holds', () => {
+	it.each([
+		['ids', A_ID],
+		['names', 'DeviceA'],
+	] as const)('reports the same value the corresponding variable holds, with variables keyed by %s', (keys, key) => {
 		const self = instance()
+		self.config = { ...self.config, variableKeys: keys }
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
 		for (const property of DEVICE_PROPERTIES) {
-			const fromFeedback = read(property, 'DeviceA', instance())
-			const fromVariable = written[`DeviceA_${property}`]
+			const fromFeedback = read(property, A_ID, instance())
+			const fromVariable = written[`${key}_${property}`]
 			// the feedback substitutes '' where a variable is simply absent
 			expect(fromFeedback).toEqual(fromVariable ?? '')
 		}
@@ -334,19 +351,54 @@ describe('the Create Module Variables option', () => {
 	it('still reports device properties through the feedback when variables are off', () => {
 		// the point of the option: the data is still tracked, only the variables are not created
 		const self = withVariables(false)
-		expect(definition(self).callback({ id: 'fb', options: { device: 'DeviceA', property: 'sr' } }, {})).toBe(48000)
+		expect(definition(self).callback({ id: 'fb', options: { device: A_ID, property: 'sr' } }, {})).toBe(48000)
 	})
 })
 
-describe('variable ids are sanitised', () => {
+describe('variable ids keyed by device id', () => {
+	it('is the default for a new connection', () => {
+		const self = instance()
+		UpdateVariableDefinitions(self)
+
+		const definitions = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		expect(Object.keys(definitions)).toContain(`${A_ID}_ip`)
+		expect(Object.keys(definitions)).not.toContain('DeviceA_ip')
+		// the description carries the name, so the variable picker stays readable
+		expect(definitions[`${A_ID}_ip`].name).toBe('Ip address of DeviceA')
+	})
+
+	it('keeps the same ids when a device is renamed', () => {
+		const self = instance()
+		UpdateVariableDefinitions(self)
+		self.devicesData[A].name = name('DeviceA-Renamed')
+		UpdateVariableDefinitions(self)
+
+		const calls = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls
+		expect(Object.keys(calls.at(-1)?.[0] ?? {})).toEqual(Object.keys(calls[0][0]))
+	})
+
+	it('publishes nothing for a device whose id is not known yet', () => {
+		const data = devicesData()
+		delete data[A].id
+		const self = instance(data)
+		UpdateVariableDefinitions(self)
+
+		const definitions = (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		expect(Object.keys(definitions).some((variable) => variable.includes('DeviceA'))).toBe(false)
+		expect(Object.keys(definitions)).toContain(`${CONTROLLER_ID}_ip`)
+	})
+})
+
+describe('variable ids keyed by device name are sanitised', () => {
 	/** Companion rejects a variable id containing anything but letters, digits, `-`, `_` and `.`. */
 	const MESSY = 'Studio 1 (Rack A)'
 	const CLEAN = 'Studio_1__Rack_A_'
 
 	function withMessyDeviceName() {
 		const data = devicesData()
-		data[A].name = MESSY
+		data[A].name = name(MESSY)
 		const self = instance(data)
+		self.config = { ...self.config, variableKeys: 'names' }
 		self.setVariableDefinitions = vi.fn()
 		self.setVariableValues = vi.fn()
 		return self

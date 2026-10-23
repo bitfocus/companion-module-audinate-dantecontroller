@@ -5,6 +5,7 @@
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import { sendCommand } from './connection.js'
+import { type DeviceIp, deviceIpOf } from './ids.js'
 
 /**
  * A command the module could not carry out, with a message meant for whoever ran it.
@@ -61,7 +62,7 @@ function pendingFor(self: DanteInstance): Map<string, PendingCommand> {
 /** A command's transaction number, which the device echoes in bytes 4-5 of its reply. */
 export const transactionId = (packet: Buffer): number => packet.readUInt16BE(4)
 
-const pendingKey = (ip: string, packet: Buffer) => `${ip}#${transactionId(packet)}`
+const pendingKey = (ip: DeviceIp, packet: Buffer) => `${ip}#${transactionId(packet)}`
 
 /**
  * Hands a reply to the command waiting for it, if any. Called for every packet on the ARC socket,
@@ -76,7 +77,7 @@ export function handleCommandReply(
 	// header plus the result code
 	if (reply.length < 10) return false
 	const pending = pendingByInstance.get(self)
-	const key = pendingKey(rinfo.address, reply)
+	const key = pendingKey(deviceIpOf(rinfo), reply)
 	const waiting = pending?.get(key)
 	if (!waiting) return false
 
@@ -86,7 +87,7 @@ export function handleCommandReply(
 }
 
 /** Fails the command waiting on a packet the socket could not send. */
-export function handleSendFailure(self: DanteInstance, ip: string, packet: Buffer, error: Error): void {
+export function handleSendFailure(self: DanteInstance, ip: DeviceIp, packet: Buffer, error: Error): void {
 	if (packet.length < 6) return
 	const pending = pendingByInstance.get(self)
 	const key = pendingKey(ip, packet)
@@ -127,7 +128,7 @@ const DEFAULT_ACK_OPTIONS: Required<AckOptions> = { attemptTimeoutMs: 1000, atte
  */
 export async function awaitCommandAck(
 	self: DanteInstance,
-	ip: string,
+	ip: DeviceIp,
 	command: Buffer,
 	options: AckOptions = {},
 ): Promise<CommandAck> {
@@ -169,10 +170,10 @@ export async function awaitCommandAck(
 
 // Receive channel state
 
-const rxListeners = new WeakMap<DanteInstance, Set<(ip: string) => void>>()
+const rxListeners = new WeakMap<DanteInstance, Set<(ip: DeviceIp) => void>>()
 
 /** Called by the parsers whenever a device's receive channel state has been merged. */
-export function notifyRxStateChanged(self: DanteInstance, ip: string): void {
+export function notifyRxStateChanged(self: DanteInstance, ip: DeviceIp): void {
 	const listeners = rxListeners.get(self)
 	if (!listeners) return
 	for (const listener of [...listeners]) listener(ip)
@@ -197,7 +198,7 @@ const DEFAULT_CONFIRM_OPTIONS: Required<ConfirmOptions> = { timeoutMs: 3000, req
  */
 export async function awaitRxState(
 	self: DanteInstance,
-	ip: string,
+	ip: DeviceIp,
 	matches: () => boolean,
 	requery: () => void,
 	options: ConfirmOptions = {},
@@ -219,7 +220,7 @@ export async function awaitRxState(
 			registered.delete(listener)
 			resolve(result)
 		}
-		const listener = (changedIp: string) => {
+		const listener = (changedIp: DeviceIp) => {
 			if (changedIp === ip && matches()) finish(true)
 		}
 		const deadline = setTimeout(() => finish(matches()), timeoutMs)

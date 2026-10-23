@@ -15,9 +15,26 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Timeout Interval** — how long a device may go unheard before it is dropped (1 s – 5 min, default
   3 s). Dante hardware sends heartbeats several times a second and is unaffected; software endpoints
   are kept alive only by the sweep, so anything below twice the Update Interval is raised to it.
-- **Create Module Variables** — on by default. Turn it off to skip the per-device variables and read
-  the same values through the Device Property feedback instead.
+- **Variable Names** — what each device's variables are named after. _Device id_ (the default) stays
+  the same when a device is renamed; _Device name_ is easier to type but breaks every reference when
+  the device is renamed. Connections created before version 3.0 keep _Device name_.
+- **Create Module Variables** — on by default. Turn it off to skip the per-device property variables and
+  read the same values through the Device Property feedback instead.
+- **Create Routing Variables** — on by default. Publishes each channel's name, each receive channel's
+  subscription, and each device's id and name. Router integrations such as Bitfocus Buttons read these.
+  Only values that change are sent, so a large network costs little to keep up to date.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
+
+## Devices
+
+Devices are identified by their Dante device id, which a device keeps when it is renamed or gets a new
+address. Actions and feedbacks store it, so they keep pointing at the same device across a rename.
+Actions saved by earlier versions hold a device name or address instead; those keep working while a
+device with that name or address is on the network, and are converted when the action is edited.
+
+Dante itself routes by name: a receiver keeps the names it subscribed with after the transmitter is
+renamed, and keeps receiving until it next re-resolves them. A replacement unit given the old name
+takes over those subscriptions in Dante, but is a new device here.
 
 ## Actions
 
@@ -27,6 +44,13 @@ expression.
 
 The crosspoint and channel-name actions carry a **Channel Type** option, _Audio_ or _Video_, and act
 on that kind of channel only. Video is supported on Dante AV devices.
+
+The crosspoint actions finish only once the device has taken the change: it acknowledges the command,
+the receive channel reports the new subscription, and, for an audio source that is on the network,
+the subscription connects. Otherwise the action fails with the reason - the device is offline or
+locked, it rejected the command (with its result code), or it reports a subscription status such as
+_unsupported_ for a self-route a device does not allow. A route to a device that is not on the network
+succeeds once the receiver reports it, as Dante pre-patching does: it connects when the device appears.
 
 _Crosspoint - Clear_'s "clear every channel" option follows the Channel Type as well: it clears every
 channel of the selected type, not both. Use two actions to clear audio and video together.
@@ -60,7 +84,9 @@ channel of the selected type, not both. Use two actions to clear audio and video
 
 ### Per device
 
-Named `<device name>_<suffix>`, so a device called `Amp-1` has `$(dante:Amp-1_sr)`.
+Named `<device>_<suffix>`, where `<device>` is the device id, or the device name with characters
+Companion cannot use replaced by `_`, per the **Variable Names** option. A device with id
+`001dc1fffe843ea2` called `Amp-1` has `$(dante:001dc1fffe843ea2_sr)` or `$(dante:Amp-1_sr)`.
 The same values are available through the Device Property feedback.
 
 - Dante model (`_dante_model`)
@@ -89,6 +115,19 @@ The same values are available through the Device Property feedback.
 - Video receive channel names (`_rx_names_video`)
 - Video transmit channel count (`_tx_video`)
 - Video transmit channel names (`_tx_names_video`)
+
+### Routing
+
+Per device, with the same `<device>` prefix:
+
+- Device id (`_device_id`)
+- Device name (`_device_name`)
+- Receive channel name (`_rx_<n>_name`, `_rx_video_<n>_name`)
+- Receive channel source (`_rx_<n>_source`, `_rx_video_<n>_source`) - what the channel is subscribed
+  to as `channel@device`, the names it subscribed with; empty when it is not subscribed
+- Receive channel source id (`_rx_<n>_source_id`, `_rx_video_<n>_source_id`) - the same subscription
+  as `<device id>/<transmit channel number>`, which still resolves after the transmitter is renamed
+- Transmit channel name (`_tx_<n>_name`, `_tx_video_<n>_name`) - the name subscriptions use
 
 ## Feedbacks
 

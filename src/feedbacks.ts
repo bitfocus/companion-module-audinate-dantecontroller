@@ -1,7 +1,6 @@
 import {
 	combineRgb,
 	createModuleLogger,
-	Regex,
 	type CompanionBooleanFeedbackDefinition,
 	type CompanionFeedbackDefinitions,
 	type CompanionValueFeedbackDefinition,
@@ -12,9 +11,9 @@ import {
 	CHANNEL_MEDIA_TYPE_LABELS,
 	deviceByIdentifier,
 	deviceOptionValue,
+	rememberedDeviceName,
 	rememberedTxChannelName,
 	rememberedTxChannelNumber,
-	findDeviceIpByName,
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
 	findVideoRxChannelByName,
@@ -39,7 +38,6 @@ import {
 	txDeviceChoices,
 	untrackFeedback,
 } from './api/index.js'
-import { sanitiseVariableId } from './utils/sanitise.js'
 import type DanteInstance from './main.js'
 
 const logger = createModuleLogger('feedbacks')
@@ -244,9 +242,10 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// Unrouted, or a device that has not reported yet: leave the user's settings as they are.
 			if (!source) return undefined
 
-			// The device the route names must be one the picker offers, which is keyed by name.
-			const sourceIp = findDeviceIpByName(self, source.deviceName)
-			if (!sourceIp) return undefined
+			// The device the route names must be one the picker offers, which is keyed by id.
+			const sourceIp = resolveDeviceIp(self, source.deviceName)
+			const sourceId = sourceIp !== undefined ? self.devicesData[sourceIp]?.id : undefined
+			if (!sourceIp || !sourceId) return undefined
 
 			// The dropdown holds a channel number, so a subscription naming a channel this module has
 			// not seen on the source cannot be expressed as a selection.
@@ -259,11 +258,11 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// literal to `string`, which no longer matches the per-device option key type. The prefix
 			// is branched explicitly (rather than built via channelOptionPrefix) so the key stays a
 			// literal template TypeScript can check against the option type's per-media-type Records.
-			const learnt: Partial<RoutingBgOptions> = { sourceDevice: source.deviceName }
+			const learnt: Partial<RoutingBgOptions> = { sourceDevice: sourceId }
 			if (isVideo) {
-				learnt[`sourceChannelVideo_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
+				learnt[`sourceChannelVideo_${sourceId}`] = sourceChannelNumber
 			} else {
-				learnt[`sourceChannel_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
+				learnt[`sourceChannel_${sourceId}`] = sourceChannelNumber
 			}
 			return learnt
 		},
@@ -278,6 +277,8 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			// Pickers store the device name; actions saved before that store an address. Both resolve.
 			const destinationDevice = deviceByIdentifier(self, opt.destinationDevice)
 			const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
+			// what the destination reports its source as - known even while the source is offline
+			const sourceName = rememberedDeviceName(self, opt.sourceDevice) ?? opt.sourceDevice
 			if (!opt.destinationDevice || !opt.sourceDevice) return false
 
 			const destinationChannelNumber = deviceOptionValue<number | undefined>(
@@ -306,9 +307,8 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					findVideoTxChannelByName(self, opt.sourceDevice, String(selectedSourceChannel))
 				// The destination reports its source by name, and both halves of that comparison used to
 				// be resolved from the *source* device's live record - so a source that had gone quiet
-				// made a route the destination still reports read as false. The picker already holds the
-				// name, and the retained choice list still holds the channel's, so neither needs the
-				// source to be reporting. What is *not* substituted is the route itself: an unrouted
+				// made a route the destination still reports read as false. The name its id was last seen
+				// with and the retained choice list's channel name do not need the source to be reporting. What is *not* substituted is the route itself: an unrouted
 				// destination reports no source and matches nothing.
 				//
 				// The destination's own account of whether media is flowing, which is the same distinction
@@ -322,9 +322,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					destinationChannel,
 					selectedSourceChannel,
 					sourceChannel,
-					sourceDevice?.name ?? opt.sourceDevice,
+					sourceName,
 					opt.destinationDevice == opt.sourceDevice,
-					rememberedTxChannelName(self, sourceDevice?.name ?? opt.sourceDevice, 'video', selectedSourceChannel),
+					rememberedTxChannelName(self, sourceName, 'video', selectedSourceChannel),
 				)
 			}
 
@@ -343,9 +343,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 					destinationChannel,
 					selectedSourceChannel,
 					sourceChannel,
-					sourceDevice?.name ?? opt.sourceDevice,
+					sourceName,
 					opt.destinationDevice == opt.sourceDevice,
-					rememberedTxChannelName(self, sourceDevice?.name ?? opt.sourceDevice, 'audio', selectedSourceChannel),
+					rememberedTxChannelName(self, sourceName, 'audio', selectedSourceChannel),
 				)
 			)
 		},
@@ -425,16 +425,13 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 			const destinationChannelId = opt.destinationChannelId
 			const destinationDeviceId = opt.destinationDeviceId
 
-			// Check if destinationDeviceId is an IP or a name
-			const IP = RegExp(Regex.IP.slice(1, -1))
-			const destinationDeviceIp = IP.test(destinationDeviceId)
-				? destinationDeviceId
-				: findDeviceIpByName(self, destinationDeviceId)
+			// free text: an id, a name or an address all resolve
+			const destinationDeviceIp = resolveDeviceIp(self, destinationDeviceId)
 
 			// These options are free text (and may come from variables), so either device may fail to
 			// resolve - against a device that has not been discovered yet, for instance. An unresolved
 			// entry registers this feedback as a wildcard so it keeps being checked regardless.
-			trackFeedbackDevices(self, feedback.id, [destinationDeviceIp, findDeviceIpByName(self, sourceDeviceName)])
+			trackFeedbackDevices(self, feedback.id, [destinationDeviceIp, resolveDeviceIp(self, sourceDeviceName)])
 
 			if (!destinationDeviceIp || !sourceDeviceName) return false
 			const sameDeviceSelected = self.devicesData[destinationDeviceIp]?.name == sourceDeviceName

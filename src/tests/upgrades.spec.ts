@@ -23,7 +23,8 @@ const VARIABLES_OPTION_SCRIPT_INDEX = 4
 const INTERVAL_MINIMUMS_SCRIPT_INDEX = 5
 const REFRESH_DEVICE_SCRIPT_INDEX = 6
 const CHANNEL_TYPE_SCRIPT_INDEX = 7
-const EXPECTED_SCRIPT_COUNT = 8
+const VARIABLE_KEYS_SCRIPT_INDEX = 8
+const EXPECTED_SCRIPT_COUNT = 9
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
@@ -31,6 +32,7 @@ const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
 const applyIntervalMinimums = UpgradeScripts[INTERVAL_MINIMUMS_SCRIPT_INDEX]
 const addRefreshDeviceOption = UpgradeScripts[REFRESH_DEVICE_SCRIPT_INDEX]
 const addChannelTypeOption = UpgradeScripts[CHANNEL_TYPE_SCRIPT_INDEX]
+const keepNameKeyedVariables = UpgradeScripts[VARIABLE_KEYS_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -541,5 +543,51 @@ describe('channelType option upgrade script', () => {
 
 	it('leaves the config alone', () => {
 		expect(runChannelType([action('makeCrosspoint', {})]).updatedConfig).toBeNull()
+	})
+})
+
+describe('variable keys upgrade script', () => {
+	function runConfig(config: Record<string, unknown> | null) {
+		return keepNameKeyedVariables(
+			{} as CompanionUpgradeContext<ModuleConfig>,
+			{
+				config,
+				secrets: null,
+				actions: [],
+				feedbacks: [],
+			} as unknown as CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+		)
+	}
+
+	it('keeps name-keyed variables for a connection from before 3.0, whose buttons use them', () => {
+		const result = runConfig({
+			mac: 'aa|1.2.3.4',
+			interval: 250,
+			timeoutInterval: 9000,
+			variables: true,
+			verbose: false,
+		})
+		expect(result.updatedConfig).toEqual({
+			mac: 'aa|1.2.3.4',
+			interval: 250,
+			timeoutInterval: 9000,
+			variables: true,
+			verbose: false,
+			variableKeys: 'names',
+		})
+	})
+
+	it.each(['ids', 'names'])('leaves a connection that has already chosen %s alone', (variableKeys) => {
+		expect(runConfig({ variableKeys }).updatedConfig).toBeNull()
+	})
+
+	it('tolerates a connection with no config', () => {
+		expect(runConfig(null)).toEqual({ updatedConfig: null, updatedActions: [], updatedFeedbacks: [] })
+	})
+
+	it('changes no actions or feedbacks', () => {
+		const result = runConfig({ variables: true })
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
 	})
 })

@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { handleCommandReply, notifyRxStateChanged } from '../api/index.js'
+import { asDeviceIp, handleCommandReply, notifyRxStateChanged } from '../api/index.js'
 import type DanteInstance from '../main.js'
 
 /**
@@ -43,7 +43,7 @@ export function answeringSend(
 			if (!answer) return
 			queueMicrotask(() => {
 				answer.apply?.()
-				notifyRxStateChanged(self, ip)
+				notifyRxStateChanged(self, asDeviceIp(ip))
 				handleCommandReply(self, ackFor(command, answer.result), { address: ip })
 			})
 		},

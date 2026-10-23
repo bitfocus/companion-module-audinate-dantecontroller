@@ -18,6 +18,7 @@ import {
 } from '../index.js'
 import { UpdateVariableDefinitions } from '../../variables.js'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * Real packets captured from a live Dante network during the video-routing reverse-engineering
@@ -139,7 +140,7 @@ const REAL_AUDIO_ONLY_TX_DIRECTORY_HEX =
 const REAL_LEGACY_TAG_TX_DIRECTORY_HEX =
 	'28090080110d240000010000000000000202002c005800000000bb8001010018040000180018000e43483100141400010000000300010000000001070000000000280018000000000000002800000000000000004348320014140002000000030002000000000107000000000054001800000000000000540000000000000000'
 
-const REAL_DEVICE_IP = '169.254.2.58'
+const REAL_DEVICE_IP = ip('169.254.2.58')
 
 let loggerSink: ReturnType<typeof vi.fn<LoggingSink>>
 
@@ -156,9 +157,29 @@ function makeRinfo(address: string, size: number): dgram.RemoteInfo {
 	return { address, size, port: 0, family: 'IPv4' }
 }
 
-function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: DevicesData } = {}): DanteInstance {
+/**
+ * Device records as plain fixture data. The parsers brand the names and channel numbers they read
+ * off the wire; a fixture literal cannot, so this stands in for them.
+ */
+function devices(records: Record<string, object> = {}): DevicesData {
+	return records
+}
+
+/** A mock instance's overrides, with device records given as plain fixture data - see {@link devices}. */
+type MockOverrides = Omit<Partial<DanteInstance>, 'devicesData'> & { devicesData?: Record<string, object> }
+
+/** Variables keyed by device name, the mode connections upgraded from 2.x run in. */
+const NAME_KEYED = {
+	mac: '',
+	interval: 1000,
+	timeoutInterval: 3000,
+	variables: true,
+	variableKeys: 'names',
+	verbose: false,
+} as const
+
+function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 	const base = {
-		devicesData: {},
 		sockets: {},
 		counter: Buffer.from('0000', 'hex'),
 		debug: false,
@@ -172,7 +193,10 @@ function createMockInstance(overrides: Partial<DanteInstance> & { devicesData?: 
 		setVariableValues: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		checkAllFeedbacks: vi.fn(),
+		deviceIdsByName: {},
+		deviceNamesById: {},
 		...overrides,
+		devicesData: devices(overrides.devicesData),
 	}
 	return base as unknown as DanteInstance
 }
@@ -253,7 +277,7 @@ describe('makeVideoCrosspoint / clearVideoCrosspoint', () => {
 		const send = vi.fn()
 		const self = createMockInstance({ sockets: { ARC: { send } as unknown as dgram.Socket } })
 		expect(() => makeVideoCrosspoint(self, 'UnknownDevice', '01', 'Encoder-001', 1)).toThrow(
-			"Can't find UnknownDevice IP address",
+			"Can't find UnknownDevice - it may be offline",
 		)
 		expect(send).not.toHaveBeenCalled()
 	})
@@ -401,7 +425,7 @@ describe('parseAvReply', () => {
 	})
 
 	it('schedules only the video tx variable types for a tx reply', () => {
-		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'Encoder-001' } } })
+		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'Encoder-001' } }, config: NAME_KEYED })
 		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_TX_DIRECTORY_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
@@ -431,7 +455,7 @@ describe('parseAvReply', () => {
 	})
 
 	it('schedules only the video rx variable types, not a full refresh', () => {
-		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910' } } })
+		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910' } }, config: NAME_KEYED })
 		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_ALL_ROUTED_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
@@ -464,22 +488,22 @@ describe('getVideoRxChannelSource / findVideoRxChannelByName / findVideoTxChanne
 	it('reads the current video subscription source', () => {
 		const self = createMockInstance({
 			devicesData: {
-				'10.0.0.5': { videoRx: { 1: { number: 1, sourceChannel: 'Tx 1', sourceDevice: 'Sender' } } },
+				[ip('10.0.0.5')]: { videoRx: { 1: { number: 1, sourceChannel: 'Tx 1', sourceDevice: 'Sender' } } },
 			},
 		})
-		expect(getVideoRxChannelSource(self, '10.0.0.5', 1)).toEqual({ deviceName: 'Sender', channelName: 'Tx 1' })
+		expect(getVideoRxChannelSource(self, ip('10.0.0.5'), 1)).toEqual({ deviceName: 'Sender', channelName: 'Tx 1' })
 	})
 
 	it('returns undefined for an unrouted channel', () => {
-		const self = createMockInstance({ devicesData: { '10.0.0.5': { videoRx: { 1: { number: 1 } } } } })
-		expect(getVideoRxChannelSource(self, '10.0.0.5', 1)).toBeUndefined()
+		const self = createMockInstance({ devicesData: { [ip('10.0.0.5')]: { videoRx: { 1: { number: 1 } } } } })
+		expect(getVideoRxChannelSource(self, ip('10.0.0.5'), 1)).toBeUndefined()
 	})
 
 	it('finds a video rx/tx channel by name', () => {
 		const self = createMockInstance({
 			devicesData: {
-				'10.0.0.5': { name: 'Dest', videoRx: { 1: { number: 1, name: 'Decoder Video Channel' } } },
-				'10.0.0.6': { name: 'Source', videoTx: { 1: { number: 1, name: 'Transmit Video Channel' } } },
+				[ip('10.0.0.5')]: { name: 'Dest', videoRx: { count: 1, 1: { number: 1, name: 'Decoder Video Channel' } } },
+				[ip('10.0.0.6')]: { name: 'Source', videoTx: { count: 1, 1: { number: 1, name: 'Transmit Video Channel' } } },
 			},
 		})
 		expect(findVideoRxChannelByName(self, 'Dest', 'Decoder Video Channel')?.number).toBe(1)

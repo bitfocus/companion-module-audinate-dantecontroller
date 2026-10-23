@@ -21,6 +21,7 @@ import {
 	type ConnectionName,
 } from './api/index.js'
 import type { DanteModuleTypes } from './types.js'
+import type { ChannelNumber, DanteDeviceId, DeviceName } from './api/ids.js'
 
 export { UpgradeScripts }
 
@@ -36,18 +37,21 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	config!: ModuleConfig
 
 	devicesData: DevicesData = {}
-	/** Discovered devices, keyed by name - see `resolveDeviceIp`. */
-	devicesChoices: DropdownChoice<string>[] = []
-	txChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
-	rxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
-	videoTxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
-	videoRxChannelsChoices: Record<string, DropdownChoice<number>[]> = {}
+	/** Discovered devices whose id is known, labelled by name - see `resolveDeviceIp`. */
+	devicesChoices: DropdownChoice<DanteDeviceId>[] = []
+	/** Channel choice lists per device. Kept while a device is offline - see `channelFieldDevices`. */
+	txChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
+	rxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
+	videoTxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
+	videoRxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
 	/**
 	 * Dante device ids by device name, from each device's `_netaudio-cmc` TXT record. Kept for
 	 * offline devices like the channel choice lists, so the id a router keys a device on does not
 	 * disappear when the device blips.
 	 */
-	deviceIdsByName: Record<string, string> = {}
+	deviceIdsByName: Partial<Record<DeviceName, DanteDeviceId>> = {}
+	/** The last name each device id was seen with, for devices that are offline. */
+	deviceNamesById: Partial<Record<DanteDeviceId, DeviceName>> = {}
 	txFriendlyNameRefreshCounter = 0
 
 	debug = false

@@ -3,6 +3,7 @@ import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { destroyDevice, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { id, ip, name } from './ids.js'
 
 /**
  * Companion requires that any option referenced from another option's `isVisibleExpression` has
@@ -11,6 +12,36 @@ import type DanteInstance from '../main.js'
  * These tests walk the definitions this module actually generates rather than its source text, so
  * they cover the per-device option fields that are built dynamically from `devicesData`.
  */
+
+/**
+ * Fixture device ids, by device name. An id belongs to the device rather than its address, so a
+ * device seen at two addresses - or renamed - keeps the one here.
+ */
+const DEVICE_IDS: Record<string, number> = {
+	DeviceA: 0x0a,
+	'Studio 1 (Rack A)': 0x0a,
+	DeviceB: 0x0b,
+	AController: 0x0c,
+	Decoder: 0x0d,
+	Mixed: 0x0e,
+	'DAV-02HR-Stage1': 0x143,
+}
+
+function idOf(deviceName: string) {
+	const suffix = DEVICE_IDS[deviceName]
+	if (suffix === undefined) throw new Error(`No fixture id for ${deviceName}`)
+	return id(suffix)
+}
+
+const A = ip('10.0.0.5')
+const A_ID = idOf('DeviceA')
+const B = ip('10.0.0.6')
+const B_ID = idOf('DeviceB')
+
+/** Adds a device as registration and its CMC TXT record together leave it: named, with its id. */
+function put(self: DanteInstance, address: string, record: Record<string, unknown> & { name: string }) {
+	self.devicesData[ip(address)] = { ...record, name: name(record.name), id: idOf(record.name) }
+}
 
 /** The option lists a fully-featured device reports once its settings replies arrive. */
 const settingsOptions = {
@@ -27,15 +58,17 @@ function devicesData(): DevicesData {
 		return io
 	}
 	return {
-		'10.0.0.5': {
+		[A]: {
 			name: 'DeviceA',
+			id: A_ID,
 			ports: { ARC: 4440 },
 			audioRx: channels(4, 'In'),
 			audioTx: channels(4, 'Out'),
 			...settingsOptions,
 		},
-		'10.0.0.6': {
+		[B]: {
 			name: 'DeviceB',
+			id: B_ID,
 			ports: { ARC: 4440 },
 			audioRx: channels(2, 'In'),
 			audioTx: channels(2, 'Out'),
@@ -48,9 +81,9 @@ function mockInstance() {
 	const data = devicesData()
 	return {
 		devicesData: data,
-		devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
-		rxChannelsChoices: { DeviceA: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
-		txChannelsChoices: { DeviceA: [{ id: 1, label: 'Out 1' }], DeviceB: [{ id: 1, label: 'Out 1' }] },
+		devicesChoices: Object.values(data).map((device) => ({ id: device.id!, label: device.name! })),
+		rxChannelsChoices: { [A_ID]: [{ id: 1, label: 'In 1' }], [B_ID]: [{ id: 1, label: 'In 1' }] },
+		txChannelsChoices: { [A_ID]: [{ id: 1, label: 'Out 1' }], [B_ID]: [{ id: 1, label: 'Out 1' }] },
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),
 		log: vi.fn(),
@@ -161,8 +194,8 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 	/** A controller-style device: discovered and nameable, but with no audio channels at all. */
 	function withController() {
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
-		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		put(self, '10.0.0.1', { name: 'AController', ports: { ARC: 4440 } })
+		self.devicesChoices = [{ id: idOf('AController'), label: 'AController' }, ...self.devicesChoices]
 		return self
 	}
 
@@ -189,8 +222,8 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
 		const ids = deviceOption(definitions, actionId)?.choices?.map((choice) => choice.id) ?? []
-		expect(ids).not.toContain('10.0.0.1')
-		expect(ids).toContain('10.0.0.5')
+		expect(ids).not.toContain(idOf('AController'))
+		expect(ids).toContain(A_ID)
 	})
 
 	it.each(audioActions)('%s does not default to a device with no audio channels', (actionId) => {
@@ -199,18 +232,18 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
 		// the controller sorts first, so an unfiltered default would land on it
-		expect(deviceOption(definitions, actionId)?.default).not.toBe('10.0.0.1')
+		expect(deviceOption(definitions, actionId)?.default).not.toBe(idOf('AController'))
 	})
 
 	/** A decoder: video receive channels and no audio at all, as an AV-X board reports. */
 	function withVideoOnlyDecoder() {
 		const self = mockInstance()
-		self.devicesData['10.0.0.9'] = {
+		put(self, '10.0.0.9', {
 			name: 'Decoder',
 			ports: { ARC: 4440 },
 			videoRx: { count: 2, 1: { number: 1, name: 'V In 1' }, 2: { number: 2, name: 'V In 2' } },
-		}
-		self.devicesChoices = [...self.devicesChoices, { id: '10.0.0.9', label: 'Decoder' }]
+		})
+		self.devicesChoices = [...self.devicesChoices, { id: idOf('Decoder'), label: 'Decoder' }]
 		return self
 	}
 
@@ -220,7 +253,7 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
 		const ids = deviceOption(definitions, 'makeCrosspointDropDown')?.choices?.map((choice) => choice.id) ?? []
-		expect(ids).toContain('10.0.0.9')
+		expect(ids).toContain(idOf('Decoder'))
 	})
 
 	it('does not offer a video-only device an output level, which only an audio input has', () => {
@@ -231,8 +264,8 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
 		const ids = deviceOption(definitions, 'setOutputLevel')?.choices?.map((choice) => choice.id) ?? []
-		expect(ids).not.toContain('10.0.0.9')
-		expect(ids).toContain('10.0.0.5')
+		expect(ids).not.toContain(idOf('Decoder'))
+		expect(ids).toContain(A_ID)
 	})
 
 	it('still offers every device for renaming, including one with no audio channels', () => {
@@ -242,7 +275,7 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 
 		for (const actionId of ['setDeviceName', 'resetDeviceName']) {
 			const ids = deviceOption(definitions, actionId)?.choices?.map((choice) => choice.id) ?? []
-			expect(ids).toContain('10.0.0.1')
+			expect(ids).toContain(idOf('AController'))
 		}
 	})
 })
@@ -252,12 +285,12 @@ describe('settings actions offer only devices that support the setting', () => {
 	function withRealisticOptions() {
 		const self = mockInstance()
 		// as the real devices report: differing sample rates, and neither supporting pullup
-		Object.assign(self.devicesData['10.0.0.5'], {
+		Object.assign(self.devicesData[A], {
 			srOptions: ['44100', '48000', '88200', '96000'],
 			encodingOptions: ['16', '24', '32'],
 			pullupOptions: undefined,
 		})
-		Object.assign(self.devicesData['10.0.0.6'], {
+		Object.assign(self.devicesData[B], {
 			srOptions: ['48000'],
 			encodingOptions: ['32', '16', '24'],
 			pullupOptions: undefined,
@@ -281,8 +314,8 @@ describe('settings actions offer only devices that support the setting', () => {
 
 	it('offers both devices for sample rate and encoding, which they report options for', () => {
 		const definitions = build(withRealisticOptions())
-		expect(deviceIds(definitions, 'setSampleRate').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
-		expect(deviceIds(definitions, 'setEncoding').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
+		expect(deviceIds(definitions, 'setSampleRate').sort()).toEqual([A_ID, B_ID].sort())
+		expect(deviceIds(definitions, 'setEncoding').sort()).toEqual([A_ID, B_ID].sort())
 	})
 
 	it('offers only an explanatory placeholder for pullup when no device supports it', () => {
@@ -297,14 +330,14 @@ describe('settings actions offer only devices that support the setting', () => {
 
 	it('offers only the device that does support pullup', () => {
 		const self = withRealisticOptions()
-		Object.assign(self.devicesData['10.0.0.6'], { pullupOptions: ['0', '1'] })
+		Object.assign(self.devicesData[B], { pullupOptions: ['0', '1'] })
 		const definitions = build(self)
-		expect(deviceIds(definitions, 'setPullup')).toEqual(['10.0.0.6'])
+		expect(deviceIds(definitions, 'setPullup')).toEqual([B_ID])
 	})
 
 	it('still offers audio devices for latency, which has no reported option list', () => {
 		const definitions = build(withRealisticOptions())
-		expect(deviceIds(definitions, 'setLatency').sort()).toEqual(['10.0.0.5', '10.0.0.6'])
+		expect(deviceIds(definitions, 'setLatency').sort()).toEqual([A_ID, B_ID].sort())
 	})
 
 	it('offers only the placeholder before any settings reply has arrived', () => {
@@ -353,8 +386,8 @@ describe('no dropdown is emitted without choices', () => {
 		// the case that broke setSampleRate: a device with no channels and no settings options still
 		// had per-device dropdowns generated for it, each with an empty choice list
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: {} }
-		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		put(self, '10.0.0.1', { name: 'AController', ports: {} })
+		self.devicesChoices = [{ id: idOf('AController'), label: 'AController' }, ...self.devicesChoices]
 		UpdateActions(self)
 		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
 	})
@@ -423,11 +456,11 @@ describe('the "None" channel choice', () => {
 	)
 })
 
-describe('per-device fields work for a device stored by address', () => {
+describe('per-device fields show for whatever a saved action holds for the device', () => {
 	/**
-	 * An action saved before devices were keyed by name holds an address in its device picker.
-	 * `allowCustom` keeps that parseable, but the per-device fields are declared keyed by name - so
-	 * without an address arm in their visibility expressions, no channel picker would ever appear.
+	 * 3.x stores the device id, 2.x stored the name and 1.x the address. `allowCustom` keeps the older
+	 * values parseable, but the per-device fields are declared keyed by id - so without a name and an
+	 * address arm in their visibility expressions, an older action would never show its channel picker.
 	 */
 	function build() {
 		const self = mockInstance()
@@ -452,18 +485,24 @@ describe('per-device fields work for a device stored by address', () => {
 		['setEncoding', 'encoding_', 'device'],
 	]
 
-	it.each(cases)('%s %s matches the device by name', (actionId, prefix, picker) => {
+	it.each(cases)('%s %s matches the device by id', (actionId, prefix, picker) => {
+		const expressions = expressionsFor(actionId, prefix)
+		expect(expressions.length).toBeGreaterThan(0)
+		expect(expressions.some((e) => e.includes(`$(options:${picker}) == '${A_ID}'`))).toBe(true)
+	})
+
+	it.each(cases)('%s %s still matches the device by the name 2.x saved', (actionId, prefix, picker) => {
 		const expressions = expressionsFor(actionId, prefix)
 		expect(expressions.length).toBeGreaterThan(0)
 		expect(expressions.some((e) => e.includes(`$(options:${picker}) == 'DeviceA'`))).toBe(true)
 	})
 
-	it.each(cases)('%s %s also matches the device by address', (actionId, prefix) => {
+	it.each(cases)('%s %s still matches the device by the address 1.x saved', (actionId, prefix) => {
 		const expressions = expressionsFor(actionId, prefix)
 		expect(expressions.some((e) => e.includes(`== '10.0.0.5'`))).toBe(true)
 	})
 
-	it('keeps the clearAll condition alongside the two device arms', () => {
+	it('keeps the clearAll condition alongside the device arms', () => {
 		const [expression] = expressionsFor('clearCrosspointDropDown', 'destinationChannel_')
 		// the device arms must be bracketed, or `||` would swallow the `&&`
 		expect(expression).toMatch(/^\(.*\) && !\$\(options:clearAll\)$/)
@@ -490,7 +529,7 @@ describe('dropdown defaults', () => {
 	it('holds when a filter excludes the first device overall', () => {
 		// DeviceA has no tx channels, so any tx-filtered dropdown must not default to it
 		const self = mockInstance()
-		;(self.devicesData['10.0.0.5'] as { audioTx?: unknown }).audioTx = undefined
+		self.devicesData[A].audioTx = undefined
 		UpdateActions(self)
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
@@ -575,8 +614,14 @@ describe('channel dropdowns state their range in expression mode', () => {
 	})
 
 	it('names the device the range belongs to, since channel counts differ per device', () => {
+		const names = new Map<string, string>([
+			[A_ID, 'DeviceA'],
+			[B_ID, 'DeviceB'],
+		])
 		for (const [definitionId, option] of [...actionPickers, ...feedbackPickers]) {
-			const deviceName = option.id.slice(option.id.indexOf('_') + 1)
+			// the field id ends in the device id; the description names the device as the user knows it
+			const deviceName = names.get(option.id.slice(option.id.indexOf('_') + 1))
+			expect(deviceName, `${definitionId}.${option.id} names no fixture device`).toBeDefined()
 			expect(option.expressionDescription, `${definitionId}.${option.id}`).toContain(deviceName)
 		}
 	})
@@ -710,8 +755,8 @@ describe('the (custom) suffix', () => {
  * Companion identifies an option by its id within its definition, so two options sharing one is
  * unresolvable - the value saved under that id belongs to both fields at once.
  *
- * Every per-device option id ends in the device's *name*, while `devicesData` is keyed by address,
- * so one name reaching the module from two addresses used to declare each of those options twice.
+ * Every per-device option id ends in the device's id, while `devicesData` is keyed by address, so
+ * one device reaching the module from two addresses could declare each of those options twice.
  * That is not hypothetical: a device that changes address re-registers under the new one while the
  * old record waits out its offline timeout, and a Companion host on both a primary and a secondary
  * Dante network sees one device announce itself from each.
@@ -743,7 +788,7 @@ describe('option ids are unique within a definition', () => {
 	/** DeviceA announcing itself from a second address, as a re-registration or a second network does. */
 	function withSecondAddress(overrides: Record<string, unknown> = {}) {
 		const self = mockInstance()
-		self.devicesData['10.0.0.7'] = { ...self.devicesData['10.0.0.5'], ...overrides }
+		self.devicesData[ip('10.0.0.7')] = { ...self.devicesData[A], ...overrides }
 		return self
 	}
 
@@ -751,7 +796,7 @@ describe('option ids are unique within a definition', () => {
 		expect(duplicateOptionIds(allDefinitions(mockInstance()))).toEqual([])
 	})
 
-	it('holds when one device name arrives from two addresses', () => {
+	it('holds when one device arrives from two addresses', () => {
 		expect(duplicateOptionIds(allDefinitions(withSecondAddress()))).toEqual([])
 	})
 
@@ -765,13 +810,14 @@ describe('option ids are unique within a definition', () => {
 		const definitions = allDefinitions(withSecondAddress())
 		const ids = (definitions.setSampleRate?.options ?? []).map((option) => option.id)
 
-		expect(ids).toContain('sr_DeviceA')
+		expect(ids).toContain(`sr_${A_ID}`)
 	})
 
 	it('shows the single field for either address, so an action saved against one still resolves', () => {
 		const definitions = allDefinitions(withSecondAddress())
-		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === 'sr_DeviceA')
+		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === `sr_${A_ID}`)
 
+		expect(field?.isVisibleExpression).toContain(`'${A_ID}'`)
 		expect(field?.isVisibleExpression).toContain("'DeviceA'")
 		expect(field?.isVisibleExpression).toContain("'10.0.0.5'")
 		expect(field?.isVisibleExpression).toContain("'10.0.0.7'")
@@ -782,21 +828,24 @@ describe('option ids are unique within a definition', () => {
 		// record represent the name would drop a field the device demonstrably supports.
 		const self = mockInstance()
 		// first in iteration order, so a builder taking the first record it meets picks this one
-		self.devicesData = { '10.0.0.4': { name: 'DeviceA', ports: { ARC: 4440 } }, ...self.devicesData }
+		self.devicesData = {
+			[ip('10.0.0.4')]: { name: name('DeviceA'), id: A_ID, ports: { ARC: 4440 } },
+			...self.devicesData,
+		}
 		const definitions = allDefinitions(self)
-		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === 'sr_DeviceA')
+		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === `sr_${A_ID}`)
 
 		expect(field?.choices?.length).toBeGreaterThan(0)
 		expect(field?.isVisibleExpression).toContain("'10.0.0.4'")
 	})
 
-	it('leaves out a name no address has the data for', () => {
+	it('leaves out a device no address has the data for', () => {
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
+		put(self, '10.0.0.1', { name: 'AController', ports: { ARC: 4440 } })
 		const definitions = allDefinitions(self)
 		const ids = (definitions.setSampleRate?.options ?? []).map((option) => option.id)
 
-		expect(ids).not.toContain('sr_AController')
+		expect(ids).not.toContain(`sr_${idOf('AController')}`)
 	})
 })
 
@@ -811,14 +860,14 @@ describe('device pickers say what each device carries', () => {
 	function withEveryShape() {
 		const self = mockInstance()
 		const io = (count: number) => ({ count, 1: { number: 1, name: 'Ch 1' } })
-		Object.assign(self.devicesData['10.0.0.6'], { videoRx: io(1), videoTx: io(1) })
-		self.devicesData['10.0.0.8'] = { name: 'Decoder', ports: { ARC: 4440 }, videoRx: io(1) }
+		Object.assign(self.devicesData[B], { videoRx: io(1), videoTx: io(1) })
+		put(self, '10.0.0.8', { name: 'Decoder', ports: { ARC: 4440 }, videoRx: io(1) })
 		// audio one way, video the other - the case a single per-device tag would get wrong
-		self.devicesData['10.0.0.9'] = { name: 'Mixed', ports: { ARC: 4440 }, audioTx: io(1), videoRx: io(1) }
+		put(self, '10.0.0.9', { name: 'Mixed', ports: { ARC: 4440 }, audioTx: io(1), videoRx: io(1) })
 		self.devicesChoices = [
 			...self.devicesChoices,
-			{ id: '10.0.0.8', label: 'Decoder' },
-			{ id: '10.0.0.9', label: 'Mixed' },
+			{ id: idOf('Decoder'), label: 'Decoder' },
+			{ id: idOf('Mixed'), label: 'Mixed' },
 		]
 		return self
 	}
@@ -834,28 +883,28 @@ describe('device pickers say what each device carries', () => {
 	}
 
 	/** The label a device's own entry carries in that picker. */
-	function labelFor(choices: { id: string | number; label: string }[], deviceIp: string) {
-		return choices.find((choice) => choice.id === deviceIp)?.label
+	function labelFor(choices: { id: string | number; label: string }[], deviceName: string) {
+		return choices.find((choice) => choice.id === idOf(deviceName))?.label
 	}
 
 	it('tags an audio-only device, a video-only device, and one carrying both', () => {
 		const choices = picker('makeCrosspointDropDown', 'destinationDevice')
 
-		expect(labelFor(choices, '10.0.0.5')).toBe('DeviceA (A)')
-		expect(labelFor(choices, '10.0.0.8')).toBe('Decoder (V)')
-		expect(labelFor(choices, '10.0.0.6')).toBe('DeviceB (AV)')
+		expect(labelFor(choices, 'DeviceA')).toBe('DeviceA (A)')
+		expect(labelFor(choices, 'Decoder')).toBe('Decoder (V)')
+		expect(labelFor(choices, 'DeviceB')).toBe('DeviceB (AV)')
 	})
 
 	it('tags what the device offers in that direction, not what it has in total', () => {
 		// Mixed transmits audio and receives video, so it is a video destination and an audio source
-		expect(labelFor(picker('makeCrosspointDropDown', 'destinationDevice'), '10.0.0.9')).toBe('Mixed (V)')
-		expect(labelFor(picker('makeCrosspointDropDown', 'sourceDevice'), '10.0.0.9')).toBe('Mixed (A)')
+		expect(labelFor(picker('makeCrosspointDropDown', 'destinationDevice'), 'Mixed')).toBe('Mixed (V)')
+		expect(labelFor(picker('makeCrosspointDropDown', 'sourceDevice'), 'Mixed')).toBe('Mixed (A)')
 	})
 
-	it('leaves the id alone, so an action saved before the tag existed still resolves', () => {
+	it('keeps the tag out of the id, which is the device id', () => {
 		const choices = picker('makeCrosspointDropDown', 'destinationDevice')
 
-		expect(choices.map((choice) => choice.id)).toContain('10.0.0.5')
+		expect(choices.map((choice) => choice.id)).toContain(A_ID)
 	})
 
 	it('does not tag a list that only ever holds audio devices, where it would say nothing', () => {
@@ -884,11 +933,11 @@ describe('device pickers say what each device carries', () => {
 	})
 })
 
-describe('option ids are sanitised', () => {
+describe('option ids do not depend on the device name', () => {
 	/**
 	 * Companion cannot handle an option id containing a space, and a device may be named anything -
-	 * "Studio 1 (Rack A)" is an ordinary Dante name. The per-device fields are suffixed with the
-	 * device name, so without sanitising, such a device makes every field it names misbehave.
+	 * "Studio 1 (Rack A)" is an ordinary Dante name. 2.x suffixed the per-device fields with a
+	 * sanitised name; 3.x uses the device id, which is safe as it is and survives a rename.
 	 */
 	const MESSY = 'Studio 1 (Rack A)'
 	const CLEAN = 'Studio_1__Rack_A_'
@@ -896,7 +945,7 @@ describe('option ids are sanitised', () => {
 	/** The same two devices, with the first renamed to something Companion cannot use verbatim. */
 	function messyData(): DevicesData {
 		const data = devicesData()
-		;(data['10.0.0.5'] as { name: string }).name = MESSY
+		data[A].name = name(MESSY)
 		return data
 	}
 
@@ -904,9 +953,9 @@ describe('option ids are sanitised', () => {
 		const data = messyData()
 		return {
 			devicesData: data,
-			devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
-			rxChannelsChoices: { [MESSY]: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
-			txChannelsChoices: { [MESSY]: [{ id: 1, label: 'Out 1' }], DeviceB: [{ id: 1, label: 'Out 1' }] },
+			devicesChoices: Object.values(data).map((device) => ({ id: device.id!, label: device.name! })),
+			rxChannelsChoices: { [A_ID]: [{ id: 1, label: 'In 1' }], [B_ID]: [{ id: 1, label: 'In 1' }] },
+			txChannelsChoices: { [A_ID]: [{ id: 1, label: 'Out 1' }], [B_ID]: [{ id: 1, label: 'Out 1' }] },
 			setActionDefinitions: vi.fn(),
 			setFeedbackDefinitions: vi.fn(),
 			log: vi.fn(),
@@ -947,7 +996,12 @@ describe('option ids are sanitised', () => {
 
 	it('actually generated fields for the messy device, rather than passing by finding none', () => {
 		// guards the two sweeps above: they would pass trivially if no per-device field existed
-		expect(allOptionIds(built().actions).filter((id) => id.includes(CLEAN)).length).toBeGreaterThan(0)
+		expect(allOptionIds(built().actions).filter((optionId) => optionId.endsWith(A_ID)).length).toBeGreaterThan(0)
+	})
+
+	it('no option id carries the device name, sanitised or not', () => {
+		const ids = [...allOptionIds(built().actions), ...allOptionIds(built().feedbacks)]
+		expect(ids.filter((optionId) => optionId.includes(CLEAN) || optionId.includes(MESSY))).toEqual([])
 	})
 
 	it.each([
@@ -956,23 +1010,24 @@ describe('option ids are sanitised', () => {
 		['setEncoding', 'encoding_'],
 		['setOutputLevel', 'channel_'],
 		['setRxChannelName', 'channel_'],
-	])('%s suffixes %s with the sanitised name', (actionId, prefix) => {
+	])('%s suffixes %s with the device id', (actionId, prefix) => {
 		const ids = (built().actions[actionId]?.options ?? []).map((option) => option.id)
-		expect(ids).toContain(`${prefix}${CLEAN}`)
+		expect(ids).toContain(`${prefix}${A_ID}`)
 	})
 
-	it('sanitises the channel pickers and their missing-channel warnings alike', () => {
+	it('keys the channel pickers and their missing-channel warnings alike', () => {
 		const ids = (built().actions.makeCrosspointDropDown?.options ?? []).map((option) => option.id)
-		expect(ids).toContain(`destinationChannel_${CLEAN}`)
-		expect(ids).toContain(`sourceChannel_${CLEAN}`)
-		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${CLEAN}`)
+		expect(ids).toContain(`destinationChannel_${A_ID}`)
+		expect(ids).toContain(`sourceChannel_${A_ID}`)
+		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${A_ID}`)
 	})
 
-	it('leaves the device name itself unsanitised in choices and visibility expressions', () => {
-		// the name is a value, not an id: it is what the picker stores and what the expression
-		// compares against, so sanitising it here would stop the field ever showing
+	it('matches the unsanitised name in visibility expressions, which a 2.x picker holds', () => {
+		// the name is a value, not an id: it is what a 2.x picker stored and what the expression
+		// compares against, so sanitising it here would stop an older action showing its field
 		const options = built().actions.setSampleRate?.options ?? []
-		const field = options.find((option) => option.id === `sr_${CLEAN}`)
+		const field = options.find((option) => option.id === `sr_${A_ID}`)
+		expect(field?.isVisibleExpression).toContain(`$(options:device) == '${A_ID}'`)
 		expect(field?.isVisibleExpression).toContain(`$(options:device) == '${MESSY}'`)
 	})
 })
@@ -991,7 +1046,8 @@ describe('option ids are sanitised', () => {
  */
 describe('per-device channel fields survive a device going offline', () => {
 	const NAME = 'DAV-02HR-Stage1'
-	const IP = '172.16.3.143'
+	const NAME_ID = idOf(NAME)
+	const IP = ip('172.16.3.143')
 
 	/** The device online, with the 8 audio and 1 video receive channels the real one reports. */
 	function online(): DanteInstance {
@@ -1001,15 +1057,18 @@ describe('per-device channel fields survive a device going offline', () => {
 			return channels
 		}
 		const data = {
-			[IP]: { name: NAME, ports: { ARC: 4440 }, audioRx: io(8, 'In'), videoRx: io(1, 'Video In') },
+			[IP]: { name: NAME, id: NAME_ID, ports: { ARC: 4440 }, audioRx: io(8, 'In'), videoRx: io(1, 'Video In') },
 		} as unknown as DevicesData
 
 		return {
 			devicesData: data,
-			devicesChoices: [{ id: NAME, label: NAME }],
-			rxChannelsChoices: { [NAME]: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, label: `In ${i + 1}` })) },
+			devicesChoices: [{ id: NAME_ID, label: NAME }],
+			rxChannelsChoices: { [NAME_ID]: Array.from({ length: 8 }, (_, i) => ({ id: i + 1, label: `In ${i + 1}` })) },
 			txChannelsChoices: {},
-			videoRxChannelsChoices: { [NAME]: [{ id: 1, label: 'Rear' }] },
+			videoRxChannelsChoices: { [NAME_ID]: [{ id: 1, label: 'Rear' }] },
+			// what discovery recorded, and what keeps naming the device once it is offline
+			deviceIdsByName: { [NAME]: NAME_ID },
+			deviceNamesById: { [NAME_ID]: name(NAME) },
 			videoTxChannelsChoices: {},
 			setActionDefinitions: vi.fn(),
 			setFeedbackDefinitions: vi.fn(),
@@ -1027,7 +1086,7 @@ describe('per-device channel fields survive a device going offline', () => {
 	}
 
 	it('declares the video destination field while the device is online', () => {
-		expect(optionIds(online(), 'makeCrosspointDropDown')).toContain(`destinationChannelVideo_${NAME}`)
+		expect(optionIds(online(), 'makeCrosspointDropDown')).toContain(`destinationChannelVideo_${NAME_ID}`)
 	})
 
 	it('still declares it once the device has timed out', () => {
@@ -1035,8 +1094,8 @@ describe('per-device channel fields survive a device going offline', () => {
 		destroyDevice(self, IP)
 
 		const ids = optionIds(self, 'makeCrosspointDropDown')
-		expect(ids).toContain(`destinationChannelVideo_${NAME}`)
-		expect(ids).toContain(`destinationChannel_${NAME}`)
+		expect(ids).toContain(`destinationChannelVideo_${NAME_ID}`)
+		expect(ids).toContain(`destinationChannel_${NAME_ID}`)
 	})
 
 	it('takes the device out of the dropdown, so it cannot be picked while it is away', () => {
@@ -1056,8 +1115,10 @@ describe('per-device channel fields survive a device going offline', () => {
 			DefinitionLike
 		>
 		const field = (definitions.makeCrosspointDropDown?.options ?? []).find(
-			(option) => option.id === `destinationChannelVideo_${NAME}`,
+			(option) => option.id === `destinationChannelVideo_${NAME_ID}`,
 		)
+		expect(field?.isVisibleExpression).toContain(`$(options:destinationDevice) == '${NAME_ID}'`)
+		// and the remembered name, for an action 2.x saved against it
 		expect(field?.isVisibleExpression).toContain(`$(options:destinationDevice) == '${NAME}'`)
 	})
 
@@ -1073,7 +1134,7 @@ describe('per-device channel fields survive a device going offline', () => {
 			DefinitionLike
 		>
 		const field = (definitions.makeCrosspointDropDown?.options ?? []).find(
-			(option) => option.id === `destinationChannelVideo_${NAME}`,
+			(option) => option.id === `destinationChannelVideo_${NAME_ID}`,
 		)
 		expect(field?.choices).toEqual([{ id: 1, label: 'Rear' }])
 	})
@@ -1082,9 +1143,9 @@ describe('per-device channel fields survive a device going offline', () => {
 		const self = online()
 		destroyDevice(self, IP)
 		// rediscovered at a new address, as a device whose lease changed would be
-		self.devicesData['172.16.3.99'] = self.devicesData[IP] ?? {}
+		self.devicesData[ip('172.16.3.99')] = self.devicesData[IP] ?? {}
 
 		const ids = optionIds(self, 'makeCrosspointDropDown')
-		expect(ids.filter((id) => id === `destinationChannelVideo_${NAME}`)).toHaveLength(1)
+		expect(ids.filter((optionId) => optionId === `destinationChannelVideo_${NAME_ID}`)).toHaveLength(1)
 	})
 })

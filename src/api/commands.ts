@@ -4,7 +4,7 @@
 
 import { DANTE_CONST } from './const.js'
 import { subscriptionStatusLabel, validateDanteName } from './protocol-rules.js'
-import { Regex, createModuleLogger } from '@companion-module/base'
+import { createModuleLogger } from '@companion-module/base'
 import type DanteInstance from '../main.js'
 import { intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
@@ -14,6 +14,7 @@ import {
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
 	findDeviceIpByName,
+	requireDeviceIp,
 	findVideoRxChannelByName,
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
@@ -22,18 +23,19 @@ import {
 import { getRxChannels, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { awaitCommandAck, awaitRxState, DanteCommandError, type AckOptions, type ConfirmOptions } from './requests.js'
 import type { ChannelMediaType } from './types.js'
+import { type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:commands')
 
 /** Resets a device's name back to its factory default. */
-export function resetDeviceName(self: DanteInstance, ipaddress: string): void {
+export function resetDeviceName(self: DanteInstance, ipaddress: DeviceIp): void {
 	logCommand(self, deviceLabel(self, ipaddress), 'reset device name to factory default')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.setDeviceName)
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
 /** Sets a device's name. */
-export function setDeviceName(self: DanteInstance, ipaddress: string, name: string): void {
+export function setDeviceName(self: DanteInstance, ipaddress: DeviceIp, name: string): void {
 	const invalid = validateDanteName(name)
 	if (invalid) {
 		logger.error(`Device name '${name}' ${invalid}`)
@@ -72,7 +74,7 @@ function hasChannel(channelNumber: number, what: string): boolean {
 /** Sets the name of an rx or tx channel on a device. */
 export function setChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelName = '',
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
@@ -117,7 +119,7 @@ export function setChannelName(
 /** Sets the name of an rx channel on a device. */
 export function setAudioRxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -146,7 +148,7 @@ export function setAudioRxChannelName(
 /** Sets the name of a tx channel on a device. */
 export function setAudioTxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -179,7 +181,7 @@ export function setAudioTxChannelName(
 /** Clears the name of an rx or tx channel on a device back to its default. */
 export function resetChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
 ): void {
@@ -187,12 +189,12 @@ export function resetChannelName(
 }
 
 /** Clears the name of an rx channel on a device back to its default. */
-export function resetAudioRxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetAudioRxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setAudioRxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Clears the name of a tx channel on a device back to its default. */
-export function resetAudioTxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetAudioTxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setAudioTxChannelName(self, ipaddress, channelNumber)
 }
 
@@ -214,13 +216,7 @@ const MAX_UNSUBSCRIBE_PER_COMMAND = 16
  * count as a u16 here is what makes the bytes line up; widening it would shift the whole payload.
  */
 export function clearAllAudioCrosspoints(self: DanteInstance, destinationDevice: string): void {
-	// Check if destinationDevice is an IP or a name
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-
-	if (!ipaddress) {
-		throw new DanteCommandError(`Can't find ${destinationDevice} IP address - it may be offline`)
-	}
+	const ipaddress = requireDeviceIp(self, destinationDevice)
 
 	const rxCount = self.devicesData[ipaddress]?.audioRx?.count ?? 0
 	if (rxCount < 1) {
@@ -267,7 +263,7 @@ export function clearAllVideoCrosspoints(self: DanteInstance, destinationDevice:
 
 /** A crosspoint command as sent: where it went, and what the receive channel shows once applied. */
 export interface SentCrosspoint {
-	ip: string
+	ip: DeviceIp
 	/** The destination device as named in messages. */
 	destination: string
 	mediaType: ChannelMediaType
@@ -282,12 +278,8 @@ export interface SentCrosspoint {
  * locked: a Dante-locked device does not change its subscriptions, and saying so beats a command
  * that silently does nothing.
  */
-function crosspointDestination(self: DanteInstance, destinationDevice: string): string {
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-	if (!ipaddress) {
-		throw new DanteCommandError(`Can't find ${destinationDevice} IP address - it may be offline`)
-	}
+function crosspointDestination(self: DanteInstance, destinationDevice: string): DeviceIp {
+	const ipaddress = requireDeviceIp(self, destinationDevice)
 	if (self.devicesData[ipaddress]?.locked) {
 		throw new DanteCommandError(`${deviceLabel(self, ipaddress)} is locked, so it will not change its subscriptions`)
 	}
@@ -582,7 +574,7 @@ function makeVideoCrosspointArguments(
  * query, confirmed live by issuing the two back-to-back and reading the updated directory every
  * time, across repeated set/clear cycles.
  */
-function refreshVideoChannels(self: DanteInstance, ipaddress: string, direction: 'rx' | 'tx'): void {
+function refreshVideoChannels(self: DanteInstance, ipaddress: DeviceIp, direction: 'rx' | 'tx'): void {
 	if (direction === 'rx') getVideoRxChannels(self, ipaddress)
 	else getVideoTxChannels(self, ipaddress)
 }
@@ -689,7 +681,7 @@ const VIDEO_NAME_GAP = 12
 function setVideoChannelName(
 	self: DanteInstance,
 	opcode: number,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName: string,
 ): void {
@@ -731,7 +723,7 @@ function setVideoChannelName(
 /** Sets the name of a video rx channel on a device. */
 export function setVideoRxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -747,7 +739,7 @@ export function setVideoRxChannelName(
 /** Sets the name of a video tx channel on a device. */
 export function setVideoTxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -761,17 +753,17 @@ export function setVideoTxChannelName(
 }
 
 /** Clears the name of a video rx channel on a device back to its default. */
-export function resetVideoRxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetVideoRxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setVideoRxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Clears the name of a video tx channel on a device back to its default. */
-export function resetVideoTxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetVideoTxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setVideoTxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Sets a device's link-offset latency. */
-export function setLatency(self: DanteInstance, ipaddress: string, latency: number): void {
+export function setLatency(self: DanteInstance, ipaddress: DeviceIp, latency: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), `set latency to ${latency}ms`)
 	const commandArguments = Buffer.from('050382050020021100108301002400000000000000000000000000000000', 'hex')
 	commandArguments.writeUInt32BE(latency * 1000000, 22)
@@ -784,7 +776,7 @@ export function setLatency(self: DanteInstance, ipaddress: string, latency: numb
  * Sets a device's sample rate. A `sampleRate` of 0 queries the current value instead of changing it
  * (see {@link getSampleRate}).
  */
-export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate: number): void {
+export function setSampleRate(self: DanteInstance, ipaddress: DeviceIp, sampleRate: number): void {
 	// 0 is the query form of this command, not a rate anyone set
 	logCommand(
 		self,
@@ -803,7 +795,7 @@ export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate
 }
 
 /** Sets a device's sample rate pullup. */
-export function setPullup(self: DanteInstance, ipaddress: string, pullup: number): void {
+export function setPullup(self: DanteInstance, ipaddress: DeviceIp, pullup: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), `set sample rate pullup to ${pullup}`)
 	const flag = intToBuffer(3, 4)
 	const commandArguments = Buffer.concat([
@@ -825,7 +817,7 @@ export function setPullup(self: DanteInstance, ipaddress: string, pullup: number
  * Sets a device's audio encoding (bit depth). An `encoding` of 0 queries the current value instead
  * of changing it (see {@link getEncoding}).
  */
-export function setEncoding(self: DanteInstance, ipaddress: string, encoding: number): void {
+export function setEncoding(self: DanteInstance, ipaddress: DeviceIp, encoding: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), encoding === 0 ? 'query encoding' : `set encoding to ${encoding}`)
 	const flag = intToBuffer(encoding > 0 ? 1 : 0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(encoding, 4)])
@@ -842,7 +834,7 @@ export function setEncoding(self: DanteInstance, ipaddress: string, encoding: nu
 /** Sets the output level for a channel on a device. */
 export function setLevel(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	_direction: 'out',
 	channelNumber: number,
 	levelSetting: number,

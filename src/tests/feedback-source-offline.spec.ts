@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import type { DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, id, ip, name } from './ids.js'
 
 /**
  * A route the destination still reports must read as connected, even when the source device is not
@@ -18,10 +19,12 @@ import type DanteInstance from '../main.js'
  * destination's own account of the route.
  */
 
-const D_IP = '172.16.3.143'
-const D = 'DAV-02HR-Stage1'
-const S_IP = '172.16.3.141'
-const S = 'DAV-02HT-100323'
+const D_IP = ip('172.16.3.143')
+const D = name('DAV-02HR-Stage1')
+const D_ID = id(0x143)
+const S_IP = ip('172.16.3.141')
+const S = name('DAV-02HT-100323')
+const S_ID = id(0x141)
 const CH = 'SmartPi'
 
 interface Channel {
@@ -44,6 +47,7 @@ function instance(channel: Channel, { sourceOnline, audio = false }: { sourceOnl
 	const devicesData: Record<string, unknown> = {
 		[D_IP]: {
 			name: D,
+			id: D_ID,
 			ports: { ARC: 4440 },
 			...(audio ? { audioRx: { count: 1, 1: channel } } : { videoRx: { count: 1, 1: channel } }),
 		},
@@ -51,21 +55,24 @@ function instance(channel: Channel, { sourceOnline, audio = false }: { sourceOnl
 	if (sourceOnline) {
 		devicesData[S_IP] = {
 			name: S,
+			id: S_ID,
 			ports: { ARC: 4440 },
-			videoTx: { count: 1, 1: { number: 1, name: CH } },
-			audioTx: { count: 1, 1: { number: 1, name: CH } },
+			videoTx: { count: 1, 1: { number: ch(1), name: CH } },
+			audioTx: { count: 1, 1: { number: ch(1), name: CH } },
 		}
 	}
 
 	let definitions: Record<string, { callback: (feedback: unknown, ctx: unknown) => unknown }> = {}
 	const self = {
 		devicesData: devicesData as unknown as DevicesData,
-		devicesChoices: [{ id: D, label: D }, ...(sourceOnline ? [{ id: S, label: S }] : [])],
-		// retained across the source going quiet, by destroyDevice
-		rxChannelsChoices: { [D]: [{ id: 1, label: 'In 1' }] },
-		txChannelsChoices: { [S]: [{ id: 1, label: CH }] },
-		videoRxChannelsChoices: { [D]: [{ id: 1, label: 'Rear' }] },
-		videoTxChannelsChoices: { [S]: [{ id: 1, label: CH }] },
+		devicesChoices: [{ id: D_ID, label: D }, ...(sourceOnline ? [{ id: S_ID, label: S }] : [])],
+		// retained across the source going quiet, by destroyDevice, as are the ids and names seen
+		rxChannelsChoices: { [D_ID]: [{ id: 1, label: 'In 1' }] },
+		txChannelsChoices: { [S_ID]: [{ id: 1, label: CH }] },
+		videoRxChannelsChoices: { [D_ID]: [{ id: 1, label: 'Rear' }] },
+		videoTxChannelsChoices: { [S_ID]: [{ id: 1, label: CH }] },
+		deviceIdsByName: { [D]: D_ID, [S]: S_ID },
+		deviceNamesById: { [D_ID]: D, [S_ID]: S },
 		config: { variables: true },
 		setFeedbackDefinitions: (d: typeof definitions) => (definitions = d),
 		setActionDefinitions: vi.fn(),
@@ -84,10 +91,10 @@ function crosspointConnected(channel: Channel, opts: { sourceOnline: boolean; au
 			id: 'fb',
 			options: {
 				channelType: opts.audio ? 'audio' : 'video',
-				destinationDevice: D,
-				[`destinationChannel${suffix}_${D}`]: 1,
-				sourceDevice: S,
-				[`sourceChannel${suffix}_${S}`]: 1,
+				destinationDevice: D_ID,
+				[`destinationChannel${suffix}_${D_ID}`]: 1,
+				sourceDevice: S_ID,
+				[`sourceChannel${suffix}_${S_ID}`]: 1,
 			},
 		},
 		{},
@@ -151,7 +158,7 @@ describe('Channel - Subscription with the source device offline', () => {
 	function subscription(opts: { sourceOnline: boolean }) {
 		const { definitions } = instance(routed, opts)
 		return definitions.channel_subscription.callback(
-			{ id: 'fb', options: { channelType: 'video', device: D, [`channelVideo_${D}`]: 1 } },
+			{ id: 'fb', options: { channelType: 'video', device: D_ID, [`channelVideo_${D_ID}`]: 1 } },
 			{},
 		) as { connected: boolean; device: { name: string }; channel: { name: string; number: number } }
 	}

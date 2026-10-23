@@ -3,14 +3,14 @@ import { collidingIds, sanitiseVariableId } from '../utils/sanitise.js'
 import { updateData, resetIdCollisionWarnings, type DevicesData } from '../api/index.js'
 import type { LoggingSink } from '@companion-module/base'
 import type DanteInstance from '../main.js'
+import { ch, id, ip, name as deviceName } from './ids.js'
 
 /**
  * Two device names that sanitise to the same id.
  *
- * Sanitising is lossy - 'Rack 1' and 'Rack-1' are different devices but one id - and everything
- * keyed by that id then belongs to whichever was seen last: variables overwrite each other, and a
- * per-device option field appears twice in one action with no way to tell them apart. Nothing about
- * the symptoms points at the cause, which is why it is worth saying out loud.
+ * Sanitising is lossy - 'Rack 1' and 'Rack_1' are different devices but one id. Since 3.0 only
+ * name-keyed variables are built from it: option fields and id-keyed variables use the device id
+ * and cannot collide. So the warning is for connections whose variables are keyed by name.
  */
 
 let loggerSink: ReturnType<typeof vi.fn<LoggingSink>>
@@ -32,19 +32,31 @@ function collisionWarnings(): string[] {
 		.filter((message) => message.includes('both become'))
 }
 
-function instance(names: string[], remembered: string[] = []): DanteInstance {
-	const devicesData: Record<string, unknown> = {}
+/**
+ * Online devices `names`, each with one receive channel, plus offline devices `remembered`, known
+ * only by their remembered name and channels. Variables are keyed by `variableKeys`.
+ */
+function instance(names: string[], remembered: string[] = [], variableKeys: 'ids' | 'names' = 'names'): DanteInstance {
+	const devicesData: DevicesData = {}
+	const all = [...names, ...remembered]
 	names.forEach((name, index) => {
-		devicesData[`10.0.0.${index + 1}`] = { name, ports: { ARC: 4440 } }
+		devicesData[ip(`10.0.0.${index + 1}`)] = {
+			name: deviceName(name),
+			id: id(index + 1),
+			ports: { ARC: 4440 },
+			audioRx: { count: 1, 1: { number: ch(1), name: 'In 1' } },
+		}
 	})
 	return {
-		devicesData: devicesData as unknown as DevicesData,
-		devicesChoices: names.map((name) => ({ id: name, label: name })),
-		rxChannelsChoices: Object.fromEntries(remembered.map((name) => [name, [{ id: 1, label: 'In 1' }]])),
+		devicesData,
+		devicesChoices: names.map((name, index) => ({ id: id(index + 1), label: name })),
+		rxChannelsChoices: Object.fromEntries(all.map((_, index) => [id(index + 1), [{ id: ch(1), label: 'In 1' }]])),
 		txChannelsChoices: {},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		config: { variables: true, interval: 1000, timeoutInterval: 3000, verbose: false },
+		deviceNamesById: Object.fromEntries(all.map((name, index) => [id(index + 1), deviceName(name)])),
+		deviceIdsByName: Object.fromEntries(all.map((name, index) => [deviceName(name), id(index + 1)])),
+		config: { variables: true, variableKeys, interval: 1000, timeoutInterval: 3000, verbose: false },
 		debug: false,
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),
@@ -85,7 +97,7 @@ describe('collidingIds', () => {
 	})
 })
 
-describe('a rebuild warns about colliding device ids', () => {
+describe('a rebuild warns about colliding name-keyed variable ids', () => {
 	it('names both devices, the id they share, and what to do', () => {
 		updateData(instance(['Rack 1', 'Rack_1']))
 
@@ -110,7 +122,7 @@ describe('a rebuild warns about colliding device ids', () => {
 	it('speaks again when a third device joins the same collision', () => {
 		const self = instance(['Rack 1', 'Rack_1'])
 		updateData(self)
-		self.devicesData['10.0.0.3'] = { name: 'Rack:1', ports: { ARC: 4440 } }
+		self.devicesData[ip('10.0.0.3')] = { name: deviceName('Rack:1'), id: id(3), ports: { ARC: 4440 } }
 
 		updateData(self)
 		expect(collisionWarnings()).toHaveLength(2)
@@ -118,7 +130,7 @@ describe('a rebuild warns about colliding device ids', () => {
 	})
 
 	it('covers a device whose channels are only remembered', () => {
-		// a device that has gone offline still generates option fields, so it still collides
+		// a device that has gone offline still has variables, so it still collides
 		updateData(instance(['Rack 1'], ['Rack_1']))
 		expect(collisionWarnings()).toHaveLength(1)
 	})
@@ -141,4 +153,25 @@ describe('a rebuild warns about colliding device ids', () => {
 		expect(self.setVariableDefinitions).toHaveBeenCalled()
 		expect(self.setFeedbackDefinitions).toHaveBeenCalled()
 	})
+})
+
+describe('with device ids', () => {
+	it('stays quiet when variables are keyed by device id, which cannot collide', () => {
+		updateData(instance(['Rack 1', 'Rack_1'], [], 'ids'))
+		expect(collisionWarnings()).toEqual([])
+	})
+
+	it.each(['ids', 'names'] as const)(
+		'gives colliding names their own option fields with %s-keyed variables',
+		(keys) => {
+			const self = instance(['Rack 1', 'Rack_1'], [], keys)
+			updateData(self)
+
+			const actions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			const ids = (actions.makeCrosspointDropDown.options as { id: string }[]).map((option) => option.id)
+			expect(ids).toContain(`destinationChannel_${id(1)}`)
+			expect(ids).toContain(`destinationChannel_${id(2)}`)
+			expect(ids.filter((optionId) => optionId.startsWith('destinationChannel_'))).toHaveLength(2)
+		},
+	)
 })

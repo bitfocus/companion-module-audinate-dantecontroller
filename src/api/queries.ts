@@ -9,6 +9,7 @@ import { incrementBE, intToBuffer, makeAvCommand, makeCommand, makeSettingComman
 import { sendCommand } from './connection.js'
 import { setEncoding, setSampleRate } from './commands.js'
 import { deviceLabel, macForDevice, markChannelsSettling } from './devices.js'
+import { asDeviceIp, brandedEntries, brandedKeys, type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:queries')
 
@@ -19,7 +20,7 @@ const logger = createModuleLogger('api:queries')
  * device that answers nothing looks identical to one that was never asked. Naming the query and its
  * target makes the difference visible.
  */
-function logQuery(self: DanteInstance, deviceIp: string, what: string): void {
+function logQuery(self: DanteInstance, deviceIp: DeviceIp, what: string): void {
 	if (!self.debug) return
 	logger.debug(`Query -> ${deviceLabel(self, deviceIp)} : ${what}`)
 }
@@ -28,7 +29,7 @@ function logQuery(self: DanteInstance, deviceIp: string, what: string): void {
  * Queries a device's rx/tx channel counts.
  * @returns The device's last-known channel count entry, if any (the reply itself arrives asynchronously via {@link parseReply}).
  */
-export function getChannelCount(self: DanteInstance, ipaddress: string): number | undefined {
+export function getChannelCount(self: DanteInstance, ipaddress: DeviceIp): number | undefined {
 	logQuery(self, ipaddress, 'channel counts')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.channelCount)
 	sendCommand(self, commandBuffer, ipaddress)
@@ -37,7 +38,7 @@ export function getChannelCount(self: DanteInstance, ipaddress: string): number 
 }
 
 /** Queries a device's tx channel friendly names, paginating the request 32 channels at a time. */
-export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string): void {
+export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: DeviceIp): void {
 	const device = self.devicesData[ipaddress]
 	if (!device) {
 		return
@@ -59,7 +60,7 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: string
 }
 
 /** Queries a device's tx channel details (names, sample rates), paginating the request 32 channels at a time. */
-export function getTxChannels(self: DanteInstance, ipaddress: string): void {
+export function getTxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
 	sendChannelQuery(
 		self,
 		ipaddress,
@@ -78,7 +79,7 @@ export function getTxChannels(self: DanteInstance, ipaddress: string): void {
  */
 function sendChannelQuery(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	commandType: number,
 	channelCount: number,
 	channelsPerPage: number,
@@ -141,10 +142,10 @@ export function retryMissingVideoDirectories(self: DanteInstance): void {
 
 	// release the budget of anything no longer on the network, so a device that returns starts over
 	for (const key of [...attempts.keys()]) {
-		if (!self.devicesData[key.slice(0, key.lastIndexOf(':'))]) attempts.delete(key)
+		if (!self.devicesData[asDeviceIp(key.slice(0, key.lastIndexOf(':')))]) attempts.delete(key)
 	}
 
-	for (const [ipaddress, device] of Object.entries(self.devicesData)) {
+	for (const [ipaddress, device] of brandedEntries(self.devicesData)) {
 		// nothing to ask over until discovery has learned where to send it
 		if (!device?.ports?.ARC) continue
 
@@ -175,7 +176,7 @@ export function retryMissingVideoDirectories(self: DanteInstance): void {
  * all, answers with an unrecognized-command reply that {@link parseVideoRxChannels} in
  * `protocol.ts` reads as zero channels rather than an error.
  */
-export function getVideoRxChannels(self: DanteInstance, ipaddress: string): void {
+export function getVideoRxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'video rx channels')
 	markChannelsSettling(self, ipaddress)
 	sendCommand(
@@ -190,7 +191,7 @@ export function getVideoRxChannels(self: DanteInstance, ipaddress: string): void
 }
 
 /** Queries a device's video tx channels (names). See {@link getVideoRxChannels}. */
-export function getVideoTxChannels(self: DanteInstance, ipaddress: string): void {
+export function getVideoTxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'video tx channels')
 	markChannelsSettling(self, ipaddress)
 	sendCommand(
@@ -204,7 +205,7 @@ export function getVideoTxChannels(self: DanteInstance, ipaddress: string): void
 	)
 }
 
-export function getRxChannels(self: DanteInstance, ipaddress: string): void {
+export function getRxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
 	// audioRx.count, not audioTx.count - paging the receive query by the transmit count silently truncates
 	// discovery on any device with more inputs than outputs (a 32x8 DSP would only ever report its
 	// first 16 receive channels)
@@ -218,26 +219,26 @@ export function getRxChannels(self: DanteInstance, ipaddress: string): void {
 }
 
 /** Queries a device's name. */
-export function getDeviceName(self: DanteInstance, ipaddress: string): void {
+export function getDeviceName(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'device name')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_NAME_QUERY)
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
 /** Queries a device's settings (sample rate, latency). */
-export function getSettings(self: DanteInstance, ipaddress: string): void {
+export function getSettings(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'device settings')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_DEVICE_SETTINGS_QUERY)
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
 /** Queries a device's current sample rate. */
-export function getSampleRate(self: DanteInstance, ipaddress: string): void {
+export function getSampleRate(self: DanteInstance, ipaddress: DeviceIp): void {
 	setSampleRate(self, ipaddress, 0)
 }
 
 /** Queries a device's current sample rate pullup setting. */
-export function getPullup(self: DanteInstance, ipaddress: string): void {
+export function getPullup(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'sample rate pullup')
 	const flag = intToBuffer(0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(0, 4)])
@@ -251,12 +252,12 @@ export function getPullup(self: DanteInstance, ipaddress: string): void {
 }
 
 /** Queries a device's current audio encoding. */
-export function getEncoding(self: DanteInstance, ipaddress: string): void {
+export function getEncoding(self: DanteInstance, ipaddress: DeviceIp): void {
 	setEncoding(self, ipaddress, 0)
 }
 
 /** Queries a device's current output levels. */
-export function getLevel(self: DanteInstance, ipaddress: string): void {
+export function getLevel(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'output levels')
 	const commandBuffer = makeSettingCommand(
 		self,
@@ -268,7 +269,7 @@ export function getLevel(self: DanteInstance, ipaddress: string): void {
 }
 
 /** Queries a device's manufacturer/model version info. */
-export function getManfVersion(self: DanteInstance, ipaddress: string): void {
+export function getManfVersion(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'manufacturer and model')
 	const commandBuffer = makeSettingCommand(
 		self,
@@ -280,7 +281,7 @@ export function getManfVersion(self: DanteInstance, ipaddress: string): void {
 }
 
 /** Queries a device's Dante firmware/product version info. */
-export function getVersion(self: DanteInstance, ipaddress: string): void {
+export function getVersion(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'firmware and product versions')
 	const commandBuffer = makeSettingCommand(
 		self,
@@ -292,7 +293,7 @@ export function getVersion(self: DanteInstance, ipaddress: string): void {
 }
 
 /** Queries a device's SETTINGS service port over the CMC socket. */
-export function getSettingsPort(self: DanteInstance, ipaddress: string): void {
+export function getSettingsPort(self: DanteInstance, ipaddress: DeviceIp): void {
 	logQuery(self, ipaddress, 'SETTINGS service port')
 	const commandBuffer = Buffer.concat([
 		intToBuffer(0x1200, 2),
@@ -314,8 +315,8 @@ export function getSettingsPort(self: DanteInstance, ipaddress: string): void {
  * Re-queries SETTINGS-service parameters (sample rate, pullup, encoding, level, versions) for
  * one device, or all known devices if none is given.
  */
-export function refreshSettings(self: DanteInstance, deviceIp?: string): void {
-	const ipArray = deviceIp ? [deviceIp] : Object.keys(self.devicesData)
+export function refreshSettings(self: DanteInstance, deviceIp?: DeviceIp): void {
+	const ipArray = deviceIp ? [deviceIp] : brandedKeys(self.devicesData)
 	if (self.debug) {
 		logger.debug(`Refreshing SETTINGS parameters for ${ipArray.length} device(s)`)
 	}
@@ -333,8 +334,8 @@ export function refreshSettings(self: DanteInstance, deviceIp?: string): void {
  * Re-queries ARC-service parameters (device name, settings, rx/tx channels) for one device,
  * or all known devices if none is given.
  */
-export function refreshArc(self: DanteInstance, deviceIp?: string): void {
-	const ipArray = deviceIp ? [deviceIp] : Object.keys(self.devicesData)
+export function refreshArc(self: DanteInstance, deviceIp?: DeviceIp): void {
+	const ipArray = deviceIp ? [deviceIp] : brandedKeys(self.devicesData)
 	if (self.debug) {
 		logger.debug(`Refreshing ARC parameters for ${ipArray.length} device(s)`)
 	}

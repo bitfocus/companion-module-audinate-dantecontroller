@@ -63,6 +63,9 @@ export interface DanteDeviceVariables {
  * The routing variables, published when the `routingVariables` config option is on. Built for a
  * router integration, so each one is a single value that changes on its own:
  *
+ * `<device>` is the device id or its name, per the `variableKeys` option.
+ *
+ * - `<device>_device_name` - the device's current name.
  * - `<device>_device_id` - the 64-bit Dante device id from the device's mDNS TXT record. It
  *   survives renames and address changes, unlike everything else that identifies a device.
  * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
@@ -76,6 +79,7 @@ export interface DanteDeviceVariables {
  */
 export interface DanteRoutingVariables {
 	device_id: string
+	device_name: string
 	source: string
 	source_id: string
 	name: string

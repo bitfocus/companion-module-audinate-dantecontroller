@@ -35,6 +35,7 @@ import {
 	getVideoTxChannels,
 	refreshSettings,
 } from './queries.js'
+import { asChannelNumber, asDeviceName, type DeviceIp, deviceIpOf } from './ids.js'
 
 const logger = createModuleLogger('api:protocol')
 
@@ -183,7 +184,7 @@ function parseTxFriendlyNames(reply: Buffer): Partial<DeviceData> {
 
 		// create return object if needed
 		if (tx[nameNumber] == undefined) {
-			tx[nameNumber] = { number: nameNumber }
+			tx[nameNumber] = { number: asChannelNumber(nameNumber) }
 		}
 		const returnChannel = tx[nameNumber]
 
@@ -228,7 +229,7 @@ function parseTxChannels(reply: Buffer): Partial<DeviceData> {
 
 		// create return object if needed
 		if (tx[nameNumber] == undefined) {
-			tx[nameNumber] = { number: nameNumber }
+			tx[nameNumber] = { number: asChannelNumber(nameNumber) }
 		}
 		const returnChannel = tx[nameNumber]
 
@@ -287,7 +288,7 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 
 		// create return object if needed
 		if (rx[nameNumber] == undefined) {
-			rx[nameNumber] = { number: nameNumber }
+			rx[nameNumber] = { number: asChannelNumber(nameNumber) }
 		}
 		const returnChannel = rx[nameNumber]
 
@@ -315,7 +316,8 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 
 /** Parses a device-name-query reply. */
 function parseDeviceName(reply: Buffer): Partial<DeviceData> {
-	return { name: parseString(reply, 10) }
+	const name = parseString(reply, 10)
+	return { name: name === undefined ? undefined : asDeviceName(name) }
 }
 
 /** Parses a device-settings-query reply into sample rate and latency. */
@@ -461,7 +463,7 @@ function parseVideoRxChannels(reply: Buffer): Partial<DeviceData> {
 	let count = 0
 	for (const record of parseAvChannelDirectory(reply, DANTE_CONST.AV_MEDIA_TYPE.VIDEO)) {
 		videoRx[record.channelNumber] = {
-			number: record.channelNumber,
+			number: asChannelNumber(record.channelNumber),
 			name: record.name,
 			sourceChannel: record.sourceChannel,
 			sourceDevice: record.sourceDevice,
@@ -484,7 +486,7 @@ function parseVideoTxChannels(reply: Buffer): Partial<DeviceData> {
 	const videoTx: VideoTxChannels = {}
 	let count = 0
 	for (const record of parseAvChannelDirectory(reply, DANTE_CONST.AV_MEDIA_TYPE.VIDEO)) {
-		videoTx[record.channelNumber] = { number: record.channelNumber, name: record.name }
+		videoTx[record.channelNumber] = { number: asChannelNumber(record.channelNumber), name: record.name }
 		count = Math.max(count, record.channelNumber)
 	}
 	videoTx.count = count
@@ -516,7 +518,7 @@ function subscriptionLabel(channel: AudioRxChannel | undefined): string {
  * The subscription status is included because a route can stop working without its source changing:
  * the transmitter going offline flips the status while the names stay put.
  */
-function logRouteChanges(self: DanteInstance, deviceIp: string, incoming: AudioRxChannels | undefined): void {
+function logRouteChanges(self: DanteInstance, deviceIp: DeviceIp, incoming: AudioRxChannels | undefined): void {
 	if (!incoming) return
 
 	const deviceName = self.devicesData[deviceIp]?.name ?? deviceIp
@@ -557,7 +559,7 @@ function logRouteChanges(self: DanteInstance, deviceIp: string, incoming: AudioR
 }
 
 export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
-	const deviceIp = rinfo.address
+	const deviceIp = deviceIpOf(rinfo)
 	const replySize = rinfo.size
 	const deviceData: Record<string, Partial<DeviceData>> = {}
 	const updateFlags: string[] = []
@@ -722,7 +724,7 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
  * carry both protocols without either parser needing to know about the other.
  */
 export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
-	const deviceIp = rinfo.address
+	const deviceIp = deviceIpOf(rinfo)
 	const replySize = rinfo.size
 
 	// Short enough that a corrupt or truncated packet cannot make any of the reads below throw.
@@ -795,7 +797,7 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
  */
 function logVideoChannelCounts(
 	self: DanteInstance,
-	deviceIp: string,
+	deviceIp: DeviceIp,
 	channelDirection: 'rx' | 'tx' | undefined,
 	countBefore: number | undefined,
 ): void {
@@ -833,7 +835,7 @@ export function parseHeartbeatReply(self: DanteInstance, reply: Buffer, rinfo: d
 		// `checkConnections` saw a service still marked down and said Disconnected again.
 
 		// device is online
-		keepAlive(self, rinfo.address)
+		keepAlive(self, deviceIpOf(rinfo))
 	}
 }
 
@@ -845,7 +847,7 @@ export function parseHeartbeatReply(self: DanteInstance, reply: Buffer, rinfo: d
  * usable hardware address to ask with. Logged once, on the transition from unknown to known, since
  * this reply is re-requested on every settings refresh.
  */
-function logDeviceIdentity(self: DanteInstance, deviceIp: string, incoming: Partial<DeviceData>): void {
+function logDeviceIdentity(self: DanteInstance, deviceIp: DeviceIp, incoming: Partial<DeviceData>): void {
 	const known = self.devicesData[deviceIp]
 	if (known?.modelName || !incoming.modelName) return
 
@@ -859,7 +861,7 @@ function logDeviceIdentity(self: DanteInstance, deviceIp: string, incoming: Part
  * device settings info into `devicesData`.
  */
 export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
-	const deviceIp = rinfo.address
+	const deviceIp = deviceIpOf(rinfo)
 	const replySize = rinfo.size
 	const deviceData: Record<string, Partial<DeviceData>> = {}
 	const updateFlags: string[] = []
@@ -1090,7 +1092,7 @@ export function parseSettingsReply(self: DanteInstance, reply: Buffer, rinfo: dg
  * and merges them into `devicesData`.
  */
 export function parseCmcReply(self: DanteInstance, reply: Buffer, rinfo: dgram.RemoteInfo): void {
-	const deviceIp = rinfo.address
+	const deviceIp = deviceIpOf(rinfo)
 	const replySize = rinfo.size
 	const deviceData: Record<string, Partial<DeviceData>> = {}
 
@@ -1170,7 +1172,7 @@ export function makeSettingCommand(
 	commandType: number,
 	commandArguments: Buffer = Buffer.alloc(2),
 	/** The device this command is addressed to, so the right local card's address is embedded. */
-	ipaddress?: string,
+	ipaddress?: DeviceIp,
 ): Buffer {
 	const commandLength = intToBuffer(commandArguments.length + 28)
 	const startBlock = Buffer.from('2a84', 'hex')

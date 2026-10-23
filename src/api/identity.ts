@@ -5,6 +5,14 @@
 import type DanteInstance from '../main.js'
 import { getChannelSubscriptionName } from './devices.js'
 import type { ChannelMediaType } from './types.js'
+import {
+	brandedEntries,
+	channelNumbers,
+	type ChannelNumber,
+	type DanteDeviceId,
+	type DeviceIp,
+	type DeviceName,
+} from './ids.js'
 
 /**
  * Transmit channel numbers by name, per device id and media type, for every name each channel has
@@ -15,9 +23,9 @@ import type { ChannelMediaType } from './types.js'
  * watched after both a device and a transmit channel rename. So to say where a route really comes
  * from, the old names have to stay resolvable. Cleared with `deviceIdsByName` on reconnect.
  */
-const txNamesByInstance = new WeakMap<DanteInstance, Map<string, Map<string, number>>>()
+const txNamesByInstance = new WeakMap<DanteInstance, Map<string, Map<string, ChannelNumber>>>()
 
-const historyKey = (deviceId: string, mediaType: ChannelMediaType) => `${deviceId}|${mediaType}`
+const historyKey = (deviceId: DanteDeviceId, mediaType: ChannelMediaType) => `${deviceId}|${mediaType}`
 
 /** Forgets every remembered name, for a fresh connection. */
 export function resetChannelNameHistory(self: DanteInstance): void {
@@ -25,23 +33,21 @@ export function resetChannelNameHistory(self: DanteInstance): void {
 }
 
 /** The device id of a device name, current or former. */
-export function deviceIdForName(self: DanteInstance, deviceName: string): string | undefined {
+export function deviceIdForName(self: DanteInstance, name: string): DanteDeviceId | undefined {
 	const ids = self.deviceIdsByName ?? {}
-	if (ids[deviceName] !== undefined) return ids[deviceName]
-	const wanted = deviceName.toLowerCase()
-	for (const [name, id] of Object.entries(ids)) {
-		if (name.toLowerCase() === wanted) return id
-	}
-	return undefined
+	const exact = ids[name as DeviceName]
+	if (exact !== undefined) return exact
+	const wanted = name.toLowerCase()
+	return brandedEntries(ids).find(([candidate]) => candidate.toLowerCase() === wanted)?.[1]
 }
 
 /**
  * Remembers the current transmit channel names of the device at `deviceIp`, once its id is known.
  * Called whenever its transmit channels or its id are learnt; cheap when nothing is new.
  */
-export function rememberTxChannelNames(self: DanteInstance, deviceIp: string): void {
+export function rememberTxChannelNames(self: DanteInstance, deviceIp: DeviceIp): void {
 	const device = self.devicesData[deviceIp]
-	const deviceId = device?.name !== undefined ? self.deviceIdsByName?.[device.name] : undefined
+	const deviceId = device?.id
 	if (!device || deviceId === undefined) return
 
 	let history = txNamesByInstance.get(self)
@@ -50,7 +56,7 @@ export function rememberTxChannelNames(self: DanteInstance, deviceIp: string): v
 		txNamesByInstance.set(self, history)
 	}
 
-	const remember = (mediaType: ChannelMediaType, channel: number, ...names: (string | undefined)[]) => {
+	const remember = (mediaType: ChannelMediaType, channel: ChannelNumber, ...names: (string | undefined)[]) => {
 		const key = historyKey(deviceId, mediaType)
 		let byName = history.get(key)
 		if (!byName) {
@@ -62,12 +68,12 @@ export function rememberTxChannelNames(self: DanteInstance, deviceIp: string): v
 		}
 	}
 
-	for (let channel = 1; channel <= (device.audioTx?.count ?? 0); channel++) {
+	for (const channel of channelNumbers(device.audioTx?.count)) {
 		const tx = device.audioTx?.[channel]
 		// both: a subscription names the friendly name when there is one, but may predate it
 		remember('audio', channel, tx?.name, getChannelSubscriptionName(tx))
 	}
-	for (let channel = 1; channel <= (device.videoTx?.count ?? 0); channel++) {
+	for (const channel of channelNumbers(device.videoTx?.count)) {
 		remember('video', channel, device.videoTx?.[channel]?.name)
 	}
 }
@@ -80,19 +86,22 @@ export function rememberTxChannelNames(self: DanteInstance, deviceIp: string): v
  * A current channel name wins over a former one, so a name that has since moved to another channel
  * resolves to where it is now - which is also where the receiver will reconnect to.
  */
+/** A subscription's source as `<device id>/<transmit channel number>`. */
+export type SubscriptionSourceId = `${DanteDeviceId}/${ChannelNumber}`
+
 export function resolveSubscriptionSource(
 	self: DanteInstance,
 	source: { deviceName: string; channelName: string },
 	mediaType: ChannelMediaType,
-): string | undefined {
+): SubscriptionSourceId | undefined {
 	const deviceId = deviceIdForName(self, source.deviceName)
 	if (deviceId === undefined) return undefined
 	const wanted = source.channelName.toLowerCase()
 
-	for (const device of Object.values(self.devicesData)) {
-		if (device.name === undefined || self.deviceIdsByName?.[device.name] !== deviceId) continue
+	for (const [, device] of brandedEntries(self.devicesData)) {
+		if (device.id !== deviceId) continue
 		const channels = mediaType === 'video' ? device.videoTx : device.audioTx
-		for (let channel = 1; channel <= (channels?.count ?? 0); channel++) {
+		for (const channel of channelNumbers(channels?.count)) {
 			const tx = channels?.[channel]
 			const names = mediaType === 'video' ? [tx?.name] : [getChannelSubscriptionName(tx), tx?.name]
 			if (names.some((name) => name?.toLowerCase() === wanted)) return `${deviceId}/${channel}`
