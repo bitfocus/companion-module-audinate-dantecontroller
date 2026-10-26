@@ -21,16 +21,12 @@ import {
 	scheduleUpdateData,
 } from './devices.js'
 import { sanitiseVariableId } from '../utils/sanitise.js'
-import { deviceIdForName, rememberTxChannelNames } from './identity.js'
 import { channelDisplayLabel } from './protocol-rules.js'
 import {
 	brandedEntries,
 	brandedKeys,
 	channelNumbers,
-	asDeviceName,
-	isDanteDeviceId,
 	type ChannelNumber,
-	type DanteDeviceId,
 	type DeviceIp,
 	type DeviceName,
 } from './ids.js'
@@ -218,9 +214,8 @@ export function audioChannelChoices(
 	channelType: 'rx' | 'tx',
 ): DropdownChoice<ChannelNumber>[] {
 	if (!device.name) return []
-	if (!device.id) return []
 	const byDevice = channelType === 'rx' ? self.rxChannelsChoices : self.txChannelsChoices
-	return byDevice[device.id] ?? []
+	return byDevice[device.name] ?? []
 }
 
 /** A device's rx or tx video channel choices, or an empty list if it has none yet. */
@@ -229,11 +224,11 @@ export function videoChannelChoices(
 	device: DeviceData,
 	channelType: 'rx' | 'tx',
 ): DropdownChoice<ChannelNumber>[] {
-	if (!device.id) return []
+	if (!device.name) return []
 	// The ?? {} guards a DanteInstance-like test double that predates video and so has no reason to
 	// set this field - a real instance always has it, initialized alongside rxChannelsChoices.
 	const byDevice = (channelType === 'rx' ? self.videoRxChannelsChoices : self.videoTxChannelsChoices) ?? {}
-	return byDevice[device.id] ?? []
+	return byDevice[device.name] ?? []
 }
 
 /**
@@ -329,8 +324,8 @@ export function channelTypeOption<Key extends string>(id: Key): CompanionInputFi
  * `deviceSelectedExpression` builds from the live record, which exists again the moment it returns.
  */
 export function channelFieldDevices(self: DanteInstance): NamedDevice[] {
-	const live = devicesById(self)
-	const seen = new Set(live.map((named) => named.id))
+	const live = devicesByName(self)
+	const seen = new Set(live.map((named) => named.name))
 
 	const remembered: NamedDevice[] = []
 	for (const byDevice of [
@@ -339,11 +334,10 @@ export function channelFieldDevices(self: DanteInstance): NamedDevice[] {
 		self.videoRxChannelsChoices ?? {},
 		self.videoTxChannelsChoices ?? {},
 	]) {
-		for (const id of brandedKeys(byDevice)) {
-			if (seen.has(id)) continue
-			seen.add(id)
-			const name = self.deviceNamesById?.[id] ?? asDeviceName(id)
-			remembered.push({ id, name, device: { id, name }, ips: [] })
+		for (const name of brandedKeys(byDevice)) {
+			if (seen.has(name)) continue
+			seen.add(name)
+			remembered.push({ name, device: { name }, ips: [] })
 		}
 	}
 
@@ -362,14 +356,14 @@ export function perDeviceChannelFields<Key extends string>(
 	const fields: CompanionInputFieldDropdown<Key>[] = []
 
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
-		for (const { id, name, device, ips } of channelFieldDevices(self)) {
+		for (const { name, device, ips } of channelFieldDevices(self)) {
 			const choices = displayChannelChoices(mediaChannelChoices(self, device, direction, mediaType))
 			if (choices.length === 0) continue
 
 			// deviceSelectedExpression contains `||`, which binds looser than `&&` - bracket it (and, if
 			// there's an extraVisibleCondition too, the whole device+type clause) so a later `&&` can't
 			// silently swallow one arm of the `||`.
-			const deviceAndType = `(${deviceSelectedExpression(devicePickerId, id, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
+			const deviceAndType = `(${deviceSelectedExpression(devicePickerId, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
 			const isVisibleExpression = extraVisibleCondition
 				? `(${deviceAndType}) && ${extraVisibleCondition}`
 				: deviceAndType
@@ -377,9 +371,9 @@ export function perDeviceChannelFields<Key extends string>(
 			fields.push({
 				type: 'dropdown',
 				label: mediaType === 'audio' ? label : `${CHANNEL_MEDIA_TYPE_LABELS[mediaType]} ${label.toLowerCase()}`,
-				// Keyed by device id, so a rename leaves every saved selection in place. deviceOptionValue
-				// also reads the name-keyed ids 2.x saved under.
-				id: `${channelOptionPrefix(basePrefix, mediaType)}_${id}` as Key,
+				// Sanitised, because a device name may hold characters an option id cannot - see
+				// deviceOptionValue, which reads these keys back the same way.
+				id: `${channelOptionPrefix(basePrefix, mediaType)}_${sanitiseVariableId(name)}` as Key,
 				choices: noneOption ? [noneOption, ...choices] : choices,
 				// The default comes from `choices` alone, never `[noneOption, ...choices]`: None sorts
 				// first, so including it here would make a freshly-added field default to "no route".
@@ -411,56 +405,26 @@ export function perDeviceChannelFields<Key extends string>(
  */
 export function rememberedTxChannelName(
 	self: DanteInstance,
-	deviceIdentifier: string | undefined,
+	deviceName: string | undefined,
 	mediaType: ChannelMediaType,
 	channelNumber: number | string,
 ): string | undefined {
-	const id = rememberedDeviceId(self, deviceIdentifier)
-	if (id === undefined) return undefined
+	if (deviceName === undefined) return undefined
 	const byDevice = (mediaType === 'video' ? self.videoTxChannelsChoices : self.txChannelsChoices) ?? {}
-	const label = byDevice[id]?.find((choice) => String(choice.id) === String(channelNumber))?.label
+	const label = byDevice[deviceName as DeviceName]?.find((choice) => String(choice.id) === String(channelNumber))?.label
 	return label || undefined
-}
-
-/**
- * The name a device identifier refers to, including for a device that is offline: its current name
- * when online, otherwise the name its id was last seen with. Undefined when neither is known.
- */
-export function rememberedDeviceName(
-	self: DanteInstance,
-	deviceIdentifier: string | undefined,
-): DeviceName | undefined {
-	const online = deviceByIdentifier(self, deviceIdentifier)?.name
-	if (online !== undefined) return online
-	const id = rememberedDeviceId(self, deviceIdentifier)
-	return id !== undefined ? self.deviceNamesById?.[id] : undefined
-}
-
-/**
- * The id behind a device identifier, including for a device that is offline: an id is itself, and a
- * name - current or former, or as saved by 2.x - is looked up among the names ids have been seen
- * with. Addresses only resolve while the device is online.
- */
-export function rememberedDeviceId(
-	self: DanteInstance,
-	deviceIdentifier: string | undefined,
-): DanteDeviceId | undefined {
-	if (deviceIdentifier === undefined) return undefined
-	if (isDanteDeviceId(deviceIdentifier)) return deviceIdentifier
-	return deviceByIdentifier(self, deviceIdentifier)?.id ?? deviceIdForName(self, deviceIdentifier)
 }
 
 /** The reverse of {@link rememberedTxChannelName}: a transmit channel's number, given its name. */
 export function rememberedTxChannelNumber(
 	self: DanteInstance,
-	deviceIdentifier: string | undefined,
+	deviceName: string | undefined,
 	mediaType: ChannelMediaType,
 	channelName: string | undefined,
 ): ChannelNumber | undefined {
-	const id = rememberedDeviceId(self, deviceIdentifier)
-	if (id === undefined || channelName === undefined) return undefined
+	if (deviceName === undefined || channelName === undefined) return undefined
 	const byDevice = (mediaType === 'video' ? self.videoTxChannelsChoices : self.txChannelsChoices) ?? {}
-	return byDevice[id]?.find((choice) => choice.label === channelName)?.id
+	return byDevice[deviceName as DeviceName]?.find((choice) => choice.label === channelName)?.id
 }
 
 /** How a channel direction reads in a sentence aimed at the user. */
@@ -498,7 +462,7 @@ export function perDeviceMissingChannelWarnings(
 	for (const mediaType of CHANNEL_MEDIA_TYPES) {
 		// the same set perDeviceChannelFields builds from, so every device with a picker for one media
 		// type has an explanation for the type it lacks
-		for (const { id, name, device, ips } of channelFieldDevices(self)) {
+		for (const { name, device, ips } of channelFieldDevices(self)) {
 			if (mediaChannelChoices(self, device, direction, mediaType).length > 0) continue
 			const offeredAtAll = CHANNEL_MEDIA_TYPES.some(
 				(otherType) => mediaChannelChoices(self, device, direction, otherType).length > 0,
@@ -507,14 +471,14 @@ export function perDeviceMissingChannelWarnings(
 
 			// Bracketed exactly as in perDeviceChannelFields: deviceSelectedExpression contains `||`,
 			// which binds looser than the `&&` joining it to the channel-type test.
-			const isVisibleExpression = `(${deviceSelectedExpression(devicePickerId, id, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
+			const isVisibleExpression = `(${deviceSelectedExpression(devicePickerId, name, ...ips)}) && $(options:channelType) == '${mediaType}'`
 
 			const mediaLabel = CHANNEL_MEDIA_TYPE_LABELS[mediaType]
 			fields.push({
 				type: 'static-text',
 				// Not `channelOptionPrefix`: these hold no value, so there is no saved-config
 				// compatibility to preserve and every media type can carry its own name.
-				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${id}`,
+				id: `${devicePickerId}No${mediaLabel}${direction.toUpperCase()}Channels_${sanitiseVariableId(name)}`,
 				label: `No ${mediaLabel.toLowerCase()} channels`,
 				value:
 					`${name} has no ${mediaLabel.toLowerCase()} ${DIRECTION_LABELS[direction]} channels, so there ` +
@@ -548,67 +512,84 @@ export function channelRangeDescription(
 /**
  * A visibility expression matching a device picker against one device.
  *
- * Matches the device id, which pickers store, and the device's current name and addresses, which
- * pickers saved by 2.x and 1.x hold - without those arms such an action shows no per-device field
- * at all, since nothing would match.
+ * Matches the device name, which is what pickers store, *and* its current addresses, which is what
+ * actions saved before devices were keyed by name still hold. Without the address arm those actions
+ * show no per-device field at all: the option ids are keyed by name, so nothing matches and the
+ * channel picker simply never appears.
+ *
+ * Takes any number of addresses because one name can be announced from several - see
+ * {@link devicesByName}. All of them are matched, so an older action holding whichever address it
+ * was saved against still resolves.
  */
-export function deviceSelectedExpression(pickerId: string, ...values: string[]): string {
-	return [...new Set(values)].map((value) => `$(options:${pickerId}) == '${value}'`).join(' || ')
+export function deviceSelectedExpression(pickerId: string, deviceName: string, ...deviceIps: string[]): string {
+	return [...new Set([deviceName, ...deviceIps])].map((value) => `$(options:${pickerId}) == '${value}'`).join(' || ')
 }
 
-/** One device, as the per-device option builders see it: its id and name, its record, its addresses. */
+/** One device, as the per-device option builders see it: a name, its record, and its addresses. */
 export interface NamedDevice {
-	id: DanteDeviceId
 	name: DeviceName
 	device: DeviceData
 	ips: DeviceIp[]
 }
 
 /**
- * The devices to build per-device option fields from: one entry per device id, for every online
- * device whose id is known.
+ * The devices to build per-device option fields from: one entry per distinct *name*.
  *
- * `devicesData` is keyed by address, and two addresses can carry one device - a device whose address
- * changed re-registers under the new one while the old record waits out its offline timeout, and a
- * Companion host on both a primary and a secondary Dante network sees one device from each. Grouping
- * by id gives each device one set of fields; every address is kept in `ips` so the visibility
- * expression still matches actions saved against any of them.
+ * `devicesData` is keyed by address, and two addresses can carry the same device name - a device
+ * whose address changed re-registers under the new one while the old record waits out its offline
+ * timeout, and a Companion host on both a primary and a secondary Dante network sees one device
+ * announce itself from each. Building fields straight from the records would then emit two options
+ * with the same `<prefix>_${name}` id, which Companion cannot tell apart.
  *
- * @param include Which records can represent a device, matching the `.filter()` each call site used
- * to do itself. A device whose records all fail it is left out. Where several records share an id,
- * a passing one is preferred - a device that has just re-registered has a record with no settings
- * replies in it yet, and that one must not stand in for the record that has them.
+ * Grouping first is enough to make that impossible, and loses nothing: everything a per-device field
+ * needs is keyed by name too (`rxChannelsChoices` and friends), so the duplicate record could only
+ * ever have produced an identical field. Its address is kept in `ips` so the visibility expression
+ * still matches actions saved against it.
+ *
+ * @param include Which records can represent a name, matching the `.filter()` each call site used
+ * to do itself. A name whose records all fail it is left out entirely. Where several share a name,
+ * a passing record is preferred over a failing one - a device that has just re-registered has an
+ * entry with no settings replies in it yet, and that one must not stand in for the entry that has
+ * them. Addresses are still collected from every record, passing or not, so a saved action holding
+ * any of them stays matched.
  */
-export function devicesById(self: DanteInstance, include: (device: DeviceData) => boolean = () => true): NamedDevice[] {
-	const byId = new Map<DanteDeviceId, NamedDevice>()
+export function devicesByName(
+	self: DanteInstance,
+	include: (device: DeviceData) => boolean = () => true,
+): NamedDevice[] {
+	const byName = new Map<DeviceName, NamedDevice>()
 
 	for (const [ip, device] of brandedEntries(self.devicesData)) {
-		// Without an id there is nothing stable to key an option on, and without a name nothing to show.
-		if (device.id === undefined || device.name === undefined) continue
+		// An unnamed device has no id to build an option from - `<prefix>_undefined` is nobody's field.
+		if (device.name === undefined) continue
 
-		const existing = byId.get(device.id)
+		const existing = byName.get(device.name)
 		if (!existing) {
-			byId.set(device.id, { id: device.id, name: device.name, device, ips: [ip] })
+			byName.set(device.name, { name: device.name, device, ips: [ip] })
 			continue
 		}
 
 		existing.ips.push(ip)
-		if (include(device) && !include(existing.device)) {
-			existing.device = device
-			existing.name = device.name
-		}
+		if (include(device) && !include(existing.device)) existing.device = device
 	}
 
-	return [...byId.values()].filter((named) => include(named.device))
+	return [...byName.values()].filter((named) => include(named.device))
 }
 
 /**
  * Reads a per-device option, accepting every key form one may have been saved under.
  *
- * Fields are keyed by device id, so that is tried first and an action saved by 3.x always uses it.
- * The forms 2.x and earlier saved are accepted behind it: the sanitised and the raw device name,
- * and the identifier the device option holds, sanitised and raw - a name, or an address from
- * before devices were keyed by name.
+ * Fields are declared keyed by the *sanitised* device name, so that is tried first and a re-saved
+ * action always uses the current key. Three older forms are still accepted behind it:
+ *
+ * - the unsanitised name, which is what a config saved before ids were sanitised holds;
+ * - the identifier the option actually stores, sanitised - the device dropdown holds a name, and
+ *   when that device is offline `deviceByIdentifier` cannot resolve it to look the name up;
+ * - that identifier raw, which covers both an unsanitised name and an action saved before devices
+ *   were keyed by name at all, whose key is suffixed with an address.
+ *
+ * Order matters only where the forms differ; for a device whose name needs no sanitising, and for
+ * an address (sanitising leaves IPv4 untouched), several of these are the same key.
  */
 export function deviceOptionValue<T>(
 	self: DanteInstance,
@@ -617,11 +598,8 @@ export function deviceOptionValue<T>(
 	identifier: string,
 	fallback: T,
 ): T {
-	const device = deviceByIdentifier(self, identifier)
-	const id = device?.id ?? rememberedDeviceId(self, identifier)
-	const name = device?.name ?? (id !== undefined ? self.deviceNamesById?.[id] : undefined)
+	const name = deviceByIdentifier(self, identifier)?.name
 	const suffixes = new Set([
-		...(id !== undefined ? [id] : []),
 		...(name !== undefined ? [sanitiseVariableId(name), name] : []),
 		sanitiseVariableId(identifier),
 		identifier,
@@ -638,15 +616,15 @@ export function deviceOptionValue<T>(
 }
 
 /**
- * Rebuilds the device dropdown from the device records: one entry per online device whose id is
- * known, labelled with its name, sorted by label. Returns whether it changed.
+ * Rebuilds the device dropdown from the device records: one entry per online device name, sorted.
+ * Returns whether it changed.
  *
  * Derived rather than patched on each event, so a rename, an address change or a duplicate
  * announcement can never leave a stale or doubled entry behind.
  */
 export function refreshDeviceChoices(self: DanteInstance): boolean {
-	const next = devicesById(self)
-		.map(({ id, name }) => ({ id, label: name }))
+	const next = devicesByName(self)
+		.map(({ name }) => ({ id: name, label: name }))
 		.sort((a, b) => a.label.localeCompare(b.label))
 
 	const current = self.devicesChoices
@@ -668,26 +646,16 @@ export function updateDeviceChoice(self: DanteInstance, deviceIp: DeviceIp, newN
 	const device = self.devicesData[deviceIp]
 	const previousName = device?.name
 
-	// With choices keyed by id a rename no longer breaks the actions pointing at the device, but it
-	// does break any route other devices made to it by name - Dante subscribes by name.
+	// Worth an info line either way: a rename breaks every action pointed at the old name, and any
+	// route other devices made to it by name - Dante subscribes by name.
 	if (previousName && previousName !== newName) {
 		logger.info(`Device renamed: '${previousName}' is now '${newName}' (${deviceIp})`)
 	} else if (self.debug) {
 		logger.debug(`Device name for ${deviceIp} confirmed as '${newName}'`)
 	}
 
-	if (device) {
-		device.name = newName
-		const id = self.deviceIdsByName?.[newName] ?? device.id
-		if (id !== undefined) noteDeviceName(self, id, newName)
-	}
+	if (device) device.name = newName
 	refreshDeviceChoices(self)
-}
-
-/** Remembers the name a device id was last seen with, for while the device is offline. */
-export function noteDeviceName(self: DanteInstance, id: DanteDeviceId, name: DeviceName): void {
-	;(self.deviceNamesById ??= {})[id] = name
-	;(self.deviceIdsByName ??= {})[name] = id
 }
 
 /**
@@ -703,10 +671,7 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: DeviceIp, ch
 	}
 
 	const deviceName = device?.name
-	const deviceId = device?.id
-	// Channel choices are keyed by id; this runs again for the device once its id arrives
-	if (deviceName === undefined || deviceId === undefined) return
-	if (channelType === 'tx') rememberTxChannelNames(self, deviceIp)
+	if (deviceName === undefined) return
 
 	// No "None" entry: every action taking a channel acts on that one channel, so a "none" selection
 	// only means "do nothing". It also sorted first, which made it the default - so a freshly added
@@ -719,14 +684,14 @@ export function updateChannelChoices(self: DanteInstance, deviceIp: DeviceIp, ch
 		channelChoice.push({ id: number, label: channelName })
 	}
 
-	const existing = choicesByDevice[deviceId]
+	const existing = choicesByDevice[deviceName]
 	const changed =
 		!existing ||
 		existing.length !== channelChoice.length ||
 		channelChoice.some((choice, index) => choice.label !== existing[index]?.label)
 	if (changed) {
 		logChannelNameChanges(deviceName, channelType, existing, channelChoice, channelsAreSettling(self, deviceIp))
-		choicesByDevice[deviceId] = channelChoice
+		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
 	}
 }
@@ -747,9 +712,7 @@ export function updateVideoChannelChoices(self: DanteInstance, deviceIp: DeviceI
 	}
 
 	const deviceName = self.devicesData[deviceIp].name
-	const deviceId = self.devicesData[deviceIp].id
-	if (deviceName === undefined || deviceId === undefined) return
-	if (channelType === 'tx') rememberTxChannelNames(self, deviceIp)
+	if (deviceName === undefined) return
 	const ioObject = self.devicesData[deviceIp][videoChannelType]
 	if (ioObject === undefined) return
 
@@ -760,7 +723,7 @@ export function updateVideoChannelChoices(self: DanteInstance, deviceIp: DeviceI
 		channelChoice.push({ id: number, label: ioObject[number]?.name ?? '' })
 	}
 
-	const existing = choicesByDevice[deviceId]
+	const existing = choicesByDevice[deviceName]
 	const changed =
 		!existing ||
 		existing.length !== channelChoice.length ||
@@ -774,7 +737,7 @@ export function updateVideoChannelChoices(self: DanteInstance, deviceIp: DeviceI
 			channelsAreSettling(self, deviceIp),
 			'video',
 		)
-		choicesByDevice[deviceId] = channelChoice
+		choicesByDevice[deviceName] = channelChoice
 		scheduleUpdateData(self)
 	}
 }

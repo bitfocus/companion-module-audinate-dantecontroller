@@ -44,28 +44,7 @@ export type ModuleConfig = {
 	 * read it through `routingVariablesEnabled`.
 	 */
 	routingVariables?: boolean
-	/**
-	 * What every variable id starts with: the device id (the default) or the device name. See
-	 * `variableKeysOf`. Connections from before 3.0 are upgraded to `names`, which is what their
-	 * buttons were built with.
-	 */
-	variableKeys?: VariableKeys
 	verbose: boolean
-}
-
-/**
- * How variable ids name a device.
- *
- * - `ids`: `<device id>_<suffix>`. Survives renames and address changes, so a button showing a
- *   variable keeps showing it. The variable descriptions carry the device name.
- * - `names`: `<device name>_<suffix>`, with characters Companion rejects replaced by `_`. Readable
- *   and typable, but every reference to a device's variables breaks when it is renamed.
- */
-export type VariableKeys = 'ids' | 'names'
-
-/** See {@link ModuleConfig.variableKeys}. Anything but `names` means ids. */
-export function variableKeysOf(config: Pick<ModuleConfig, 'variableKeys'> | undefined): VariableKeys {
-	return config?.variableKeys === 'names' ? 'names' : 'ids'
 }
 
 /** See {@link ModuleConfig.routingVariables}. */
@@ -257,21 +236,6 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 				'and read device properties through the Device Property feedback instead.',
 			width: 12,
 			default: true,
-		},
-
-		{
-			type: 'dropdown',
-			id: 'variableKeys',
-			label: 'Variable Names',
-			description:
-				'Name variables after each device id, which stays the same when a device is renamed, or after ' +
-				'the device name, which is easier to type but breaks every reference when the device is renamed.',
-			width: 12,
-			default: 'ids',
-			choices: [
-				{ id: 'ids', label: 'Device id, e.g. $(dante:001dc1fffe843ea2_sr)' },
-				{ id: 'names', label: 'Device name, e.g. $(dante:Stage_Box_sr)' },
-			],
 		},
 
 		{

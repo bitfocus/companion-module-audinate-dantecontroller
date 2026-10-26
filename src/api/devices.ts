@@ -6,7 +6,6 @@
 import { debounce, throttle, type DebouncedFunc } from 'es-toolkit/compat'
 import { createModuleLogger } from '@companion-module/base'
 import { collidingIds } from '../utils/sanitise.js'
-import { variableKeysOf } from '../config.js'
 import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateVariableDefinitions, CheckVariables } from '../variables.js'
@@ -32,8 +31,6 @@ import {
 	channelNumbers,
 	asDeviceIp,
 	asDeviceName,
-	isDanteDeviceId,
-	type DanteDeviceId,
 	type DeviceIp,
 	type DeviceName,
 } from './ids.js'
@@ -260,11 +257,6 @@ export function findDeviceIpByName(self: DanteInstance, name: string): DeviceIp 
 	return entries.find(([, device]) => device.name?.toLowerCase() === wanted)?.[0]
 }
 
-/** The address of the device with this id, if it is online. */
-export function findDeviceIpById(self: DanteInstance, id: DanteDeviceId): DeviceIp | undefined {
-	return brandedEntries(self.devicesData).find(([, device]) => device.id === id)?.[0]
-}
-
 /** Finds a channel on a device by name, matching any of the names `names` reads from it. */
 function findChannelByName<Channel extends { name?: string }>(
 	channels: (Record<number, Channel> & { count?: number }) | undefined,
@@ -382,19 +374,14 @@ export function getVideoRxChannelSource(
 }
 
 /**
- * Resolves whatever a saved option holds to name a device to the address it is online at.
+ * Resolves a device identifier to its address.
  *
- * 3.x stores the device id: unlike a name it survives a rename, and unlike an address it survives
- * DHCP and link-local reassignment. Values saved by earlier versions are still accepted - a name
- * (2.x) or an address (1.x) - and resolve for as long as a device has that name or address; saving
- * the action again stores the id.
+ * Accepts either a device name or an IP. Dropdowns store the name, because a device's address is
+ * reassigned by DHCP and link-local autoconfiguration while its name is chosen by the user and
+ * persists - but actions saved before that store an address, and those keep working through here.
  */
 export function resolveDeviceIp(self: DanteInstance, identifier: string | undefined): DeviceIp | undefined {
 	if (!identifier) return undefined
-	if (isDanteDeviceId(identifier)) {
-		const byId = findDeviceIpById(self, identifier)
-		if (byId !== undefined) return byId
-	}
 	if (Object.hasOwn(self.devicesData, identifier)) return asDeviceIp(identifier)
 	return findDeviceIpByName(self, identifier)
 }
@@ -417,9 +404,7 @@ export function deviceLabel(self: DanteInstance, deviceIp: DeviceIp): string {
 export function requireDeviceIp(self: DanteInstance, identifier: string | undefined): DeviceIp {
 	const ip = resolveDeviceIp(self, identifier)
 	if (ip !== undefined) return ip
-	const remembered = isDanteDeviceId(identifier) ? self.deviceNamesById?.[identifier] : undefined
-	const described = remembered ? `${remembered} (${identifier})` : (identifier ?? 'the device')
-	throw new DanteCommandError(`Can't find ${described} - it may be offline`)
+	throw new DanteCommandError(`Can't find ${identifier ?? 'the device'} - it may be offline`)
 }
 
 /** The device record behind an identifier. See {@link resolveDeviceIp}. */
@@ -464,8 +449,6 @@ export function macForDevice(self: DanteInstance, device: DeviceIp): Buffer {
 export function registerDevice(self: DanteInstance, deviceIp: DeviceIp, deviceName: DeviceName): DeviceData {
 	self.devicesData[deviceIp] = {
 		name: deviceName,
-		// usually known already: the CMC TXT record arrives with the SRV records that register a device
-		id: self.deviceIdsByName?.[deviceName],
 		ports: {},
 		interfaceMac: resolveDeviceInterface(self, deviceIp),
 	}
@@ -883,22 +866,25 @@ export function resetIdCollisionWarnings(self: DanteInstance): void {
 }
 
 /**
- * Warns when two device names sanitise to the same variable id, with variables keyed by name.
+ * Warns when two device names sanitise to the same id.
  *
- * Name-keyed variable ids run the name through `sanitiseVariableId`, which is lossy - `Rack 1` and
- * `Rack-1` both become `Rack_1`. The two devices then share every variable and the last one
- * discovered wins. Nothing about the symptoms points at the cause, so say so plainly. Option ids and
- * id-keyed variables use the device id and cannot collide.
+ * Variable and per-device option ids run the name through `sanitiseVariableId`, which is lossy -
+ * `Rack 1` and `Rack-1` both become `Rack_1`. The two devices then share every variable and
+ * per-device field and the last one discovered wins. Nothing about the symptoms points at the
+ * cause, so say so plainly.
  */
 function warnOnIdCollisions(self: DanteInstance): void {
-	if (variableKeysOf(self.config) !== 'names') return
-
 	const names = new Set<string>()
 	for (const [, device] of brandedEntries(self.devicesData)) {
 		if (device.name) names.add(device.name)
 	}
-	for (const name of Object.values(self.deviceNamesById ?? {})) {
-		if (name) names.add(name)
+	for (const byDevice of [
+		self.rxChannelsChoices,
+		self.txChannelsChoices,
+		self.videoRxChannelsChoices ?? {},
+		self.videoTxChannelsChoices ?? {},
+	]) {
+		for (const name of brandedKeys(byDevice)) names.add(name)
 	}
 
 	const collisions = collidingIds(names)
@@ -918,8 +904,8 @@ function warnOnIdCollisions(self: DanteInstance): void {
 
 		logger.warn(
 			`Device names ${group.map((name) => `'${name}'`).join(' and ')} both become '${id}' once characters ` +
-				`Companion cannot use in an id are replaced, so they share variables and the last one discovered ` +
-				`wins. Rename one of them, or name variables after device ids in the connection config.`,
+				`Companion cannot use in an id are replaced, so they share variables and per-device action fields ` +
+				`and the last one discovered wins. Rename one of them to tell them apart.`,
 		)
 	}
 }

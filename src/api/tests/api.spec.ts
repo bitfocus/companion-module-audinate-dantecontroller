@@ -57,8 +57,7 @@ import {
 import { UpdateVariableDefinitions } from '../../variables.js'
 import { DANTE_CONST } from '../const.js'
 import type DanteInstance from '../../main.js'
-import { ch, id, ip, name } from '../../tests/ids.js'
-import type { DanteDeviceId } from '../ids.js'
+import { ch, ip, name } from '../../tests/ids.js'
 
 // Real packets captured from a live Dante network during development, used to exercise
 // the protocol/size/magic-string checks and byte-offset parsing against genuine data
@@ -128,8 +127,6 @@ function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 		setFeedbackDefinitions: vi.fn(),
 		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
-		deviceIdsByName: {},
-		deviceNamesById: {},
 		...overrides,
 		devicesData: devices(overrides.devicesData),
 	}
@@ -374,12 +371,6 @@ describe('checkConnections', () => {
 
 describe('registerDevice / destroyDevice / keepAlive', () => {
 	const MY_DEVICE = name('MyDevice')
-	const MY_ID = id(1)
-
-	/** An instance that has already seen MyDevice's mDNS TXT record, so registering it knows its id. */
-	function known(overrides: MockOverrides = {}) {
-		return createMockInstance({ deviceIdsByName: { [MY_DEVICE]: MY_ID }, ...overrides })
-	}
 
 	beforeEach(() => {
 		vi.useFakeTimers()
@@ -390,27 +381,27 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 	})
 
 	it('registers the device with the given name and adds it to devicesChoices', () => {
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 		expect(self.devicesData[ip('10.0.0.5')]?.name).toBe(MY_DEVICE)
 		// choices are keyed by device name, which survives an address change
-		expect(self.devicesChoices).toContainEqual({ id: MY_ID, label: MY_DEVICE })
+		expect(self.devicesChoices).toContainEqual({ id: MY_DEVICE, label: MY_DEVICE })
 	})
 
 	it('arms an offline-destroy timeout when self.timeout > 0', () => {
-		const self = known({ timeout: 3000 })
+		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 		expect(self.devicesData[ip('10.0.0.5')]?.timeoutArray).toBeDefined()
 	})
 
 	it('does not arm a timeout when self.timeout is 0', () => {
-		const self = known({ timeout: 0 })
+		const self = createMockInstance({ timeout: 0 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 		expect(self.devicesData[ip('10.0.0.5')]?.timeoutArray).toBeUndefined()
 	})
 
 	it('destroys the device automatically once the timeout elapses without a keepAlive', () => {
-		const self = known({ timeout: 3000 })
+		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 		vi.advanceTimersByTime(3000)
 		expect(self.devicesData[ip('10.0.0.5')]).toBeUndefined()
@@ -418,7 +409,7 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 	})
 
 	it('keepAlive resets the destroy timer, keeping the device alive past the original deadline', () => {
-		const self = known({ timeout: 3000 })
+		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 
 		vi.advanceTimersByTime(2000)
@@ -431,12 +422,12 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 	})
 
 	it('keepAlive is a no-op for a device with no armed timeout', () => {
-		const self = known()
+		const self = createMockInstance()
 		expect(() => keepAlive(self, ip('10.0.0.5'))).not.toThrow()
 	})
 
 	it('destroyDevice removes the device from devicesData and devicesChoices immediately', () => {
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 		destroyDevice(self, ip('10.0.0.5'))
 		expect(self.devicesData[ip('10.0.0.5')]).toBeUndefined()
@@ -444,35 +435,35 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 	})
 
 	it('registering the same device at a second address offers it once', () => {
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
-		// the device moved, or a second network carries it - either way the id is already offered
+		// the device moved, or a second network carries it - either way the name is already offered
 		registerDevice(self, ip('10.0.0.7'), MY_DEVICE)
-		expect(self.devicesChoices).toEqual([{ id: MY_ID, label: MY_DEVICE }])
+		expect(self.devicesChoices).toEqual([{ id: MY_DEVICE, label: MY_DEVICE }])
 	})
 
 	it('destroying a stale address leaves the device alone while another address still has it', () => {
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
-		self.rxChannelsChoices[MY_ID] = [{ id: ch(1), label: 'In 1' }]
-		self.txChannelsChoices[MY_ID] = [{ id: ch(1), label: 'Out 1' }]
-		self.videoRxChannelsChoices[MY_ID] = [{ id: ch(1), label: 'Video In 1' }]
+		self.rxChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'In 1' }]
+		self.txChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'Out 1' }]
+		self.videoRxChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'Video In 1' }]
 
 		// the device changed address: it re-registers straight away, and the record for the old
-		// address is destroyed a timeout later. Both carry the same id, so destroying the old one
+		// address is destroyed a timeout later. Both carry the same name, so destroying the old one
 		// must not take the live device's channel choices or dropdown entry with it.
 		registerDevice(self, ip('10.0.0.7'), MY_DEVICE)
 		destroyDevice(self, ip('10.0.0.5'))
 
 		expect(self.devicesData[ip('10.0.0.7')]).toBeDefined()
-		expect(self.devicesChoices).toEqual([{ id: MY_ID, label: MY_DEVICE }])
-		expect(self.rxChannelsChoices[MY_ID]).toBeDefined()
-		expect(self.txChannelsChoices[MY_ID]).toBeDefined()
-		expect(self.videoRxChannelsChoices[MY_ID]).toBeDefined()
+		expect(self.devicesChoices).toEqual([{ id: MY_DEVICE, label: MY_DEVICE }])
+		expect(self.rxChannelsChoices[MY_DEVICE]).toBeDefined()
+		expect(self.txChannelsChoices[MY_DEVICE]).toBeDefined()
+		expect(self.videoRxChannelsChoices[MY_DEVICE]).toBeDefined()
 	})
 
 	it('destroying the last address of a device takes it out of the device dropdown', () => {
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 
 		destroyDevice(self, ip('10.0.0.5'))
@@ -486,23 +477,23 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		// from a definition loses the value stored against it. Clearing them here used to blank the
 		// channel selection on every action and feedback pointing at the device, permanently - for a
 		// device that had merely missed a few mDNS responses. See `channelFieldDevices` in choices.ts.
-		const self = known()
+		const self = createMockInstance()
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
-		self.rxChannelsChoices[MY_ID] = [{ id: ch(1), label: 'In 1' }]
-		self.txChannelsChoices[MY_ID] = [{ id: ch(1), label: 'Out 1' }]
-		self.videoRxChannelsChoices[MY_ID] = [{ id: ch(1), label: 'Video In 1' }]
-		self.videoTxChannelsChoices[MY_ID] = [{ id: ch(1), label: 'Video Out 1' }]
+		self.rxChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'In 1' }]
+		self.txChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'Out 1' }]
+		self.videoRxChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'Video In 1' }]
+		self.videoTxChannelsChoices[MY_DEVICE] = [{ id: ch(1), label: 'Video Out 1' }]
 
 		destroyDevice(self, ip('10.0.0.5'))
 
-		expect(self.rxChannelsChoices[MY_ID]).toBeDefined()
-		expect(self.txChannelsChoices[MY_ID]).toBeDefined()
-		expect(self.videoRxChannelsChoices[MY_ID]).toBeDefined()
-		expect(self.videoTxChannelsChoices[MY_ID]).toBeDefined()
+		expect(self.rxChannelsChoices[MY_DEVICE]).toBeDefined()
+		expect(self.txChannelsChoices[MY_DEVICE]).toBeDefined()
+		expect(self.videoRxChannelsChoices[MY_DEVICE]).toBeDefined()
+		expect(self.videoTxChannelsChoices[MY_DEVICE]).toBeDefined()
 	})
 
 	it('clearDeviceTimeouts disarms the pending offline timeout', () => {
-		const self = known({ timeout: 3000 })
+		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 
 		clearDeviceTimeouts(self)
@@ -512,7 +503,7 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 	})
 
 	it('a re-init that clears timeouts does not later destroy a re-registered device', () => {
-		const self = known({ timeout: 3000 })
+		const self = createMockInstance({ timeout: 3000 })
 		registerDevice(self, ip('10.0.0.5'), MY_DEVICE)
 
 		// what initConnection does on re-init: disarm the old timers, then drop the device table
@@ -528,7 +519,7 @@ describe('registerDevice / destroyDevice / keepAlive', () => {
 		vi.advanceTimersByTime(2999)
 		expect(self.devicesData[ip('10.0.0.5')]).toBeDefined()
 		// choices are keyed by device name, which survives an address change
-		expect(self.devicesChoices).toContainEqual({ id: MY_ID, label: MY_DEVICE })
+		expect(self.devicesChoices).toContainEqual({ id: MY_DEVICE, label: MY_DEVICE })
 	})
 })
 
@@ -682,25 +673,24 @@ describe('scheduleCheckVariables', () => {
 			devicesData: {
 				[ip('10.0.0.5')]: {
 					name: 'DeviceA',
-					id: id(0xa),
 					ports: {},
 					audioRx: { count: 1, 1: { number: 1, name: 'In 1' } },
 				},
 				[ip('10.0.0.6')]: {
 					name: 'DeviceB',
-					id: id(0xb),
 					ports: {},
 					audioRx: { count: 1, 1: { number: 1, name: 'In 1' } },
 				},
 			},
-			rxChannelsChoices: { [id(0xa)]: [{ id: ch(1), label: 'In 1' }], [id(0xb)]: [{ id: ch(1), label: 'In 1' }] },
-			// name-keyed, so the assertions below read as the variable ids a user sees in that mode
+			rxChannelsChoices: {
+				[name('DeviceA')]: [{ id: ch(1), label: 'In 1' }],
+				[name('DeviceB')]: [{ id: ch(1), label: 'In 1' }],
+			},
 			config: {
 				mac: '',
 				interval: 1000,
 				timeoutInterval: 3000,
 				variables: true,
-				variableKeys: 'names',
 				verbose: false,
 			},
 		})
@@ -1127,82 +1117,71 @@ describe('macForDevice', () => {
 })
 
 describe('resolveDeviceIp / deviceByIdentifier / requireDeviceIp', () => {
-	const ID_A = id(0xa)
-	const ID_B = id(0xb)
-
 	function twoDevices() {
 		return createMockInstance({
 			devicesData: {
-				[ip('10.0.0.5')]: { name: 'DeviceA', id: ID_A, ports: { ARC: 4440 } },
-				[ip('10.0.0.6')]: { name: 'DeviceB', id: ID_B, ports: { ARC: 4440 } },
+				[ip('10.0.0.5')]: { name: 'DeviceA', ports: { ARC: 4440 } },
+				[ip('10.0.0.6')]: { name: 'DeviceB', ports: { ARC: 4440 } },
 			},
-			deviceNamesById: { [ID_A]: name('DeviceA'), [ID_B]: name('DeviceB') },
 		})
 	}
 
-	it('resolves a device id, which is what 3.x dropdowns store', () => {
-		expect(resolveDeviceIp(twoDevices(), ID_B)).toBe(ip('10.0.0.6'))
-	})
-
-	it('follows a device id through a rename and a renumbering', () => {
-		// the point of keying by id: names change, link-local and DHCP reassign addresses
-		const moved = createMockInstance({
-			devicesData: { [ip('169.254.99.1')]: { name: 'DeviceA-renamed', id: ID_A, ports: { ARC: 4440 } } },
-		})
-		expect(resolveDeviceIp(moved, ID_A)).toBe(ip('169.254.99.1'))
-	})
-
-	it('still resolves a device name, which is what 2.x saved', () => {
+	it('resolves a device name, which is what dropdowns store', () => {
 		expect(resolveDeviceIp(twoDevices(), 'DeviceB')).toBe(ip('10.0.0.6'))
 		// Dante names are case-insensitive
 		expect(resolveDeviceIp(twoDevices(), 'deviceb')).toBe(ip('10.0.0.6'))
 	})
 
-	it('still resolves an address, which is what 1.x saved', () => {
+	it('resolves an address, which is what 1.x saved', () => {
 		expect(resolveDeviceIp(twoDevices(), '10.0.0.5')).toBe(ip('10.0.0.5'))
 	})
 
 	it('returns undefined for an unknown or offline device and for an empty identifier', () => {
 		expect(resolveDeviceIp(twoDevices(), 'Nope')).toBeUndefined()
-		expect(resolveDeviceIp(twoDevices(), id(0xc))).toBeUndefined()
 		expect(resolveDeviceIp(twoDevices(), '')).toBeUndefined()
 		expect(resolveDeviceIp(twoDevices(), undefined)).toBeUndefined()
 	})
 
-	it('deviceByIdentifier returns the same record for an id, a name and an address', () => {
+	it('follows a device to its new address after renumbering', () => {
+		// the point of keying by name: link-local and DHCP reassign addresses, names persist
+		const renumbered = createMockInstance({
+			devicesData: { [ip('169.254.99.1')]: { name: 'DeviceA', ports: { ARC: 4440 } } },
+		})
+		expect(resolveDeviceIp(renumbered, 'DeviceA')).toBe(ip('169.254.99.1'))
+	})
+
+	it('deviceByIdentifier returns the same record for a name and an address', () => {
 		const self = twoDevices()
 		const record = self.devicesData[ip('10.0.0.5')]
-		expect(deviceByIdentifier(self, ID_A)).toBe(record)
 		expect(deviceByIdentifier(self, 'DeviceA')).toBe(record)
 		expect(deviceByIdentifier(self, '10.0.0.5')).toBe(record)
 		expect(deviceByIdentifier(self, 'Nope')).toBeUndefined()
 	})
 
-	it('requireDeviceIp names an offline device by the name its id was last seen with', () => {
+	it('requireDeviceIp names a device it cannot find', () => {
 		const self = twoDevices()
 		delete self.devicesData[ip('10.0.0.6')]
-		expect(requireDeviceIp(self, ID_A)).toBe(ip('10.0.0.5'))
-		expect(() => requireDeviceIp(self, ID_B)).toThrow(`Can't find DeviceB (${ID_B}) - it may be offline`)
-		expect(() => requireDeviceIp(self, 'Nope')).toThrow("Can't find Nope - it may be offline")
+		expect(requireDeviceIp(self, 'DeviceA')).toBe(ip('10.0.0.5'))
+		expect(() => requireDeviceIp(self, 'DeviceB')).toThrow("Can't find DeviceB - it may be offline")
 	})
 })
 
 describe('updateChannelChoices', () => {
-	const DEV_ID = id(0xde)
+	const DEV = name('Dev')
 
-	function withChannels(channelType: 'rx' | 'tx', count: number, deviceId: DanteDeviceId | null = DEV_ID) {
+	function withChannels(channelType: 'rx' | 'tx', count: number, deviceName: string | null = DEV) {
 		const io: Record<string | number, unknown> = { count }
 		for (let i = 1; i <= count; i++) io[i] = { number: i, name: `Ch ${i}` }
 		const field = channelType === 'rx' ? 'audioRx' : 'audioTx'
 		return createMockInstance({
-			devicesData: { [ip('10.0.0.5')]: { name: 'Dev', id: deviceId ?? undefined, ports: {}, [field]: io } },
+			devicesData: { [ip('10.0.0.5')]: { name: deviceName ?? undefined, ports: {}, [field]: io } },
 		})
 	}
 
 	it('offers one entry per channel, numbered from 1', () => {
 		const self = withChannels('rx', 3)
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
-		expect(self.rxChannelsChoices[DEV_ID]!).toEqual([
+		expect(self.rxChannelsChoices[DEV]!).toEqual([
 			{ id: 1, label: 'Ch 1' },
 			{ id: 2, label: 'Ch 2' },
 			{ id: 3, label: 'Ch 3' },
@@ -1212,21 +1191,21 @@ describe('updateChannelChoices', () => {
 	it('offers no "None" entry, which would only mean "do nothing"', () => {
 		const self = withChannels('rx', 2)
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
-		expect(self.rxChannelsChoices[DEV_ID]!.map((choice) => choice.id)).not.toContain(0)
+		expect(self.rxChannelsChoices[DEV]!.map((choice) => choice.id)).not.toContain(0)
 	})
 
 	it('so the first choice is a real channel rather than a no-op default', () => {
 		const self = withChannels('tx', 2)
 		updateChannelChoices(self, ip('10.0.0.5'), 'tx')
-		expect(self.txChannelsChoices[DEV_ID]![0].id).toBe(1)
+		expect(self.txChannelsChoices[DEV]![0].id).toBe(1)
 	})
 
 	it('builds tx choices without leaving a gap where "None" used to sit', () => {
 		// the tx branch assigned by index, which relied on the None entry occupying index 0
 		const self = withChannels('tx', 3)
 		updateChannelChoices(self, ip('10.0.0.5'), 'tx')
-		expect(self.txChannelsChoices[DEV_ID]!).toHaveLength(3)
-		expect(self.txChannelsChoices[DEV_ID]!.every((choice) => choice !== undefined)).toBe(true)
+		expect(self.txChannelsChoices[DEV]!).toHaveLength(3)
+		expect(self.txChannelsChoices[DEV]!.every((choice) => choice !== undefined)).toBe(true)
 	})
 
 	it('rebuilds when a channel is renamed', () => {
@@ -1234,7 +1213,7 @@ describe('updateChannelChoices', () => {
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
 		;(self.devicesData[ip('10.0.0.5')].audioRx as Record<number, { name: string }>)[2].name = 'Renamed'
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
-		expect(self.rxChannelsChoices[DEV_ID]![1].label).toBe('Renamed')
+		expect(self.rxChannelsChoices[DEV]![1].label).toBe('Renamed')
 	})
 
 	it('rebuilds when the channel count shrinks', () => {
@@ -1243,10 +1222,10 @@ describe('updateChannelChoices', () => {
 		const io = self.devicesData[ip('10.0.0.5')].audioRx as { count: number }
 		io.count = 1
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
-		expect(self.rxChannelsChoices[DEV_ID]!).toHaveLength(1)
+		expect(self.rxChannelsChoices[DEV]!).toHaveLength(1)
 	})
 
-	it('builds nothing until the device id is known, since the lists are keyed by it', () => {
+	it('builds nothing until the device name is known, since the lists are keyed by it', () => {
 		const self = withChannels('rx', 2, null)
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
 		expect(self.rxChannelsChoices).toEqual({})
@@ -1255,55 +1234,53 @@ describe('updateChannelChoices', () => {
 	it('produces an empty list for a device with no channels', () => {
 		const self = withChannels('rx', 0)
 		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
-		expect(self.rxChannelsChoices[DEV_ID]!).toEqual([])
+		expect(self.rxChannelsChoices[DEV]!).toEqual([])
 	})
 })
 
 describe('deviceOptionValue / deviceSelectedExpression', () => {
-	const ID_A = id(0xa)
-
 	function self() {
 		return createMockInstance({
-			devicesData: { [ip('10.0.0.5')]: { name: 'DeviceA', id: ID_A, ports: {} } },
-			deviceIdsByName: { [name('DeviceA')]: ID_A },
-			deviceNamesById: { [ID_A]: name('DeviceA') },
+			devicesData: { [ip('10.0.0.5')]: { name: 'DeviceA', ports: {} } },
 		})
 	}
 
-	it('reads a value stored under the device id, which 3.x fields are keyed by', () => {
-		expect(deviceOptionValue(self(), { [`channel_${ID_A}`]: 3 }, 'channel', ID_A, 0)).toBe(3)
+	it('reads a value stored under the device name', () => {
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', 'DeviceA', 0)).toBe(3)
 	})
 
-	it('reads the id-keyed value of a device that is offline', () => {
+	it('reads the name-keyed value of a device that is offline', () => {
 		const offline = self()
 		delete offline.devicesData[ip('10.0.0.5')]
-		expect(deviceOptionValue(offline, { [`channel_${ID_A}`]: 3 }, 'channel', ID_A, 0)).toBe(3)
+		expect(deviceOptionValue(offline, { channel_DeviceA: 3 }, 'channel', 'DeviceA', 0)).toBe(3)
 	})
 
-	it('still reads a value 2.x stored under the device name', () => {
-		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', 'DeviceA', 0)).toBe(3)
-		// re-picked as an id, old name key not yet cleared
-		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', ID_A, 0)).toBe(3)
+	it('reads the sanitised key a name Companion cannot use in an id is stored under', () => {
+		expect(deviceOptionValue(self(), { channel_Stage_Box: 4 }, 'channel', 'Stage Box', 0)).toBe(4)
 	})
 
-	it('still reads a value stored under the device address, as 1.x actions hold it', () => {
+	it('reads a value stored under the device address, as 1.x actions hold it', () => {
 		expect(deviceOptionValue(self(), { 'channel_10.0.0.5': 7 }, 'channel', '10.0.0.5', 0)).toBe(7)
 	})
 
-	it('prefers the id-keyed value over stale name- and address-keyed ones', () => {
-		const options = { [`channel_${ID_A}`]: 1, channel_DeviceA: 3, 'channel_10.0.0.5': 7 }
-		expect(deviceOptionValue(self(), options, 'channel', ID_A, 0)).toBe(1)
-		expect(deviceOptionValue(self(), options, 'channel', '10.0.0.5', 0)).toBe(1)
+	it('finds the name-keyed value even when the picker still holds an address', () => {
+		// the state right after a device is re-picked: picker updated, old key not yet cleared
+		expect(deviceOptionValue(self(), { channel_DeviceA: 3 }, 'channel', '10.0.0.5', 0)).toBe(3)
+	})
+
+	it('prefers the name-keyed value over a stale address-keyed one', () => {
+		const options = { channel_DeviceA: 3, 'channel_10.0.0.5': 7 }
+		expect(deviceOptionValue(self(), options, 'channel', '10.0.0.5', 0)).toBe(3)
 	})
 
 	it('falls back when no key is present', () => {
-		expect(deviceOptionValue(self(), {}, 'channel', ID_A, 0)).toBe(0)
+		expect(deviceOptionValue(self(), {}, 'channel', 'DeviceA', 0)).toBe(0)
 		expect(deviceOptionValue(self(), {}, 'sr', 'DeviceA', '')).toBe('')
 	})
 
-	it('builds an expression matching the id, and the name and address older actions hold', () => {
-		expect(deviceSelectedExpression('device', ID_A, 'DeviceA', '10.0.0.5')).toBe(
-			`$(options:device) == '${ID_A}' || $(options:device) == 'DeviceA' || $(options:device) == '10.0.0.5'`,
+	it('builds an expression matching either the name or the address', () => {
+		expect(deviceSelectedExpression('device', 'DeviceA', '10.0.0.5')).toBe(
+			"$(options:device) == 'DeviceA' || $(options:device) == '10.0.0.5'",
 		)
 	})
 })

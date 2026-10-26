@@ -25,7 +25,6 @@ import {
 } from './devices.js'
 import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
 import { cancelPendingCommands, handleCommandReply, handleSendFailure } from './requests.js'
-import { resetChannelNameHistory } from './identity.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
 import { retryMissingAudioDirectories, retryMissingVideoDirectories } from './queries.js'
 import { type DeviceIp } from './ids.js'
@@ -398,8 +397,6 @@ export function initConnection(self: DanteInstance): void {
 	self.rxChannelsChoices = {}
 	self.videoTxChannelsChoices = {}
 	self.videoRxChannelsChoices = {}
-	self.deviceIdsByName = {}
-	resetChannelNameHistory(self)
 	self.txFriendlyNameRefreshCounter = 0
 
 	// Resolve the configured network card. Matching by MAC as well as by address means a link-local

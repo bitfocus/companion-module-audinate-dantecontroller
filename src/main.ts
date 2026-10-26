@@ -21,7 +21,7 @@ import {
 	type ConnectionName,
 } from './api/index.js'
 import type { DanteModuleTypes } from './types.js'
-import type { ChannelNumber, DanteDeviceId, DeviceName } from './api/ids.js'
+import type { ChannelNumber, DeviceName } from './api/ids.js'
 
 export { UpgradeScripts }
 
@@ -37,21 +37,13 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	config!: ModuleConfig
 
 	devicesData: DevicesData = {}
-	/** Discovered devices whose id is known, labelled by name - see `resolveDeviceIp`. */
-	devicesChoices: DropdownChoice<DanteDeviceId>[] = []
-	/** Channel choice lists per device. Kept while a device is offline - see `channelFieldDevices`. */
-	txChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
-	rxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
-	videoTxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
-	videoRxChannelsChoices: Partial<Record<DanteDeviceId, DropdownChoice<ChannelNumber>[]>> = {}
-	/**
-	 * Dante device ids by device name, from each device's `_netaudio-cmc` TXT record. Kept for
-	 * offline devices like the channel choice lists, so the id a router keys a device on does not
-	 * disappear when the device blips.
-	 */
-	deviceIdsByName: Partial<Record<DeviceName, DanteDeviceId>> = {}
-	/** The last name each device id was seen with, for devices that are offline. */
-	deviceNamesById: Partial<Record<DanteDeviceId, DeviceName>> = {}
+	/** Discovered devices, by name - see `resolveDeviceIp`. */
+	devicesChoices: DropdownChoice<DeviceName>[] = []
+	/** Channel choice lists per device name. Kept while a device is offline - see `channelFieldDevices`. */
+	txChannelsChoices: Partial<Record<DeviceName, DropdownChoice<ChannelNumber>[]>> = {}
+	rxChannelsChoices: Partial<Record<DeviceName, DropdownChoice<ChannelNumber>[]>> = {}
+	videoTxChannelsChoices: Partial<Record<DeviceName, DropdownChoice<ChannelNumber>[]>> = {}
+	videoRxChannelsChoices: Partial<Record<DeviceName, DropdownChoice<ChannelNumber>[]>> = {}
 	txFriendlyNameRefreshCounter = 0
 
 	debug = false

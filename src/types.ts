@@ -63,17 +63,13 @@ export interface DanteDeviceVariables {
  * The routing variables, published when the `routingVariables` config option is on. Built for a
  * router integration, so each one is a single value that changes on its own:
  *
- * `<device>` is the device id or its name, per the `variableKeys` option.
+ * `<device>` is the device name with characters Companion cannot use replaced by `_`.
  *
- * - `<device>_device_name` - the device's current name.
- * - `<device>_device_id` - the 64-bit Dante device id from the device's mDNS TXT record. It
- *   survives renames and address changes, unlike everything else that identifies a device.
+ * - `<device>_device_name` - the device's name as it is, which the sanitised prefix cannot be
+ *   turned back into.
  * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
  *   subscribed to, as `channel@device`, or empty when it is not subscribed. These are the names the
  *   receiver subscribed with, which it keeps after the transmitter is renamed.
- * - `<device>_rx_<n>_source_id`, `<device>_rx_video_<n>_source_id` - the same subscription as
- *   `<device id>/<transmit channel number>`, which survives renames. Empty when it cannot be
- *   resolved - see `resolveSubscriptionSource`.
  * - `<device>_rx_<n>_connected`, `<device>_rx_video_<n>_connected` - true only when the channel
  *   has a subscription and the receiver reports it connected (audio: `isSubscriptionConnected`,
  *   video: `isVideoSubscriptionActive`). False when it is not subscribed, so a refused or
@@ -89,10 +85,8 @@ export interface DanteDeviceVariables {
  *   (`channelDisplayLabel`). Display only; the `_name` keeps the exact name Dante routes by.
  */
 export interface DanteRoutingVariables {
-	device_id: string
 	device_name: string
 	source: string
-	source_id: string
 	connected: boolean
 	status: string
 	name: string

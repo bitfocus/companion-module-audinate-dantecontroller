@@ -168,16 +168,6 @@ function devices(records: Record<string, object> = {}): DevicesData {
 /** A mock instance's overrides, with device records given as plain fixture data - see {@link devices}. */
 type MockOverrides = Omit<Partial<DanteInstance>, 'devicesData'> & { devicesData?: Record<string, object> }
 
-/** Variables keyed by device name, the mode connections upgraded from 2.x run in. */
-const NAME_KEYED = {
-	mac: '',
-	interval: 1000,
-	timeoutInterval: 3000,
-	variables: true,
-	variableKeys: 'names',
-	verbose: false,
-} as const
-
 function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 	const base = {
 		sockets: {},
@@ -193,8 +183,6 @@ function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 		setVariableValues: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		checkAllFeedbacks: vi.fn(),
-		deviceIdsByName: {},
-		deviceNamesById: {},
 		...overrides,
 		devicesData: devices(overrides.devicesData),
 	}
@@ -425,7 +413,7 @@ describe('parseAvReply', () => {
 	})
 
 	it('schedules only the video tx variable types for a tx reply', () => {
-		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'Encoder-001' } }, config: NAME_KEYED })
+		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'Encoder-001' } } })
 		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_TX_DIRECTORY_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))
@@ -455,7 +443,7 @@ describe('parseAvReply', () => {
 	})
 
 	it('schedules only the video rx variable types, not a full refresh', () => {
-		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910' } }, config: NAME_KEYED })
+		const self = createMockInstance({ devicesData: { [REAL_DEVICE_IP]: { name: 'DAV-110910' } } })
 		UpdateVariableDefinitions(self)
 		const reply = Buffer.from(REAL_VIDEO_ALL_ROUTED_HEX, 'hex')
 		parseAvReply(self, reply, makeRinfo(REAL_DEVICE_IP, reply.length))

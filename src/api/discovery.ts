@@ -6,29 +6,13 @@ import { DANTE_CONST } from './const.js'
 import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
-import type { MdnsResponsePacket, MdnsTxtAnswer, ServiceName } from './types.js'
+import type { MdnsResponsePacket, ServiceName } from './types.js'
 import type { MdnsSender } from './mdns-group.js'
-import { keepAlive, registerDevice, scheduleCheckVariables, scheduleUpdateData } from './devices.js'
-import {
-	noteDeviceName,
-	refreshDeviceChoices,
-	updateChannelChoices,
-	updateDeviceChoice,
-	updateVideoChannelChoices,
-} from './choices.js'
+import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
+import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { addressOnInterface } from '../config.js'
-import { rememberTxChannelNames } from './identity.js'
-import {
-	asDeviceName,
-	brandedEntries,
-	brandedKeys,
-	deviceIpOf,
-	parseDanteDeviceId,
-	type DanteDeviceId,
-	type DeviceIp,
-	type DeviceName,
-} from './ids.js'
+import { asDeviceName, brandedKeys, deviceIpOf } from './ids.js'
 
 const logger = createModuleLogger('api:discovery')
 
@@ -86,13 +70,11 @@ export function danteDiscovery(
 			// back out the card the response came in on, which is the one that reaches the device
 			via.query(
 				{
-					// TXT as well, for the device id the CMC service carries - see `danteDeviceIdFromTxt`
 					questions: [
 						{
 							name: answer.data,
 							type: 'SRV',
 						},
-						...(name === DANTE_CONST.SERVICES.CMC ? [{ name: answer.data, type: 'TXT' as const }] : []),
 					],
 				},
 				(error) => {
@@ -101,11 +83,6 @@ export function danteDiscovery(
 					}
 				},
 			)
-		} else if (answer.type == 'TXT') {
-			const dotIndex = name.indexOf('.')
-			if (name.slice(dotIndex + 1) !== DANTE_CONST.SERVICES.CMC) return
-			const deviceId = danteDeviceIdFromTxt(answer.data)
-			if (deviceId !== undefined) noteDeviceId(self, asDeviceName(name.slice(0, dotIndex)), deviceId, deviceIpOf(rinfo))
 		} else if (answer.type == 'SRV') {
 			// register services and port
 			for (const [id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
@@ -192,62 +169,4 @@ export function getMdnsServices(self: DanteInstance): void {
 			}
 		},
 	)
-}
-
-/**
- * The Dante device id from a `_netaudio-cmc` TXT record's `id` key: 16 hex digits, lower-cased.
- *
- * It is the one identifier a device keeps across renames and address changes. A device's name is
- * what Dante routes by and what it reports in subscriptions, but a rename makes routing treat it as
- * a different device. On hardware the id is the device's MAC address followed by a process number,
- * so two Dante devices sharing one host (a soundcard and a controller, say) still differ.
- */
-export function danteDeviceIdFromTxt(data: MdnsTxtAnswer['data']): DanteDeviceId | undefined {
-	for (const entry of Array.isArray(data) ? data : [data]) {
-		const text = (typeof entry === 'string' ? entry : entry.toString('utf8')).trim()
-		if (!text.startsWith('id=')) continue
-		const id = parseDanteDeviceId(text.slice(3))
-		if (id !== undefined) return id
-	}
-	return undefined
-}
-
-/**
- * Records a device's id, and gives it to the device's record.
- *
- * Everything the device offers Companion is keyed by its id - the device dropdown, the channel
- * choice lists, the per-device option fields - so a device whose id arrives after it registered
- * gets all of those now, and has none of them before.
- */
-export function noteDeviceId(
-	self: DanteInstance,
-	deviceName: DeviceName,
-	deviceId: DanteDeviceId,
-	deviceIp: DeviceIp,
-): void {
-	const previous = self.deviceIdsByName?.[deviceName]
-	noteDeviceName(self, deviceId, deviceName)
-
-	const unnamedRecords = brandedEntries(self.devicesData).filter(
-		([, device]) => device.name === deviceName && device.id !== deviceId,
-	)
-	if (previous === deviceId && unnamedRecords.length === 0) return
-
-	if (previous !== undefined && previous !== deviceId) {
-		// Same name, different hardware: a replacement unit, or a name moved between devices
-		logger.info(`${deviceName} is now device id ${deviceId} (was ${previous})`)
-	} else if (self.debug) {
-		logger.debug(`${deviceName} has device id ${deviceId}`)
-	}
-
-	for (const [ip, device] of unnamedRecords) {
-		device.id = deviceId
-		if (device.audioRx) updateChannelChoices(self, ip, 'rx')
-		if (device.audioTx) updateChannelChoices(self, ip, 'tx')
-		if (device.videoRx) updateVideoChannelChoices(self, ip, 'rx')
-		if (device.videoTx) updateVideoChannelChoices(self, ip, 'tx')
-		rememberTxChannelNames(self, ip)
-	}
-	refreshDeviceChoices(self)
-	scheduleCheckVariables(self, deviceIp, 'device_id')
 }

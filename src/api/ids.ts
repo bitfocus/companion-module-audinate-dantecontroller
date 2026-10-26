@@ -12,39 +12,17 @@ declare const brand: unique symbol
 /** `T`, told apart from every other `T` by `Name`. Only the functions below create one. */
 export type Branded<T, Name extends string> = T & { readonly [brand]: Name }
 
-/**
- * The 64-bit Dante device id: 16 lower-case hex digits, from the `id` key of the device's
- * `_netaudio-cmc` mDNS TXT record.
- *
- * The one identifier a device keeps across renames and address changes - checked against Ultimo X2
- * hardware, where a rename re-announced the same id. On hardware it is the device's MAC address in
- * EUI-64 form or followed by a process number, so two Dante devices on one host still differ.
- */
-export type DanteDeviceId = Branded<string, 'DanteDeviceId'>
-
 /** The IPv4 address a device was discovered at. How it is reached, not who it is. */
 export type DeviceIp = Branded<string, 'DeviceIp'>
 
 /**
- * A device's Dante name. Unique on the network, but changed by a rename - and what Dante itself
- * routes by, so commands still carry it on the wire.
+ * A device's Dante name. Unique on the network, and what Dante itself routes by - so it is also
+ * what actions, feedbacks and variables identify a device with. A rename changes it.
  */
 export type DeviceName = Branded<string, 'DeviceName'>
 
 /** A channel's 1-based number within its device, media type and direction. Stable across renames. */
 export type ChannelNumber = Branded<number, 'ChannelNumber'>
-
-const DEVICE_ID_PATTERN = /^[0-9a-f]{16}$/i
-
-/** A device id from untrusted text, normalised to lower case. */
-export function parseDanteDeviceId(value: unknown): DanteDeviceId | undefined {
-	return typeof value === 'string' && DEVICE_ID_PATTERN.test(value) ? (value.toLowerCase() as DanteDeviceId) : undefined
-}
-
-/** Whether a stored value is already a device id. Saved options from 2.x hold names or addresses instead. */
-export function isDanteDeviceId(value: unknown): value is DanteDeviceId {
-	return typeof value === 'string' && DEVICE_ID_PATTERN.test(value) && value === value.toLowerCase()
-}
 
 /** An address the module already knows to be a device's. Trusted: it came from a socket or a record. */
 export const asDeviceIp = (address: string): DeviceIp => address as DeviceIp

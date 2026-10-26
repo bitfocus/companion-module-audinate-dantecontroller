@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type DanteInstance from '../../main.js'
-import { id, ip, name } from '../../tests/ids.js'
+import { ip, name } from '../../tests/ids.js'
 
 /**
  * The log is the only view into a running module, so these pin the lines an operator relies on:
@@ -55,8 +55,6 @@ function devices(records: Record<string, object> = {}): DevicesData {
 function instance(records: Record<string, object> = {}, verbose = false): DanteInstance {
 	return {
 		devicesData: devices(records),
-		deviceIdsByName: {},
-		deviceNamesById: {},
 		devicesChoices: [],
 		txChannelsChoices: {},
 		rxChannelsChoices: {},
@@ -82,37 +80,29 @@ function instance(records: Record<string, object> = {}, verbose = false): DanteI
 	} as unknown as DanteInstance
 }
 
-const DEVICE_ID = id(0x1234)
-
-/** A device announcing its ARC service, with the CMC TXT record that carries its id. */
 function srvResponse(deviceName: string) {
 	return {
 		answers: [{ type: 'SRV' as const, name: `${deviceName}._netaudio-arc._udp.local`, data: { port: 4440 } }],
-		additionals: [
-			{
-				type: 'TXT' as const,
-				name: `${deviceName}._netaudio-cmc._udp.local`,
-				data: [Buffer.from(`id=${DEVICE_ID}`)],
-			},
-		],
+		additionals: [],
 	}
 }
 
 describe('device rename', () => {
-	it('keeps one dropdown entry under the same id, relabelled', () => {
-		// the entry is the device id, so actions pointing at the device survive the rename
+	it('replaces the old dropdown entry rather than leaving both', () => {
+		// updateDeviceChoice reads the outgoing name off the device record for its log line, so
+		// assigning the new name first would misreport the rename
 		const self = instance()
 		const rinfo = { address: ip('10.0.0.5') } as never
 
 		danteDiscovery(self, srvResponse('OldName'), rinfo)
-		expect(self.devicesChoices).toEqual([{ id: DEVICE_ID, label: 'OldName' }])
+		expect(self.devicesChoices).toEqual([{ id: 'OldName', label: 'OldName' }])
 
 		danteDiscovery(self, srvResponse('NewName'), rinfo)
-		expect(self.devicesChoices).toEqual([{ id: DEVICE_ID, label: 'NewName' }])
+		expect(self.devicesChoices).toEqual([{ id: 'NewName', label: 'NewName' }])
 	})
 
-	it('logs both names, since routes other devices made to the old one stop resolving', () => {
-		const self = instance({ [ip('10.0.0.5')]: { name: 'OldName', id: DEVICE_ID } })
+	it('logs both names, since actions stored against the old one stop resolving', () => {
+		const self = instance({ [ip('10.0.0.5')]: { name: 'OldName' } })
 
 		updateDeviceChoice(self, ip('10.0.0.5'), name('NewName'))
 
@@ -135,7 +125,7 @@ describe('channel renames', () => {
 	function withChannels(names: string[]) {
 		const rx: Record<string | number, unknown> = { count: names.length }
 		names.forEach((name, index) => (rx[index + 1] = { number: index + 1, name }))
-		return { [ip('10.0.0.5')]: { name: 'DeviceA', id: DEVICE_ID, audioRx: rx } }
+		return { [ip('10.0.0.5')]: { name: 'DeviceA', audioRx: rx } }
 	}
 
 	it('reports a renamed channel at info, naming both labels', () => {
@@ -352,7 +342,7 @@ describe('channel names while a device is being discovered', () => {
 
 	/** A device whose channel count is known, so its channel list is the full width from the start. */
 	function counted(rxCount: number) {
-		return instance({ [IP]: { name: 'DeviceA', id: DEVICE_ID, ports: { ARC: 4440 }, audioRx: { count: rxCount } } })
+		return instance({ [IP]: { name: 'DeviceA', ports: { ARC: 4440 }, audioRx: { count: rxCount } } })
 	}
 
 	function deliverPage(self: DanteInstance, channels: Parameters<typeof rxReply>[0]) {
@@ -365,7 +355,6 @@ describe('channel names while a device is being discovered', () => {
 		const self = instance({
 			[IP]: {
 				name: 'DeviceA',
-				id: DEVICE_ID,
 				ports: { ARC: 4440 },
 				audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02' } },
 			},

@@ -8,20 +8,17 @@ import {
 	makeAudioCrosspointConfirmed,
 	clearAudioCrosspointConfirmed,
 	makeCommand,
-	rememberTxChannelNames,
-	resolveSubscriptionSource,
 	sendCommand,
 	type DevicesData,
 } from '../api/index.js'
 import type DanteInstance from '../main.js'
-import { CheckVariables, UpdateVariableDefinitions } from '../variables.js'
 import { ackFor, answeringSend, type FakeAnswer } from './fake-device.js'
-import { ch, id, ip, name } from './ids.js'
+import { ch, ip, name } from './ids.js'
 
 const DEST = ip('10.0.0.5')
 const SOURCE = ip('10.0.0.6')
-const AMP_ID = id(1)
-const STAGE_ID = id(2)
+const AMP = name('Amp')
+const STAGE = name('Stage Box')
 
 /** Fast enough that every failure path finishes in a few tens of milliseconds. */
 const FAST = { ack: { attemptTimeoutMs: 5, attempts: 3 }, confirm: { timeoutMs: 40, requeryMs: 10 } }
@@ -32,13 +29,11 @@ function devicesData(): DevicesData {
 	return {
 		[DEST]: {
 			name: name('Amp'),
-			id: AMP_ID,
 			ports: { ARC: 4440 },
 			audioRx: { count: 2, 1: { number: ch(1), name: 'Left' }, 2: { number: ch(2), name: 'Right' } },
 		},
 		[SOURCE]: {
 			name: name('Stage Box'),
-			id: STAGE_ID,
 			ports: { ARC: 4440 },
 			audioTx: {
 				count: 2,
@@ -55,25 +50,23 @@ function instance(respond: (command: Buffer, ip: string) => FakeAnswer | undefin
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: false, verbose: false },
 		devicesData: devicesData(),
 		devicesChoices: [
-			{ id: AMP_ID, label: 'Amp' },
-			{ id: STAGE_ID, label: 'Stage Box' },
+			{ id: AMP, label: 'Amp' },
+			{ id: STAGE, label: 'Stage Box' },
 		],
 		rxChannelsChoices: {
-			[AMP_ID]: [
+			[AMP]: [
 				{ id: ch(1), label: 'Left' },
 				{ id: ch(2), label: 'Right' },
 			],
 		},
 		txChannelsChoices: {
-			[STAGE_ID]: [
+			[STAGE]: [
 				{ id: ch(1), label: 'Mic 1' },
 				{ id: ch(2), label: '02' },
 			],
 		},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		deviceIdsByName: { [name('Amp')]: AMP_ID, [name('Stage Box')]: STAGE_ID },
-		deviceNamesById: { [AMP_ID]: name('Amp'), [STAGE_ID]: name('Stage Box') },
 		counter: Buffer.from('0100', 'hex'),
 		debug: false,
 		setVariableDefinitions: vi.fn(),
@@ -115,22 +108,22 @@ describe('confirmed crosspoints', () => {
 		expect(subscribes(send)).toHaveLength(1)
 	})
 
-	it('addresses the destination by device id as well as by a name saved by 2.x', async () => {
+	it('addresses the destination by an address saved by 1.x as well as by name', async () => {
 		const { self, send } = instance((command) =>
 			isSubscribe(command) ? { apply: subscribe(self, 'Mic 1', 0x0009) } : undefined,
 		)
 
-		await makeAudioCrosspointConfirmed(self, AMP_ID, 'Mic 1', 'Stage Box', 1, FAST)
+		await makeAudioCrosspointConfirmed(self, DEST, 'Mic 1', 'Stage Box', 1, FAST)
 
 		expect(send.mock.calls[0][4]).toBe(DEST)
 	})
 
-	it('names an offline device by its last known name when it cannot be reached', async () => {
+	it('names the device it cannot reach', async () => {
 		const { self } = instance()
 		delete self.devicesData[DEST]
 
-		await expect(makeAudioCrosspointConfirmed(self, AMP_ID, 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
-			`Can't find Amp (${AMP_ID}) - it may be offline`,
+		await expect(makeAudioCrosspointConfirmed(self, AMP, 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
+			"Can't find Amp - it may be offline",
 		)
 	})
 
@@ -303,78 +296,5 @@ describe('awaitCommandAck', () => {
 
 		cancelPendingCommands(self)
 		await expect(ack).rejects.toThrow('Connection closed before the device answered')
-	})
-})
-
-describe('source ids', () => {
-	function withHistory() {
-		const { self } = instance()
-		rememberTxChannelNames(self, SOURCE)
-		return self
-	}
-
-	it('resolves a subscription to the device id and transmit channel number', () => {
-		const self = withHistory()
-		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: 'Mic 1' }, 'audio')).toBe(
-			`${STAGE_ID}/1`,
-		)
-		// the factory name a subscription may predate the friendly name with
-		expect(resolveSubscriptionSource(self, { deviceName: 'stage box', channelName: '01' }, 'audio')).toBe(
-			`${STAGE_ID}/1`,
-		)
-	})
-
-	it('still resolves the names a receiver kept after the transmitter was renamed', () => {
-		const self = withHistory()
-		// device rename: the id stays and the old name stays mapped to it
-		self.devicesData[SOURCE].name = name('Stage Box B')
-		self.deviceIdsByName[name('Stage Box B')] = STAGE_ID
-		// channel rename
-		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: 'PROBE-TX' }
-		rememberTxChannelNames(self, SOURCE)
-
-		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: '02' }, 'audio')).toBe(
-			`${STAGE_ID}/2`,
-		)
-		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box B', channelName: 'PROBE-TX' }, 'audio')).toBe(
-			`${STAGE_ID}/2`,
-		)
-	})
-
-	it('prefers where a name is now over where it used to be', () => {
-		const self = withHistory()
-		self.devicesData[SOURCE].audioTx![1] = { number: ch(1), name: '02' }
-		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: 'Spare' }
-		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: '02' }, 'audio')).toBe(
-			`${STAGE_ID}/1`,
-		)
-	})
-
-	it('is undefined for a device or channel it has never seen', () => {
-		const self = withHistory()
-		expect(resolveSubscriptionSource(self, { deviceName: 'Spare Rack', channelName: 'Mic 1' }, 'audio')).toBeUndefined()
-		expect(resolveSubscriptionSource(self, { deviceName: 'Stage Box', channelName: 'Nope' }, 'audio')).toBeUndefined()
-	})
-
-	it("updates another device's source id variable when the source's channels change", () => {
-		const { self } = instance()
-		subscribe(self, 'Mic 1', 0x0009)()
-		UpdateVariableDefinitions(self)
-		CheckVariables(self)
-		const values = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls
-		expect(values[0][0]).toMatchObject({ [`${AMP_ID}_rx_1_source_id`]: `${STAGE_ID}/1` })
-
-		// Mic 1 moves to channel 2 on the source: only Amp's source id changes
-		self.devicesData[SOURCE].audioTx![1] = { number: ch(1), name: '01' }
-		self.devicesData[SOURCE].audioTx![2] = { number: ch(2), name: '02', friendlyName: 'Mic 1' }
-		CheckVariables(self, SOURCE, 'tx_names')
-
-		expect(values.at(-1)?.[0]).toEqual({
-			[`${AMP_ID}_rx_1_source_id`]: `${STAGE_ID}/2`,
-			[`${STAGE_ID}_tx_1_name`]: '01',
-			[`${STAGE_ID}_tx_1_label`]: '01',
-			[`${STAGE_ID}_tx_2_name`]: 'Mic 1',
-			[`${STAGE_ID}_tx_2_label`]: 'Mic 1',
-		})
 	})
 })

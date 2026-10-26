@@ -6,18 +6,17 @@ import {
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
 	isVideoSubscriptionActive,
-	resolveSubscriptionSource,
 	subscriptionStatusLabel,
 	channelDisplayLabel,
 	videoSubscriptionStatusLabel,
 	type DeviceData,
 } from './api/index.js'
-import { routingVariablesEnabled, variableKeysOf } from './config.js'
+import { routingVariablesEnabled } from './config.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 import { sanitiseVariableId } from './utils/sanitise.js'
 import { VariablePublisher } from './variable-publisher.js'
-import { brandedEntries, channelNumbers, type DanteDeviceId, type DeviceIp, type DeviceName } from './api/ids.js'
+import { brandedEntries, channelNumbers, type DeviceIp, type DeviceName } from './api/ids.js'
 
 const logger = createModuleLogger('variables')
 
@@ -58,16 +57,11 @@ export function UpdateVariableDefinitions(self: DanteInstance): void {
 }
 
 /**
- * The prefix of every variable id for a device, per the `variableKeys` option: its id, or its name
- * made safe for Companion. Undefined when the device does not have that yet - a device whose id has
- * not arrived publishes no id-keyed variables, rather than some under another key first.
+ * The prefix of every variable id for a device: its name made safe for Companion. Undefined for a
+ * device that has no name yet.
  */
-export function variableDeviceKey(
-	self: DanteInstance,
-	device: { id?: DanteDeviceId; name?: DeviceName },
-): string | undefined {
-	if (variableKeysOf(self.config) === 'names') return device.name ? sanitiseVariableId(device.name) : undefined
-	return device.id
+export function variableDeviceKey(device: { name?: DeviceName }): string | undefined {
+	return device.name ? sanitiseVariableId(device.name) : undefined
 }
 
 /**
@@ -82,19 +76,15 @@ function addRoutingDefinitions(
 	self: DanteInstance,
 	variables: CompanionVariableDefinitions<DanteVariableValues>,
 ): void {
-	for (const { id: deviceId, name } of channelFieldDevices(self)) {
-		const id = variableDeviceKey(self, { id: deviceId, name })
+	for (const { name } of channelFieldDevices(self)) {
+		const id = variableDeviceKey({ name })
 		if (id === undefined) continue
-		variables[`${id}_device_id`] = { name: `Dante device id of ${name}` }
 		variables[`${id}_device_name`] = { name: `Dante device name of ${name}` }
 
-		for (const choice of self.rxChannelsChoices[deviceId] ?? []) {
+		for (const choice of self.rxChannelsChoices[name] ?? []) {
 			variables[`${id}_rx_${choice.id}_name`] = { name: `${name} audio receive channel ${choice.id} name` }
 			variables[`${id}_rx_${choice.id}_label`] = { name: `${name} audio receive channel ${choice.id} label` }
 			variables[`${id}_rx_${choice.id}_source`] = { name: `${name} audio receive channel ${choice.id} source` }
-			variables[`${id}_rx_${choice.id}_source_id`] = {
-				name: `${name} audio receive channel ${choice.id} source id`,
-			}
 			variables[`${id}_rx_${choice.id}_connected`] = {
 				name: `${name} audio receive channel ${choice.id} subscription connected`,
 			}
@@ -102,20 +92,17 @@ function addRoutingDefinitions(
 				name: `${name} audio receive channel ${choice.id} subscription status`,
 			}
 		}
-		for (const choice of self.txChannelsChoices[deviceId] ?? []) {
+		for (const choice of self.txChannelsChoices[name] ?? []) {
 			variables[`${id}_tx_${choice.id}_name`] = { name: `${name} audio transmit channel ${choice.id} name` }
 			variables[`${id}_tx_${choice.id}_label`] = { name: `${name} audio transmit channel ${choice.id} label` }
 		}
-		for (const choice of self.videoRxChannelsChoices?.[deviceId] ?? []) {
+		for (const choice of self.videoRxChannelsChoices?.[name] ?? []) {
 			variables[`${id}_rx_video_${choice.id}_name`] = { name: `${name} video receive channel ${choice.id} name` }
 			variables[`${id}_rx_video_${choice.id}_label`] = {
 				name: `${name} video receive channel ${choice.id} label`,
 			}
 			variables[`${id}_rx_video_${choice.id}_source`] = {
 				name: `${name} video receive channel ${choice.id} source`,
-			}
-			variables[`${id}_rx_video_${choice.id}_source_id`] = {
-				name: `${name} video receive channel ${choice.id} source id`,
 			}
 			variables[`${id}_rx_video_${choice.id}_connected`] = {
 				name: `${name} video receive channel ${choice.id} subscription connected`,
@@ -124,7 +111,7 @@ function addRoutingDefinitions(
 				name: `${name} video receive channel ${choice.id} subscription status`,
 			}
 		}
-		for (const choice of self.videoTxChannelsChoices?.[deviceId] ?? []) {
+		for (const choice of self.videoTxChannelsChoices?.[name] ?? []) {
 			variables[`${id}_tx_video_${choice.id}_name`] = { name: `${name} video transmit channel ${choice.id} name` }
 			variables[`${id}_tx_video_${choice.id}_label`] = {
 				name: `${name} video transmit channel ${choice.id} label`,
@@ -139,7 +126,7 @@ function addDevicePropertyDefinitions(
 	variables: CompanionVariableDefinitions<DanteVariableValues>,
 ): void {
 	for (const [, device] of brandedEntries(self.devicesData)) {
-		const id = variableDeviceKey(self, device)
+		const id = variableDeviceKey(device)
 		if (!device.name || id === undefined) continue
 		variables[`${id}_ip`] = { name: 'Ip address of ' + device.name }
 		variables[`${id}_locked`] = { name: 'Device lock state of ' + device.name }
@@ -195,7 +182,6 @@ export const ALL_VARIABLE_TYPES = [
 	'output_levels',
 	'manf',
 	'versions',
-	'device_id',
 ] as const
 
 /**
@@ -211,11 +197,7 @@ const ROUTING_TYPES = new Set<string>([
 	'tx_video',
 	'rx_names_video',
 	'tx_names_video',
-	'device_id',
 ])
-
-/** The categories of one device that can change another device's source ids. */
-const SOURCE_ID_TYPES = new Set<string>(['tx', 'tx_names', 'tx_video', 'tx_names_video', 'device_id'])
 
 /**
  * Recomputes and pushes current variable values to Companion.
@@ -229,14 +211,8 @@ export function CheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...var
 		routingVariablesEnabled(self.config) &&
 		(variableTypes.length === 0 || variableTypes.some((type) => ROUTING_TYPES.has(type)))
 	) {
-		// A source id names the transmitting device, so a change to one device's transmit channels or
-		// id can change other devices' values - those are re-resolved everywhere, and the publisher
-		// sends only the ones that moved.
-		const resolveEverywhere =
-			ipAddress === undefined || variableTypes.length === 0 || variableTypes.some((type) => SOURCE_ID_TYPES.has(type))
 		for (const [ip, device] of brandedEntries(self.devicesData)) {
 			if (ipAddress === undefined || ip === ipAddress) addRoutingValues(self, ip, device, variableValues)
-			else if (resolveEverywhere) addSourceIdValues(self, ip, device, variableValues)
 		}
 	}
 
@@ -263,10 +239,9 @@ function addRoutingValues(
 	device: DeviceData,
 	variableValues: Partial<DanteVariableValues>,
 ): void {
-	const id = variableDeviceKey(self, device)
+	const id = variableDeviceKey(device)
 	if (!device.name || id === undefined) return
 
-	variableValues[`${id}_device_id`] = device.id ?? ''
 	variableValues[`${id}_device_name`] = device.name
 
 	for (const channel of channelNumbers(device.audioRx?.count)) {
@@ -282,7 +257,6 @@ function addRoutingValues(
 			? subscriptionStatusLabel(device.audioRx?.[channel]?.subscriptionStatus)
 			: ''
 	}
-	addSourceIdValues(self, ip, device, variableValues)
 	for (const channel of channelNumbers(device.audioTx?.count)) {
 		variableValues[`${id}_tx_${channel}_name`] = getChannelSubscriptionName(device.audioTx?.[channel]) ?? ''
 		variableValues[`${id}_tx_${channel}_label`] = channelDisplayLabel(
@@ -308,26 +282,6 @@ function addRoutingValues(
 	}
 }
 
-/** One device's `_source_id` values. See `resolveSubscriptionSource`. */
-function addSourceIdValues(
-	self: DanteInstance,
-	ip: DeviceIp,
-	device: DeviceData,
-	variableValues: Partial<DanteVariableValues>,
-): void {
-	const id = variableDeviceKey(self, device)
-	if (id === undefined) return
-	const resolve = (source: { deviceName: string; channelName: string } | undefined, mediaType: 'audio' | 'video') =>
-		source ? (resolveSubscriptionSource(self, source, mediaType) ?? '') : ''
-
-	for (const channel of channelNumbers(device.audioRx?.count)) {
-		variableValues[`${id}_rx_${channel}_source_id`] = resolve(getAudioRxChannelSource(self, ip, channel), 'audio')
-	}
-	for (const channel of channelNumbers(device.videoRx?.count)) {
-		variableValues[`${id}_rx_video_${channel}_source_id`] = resolve(getVideoRxChannelSource(self, ip, channel), 'video')
-	}
-}
-
 /** The per-device property values, plus the `devices` list. */
 function addDevicePropertyValues(
 	self: DanteInstance,
@@ -346,7 +300,7 @@ function addDevicePropertyValues(
 		if (deviceName) {
 			devices.push(deviceName)
 			// must match the ids UpdateVariableDefinitions registered
-			const id = variableDeviceKey(self, device)
+			const id = variableDeviceKey(device)
 
 			if (id !== undefined && (ip == ipAddress || !ipAddress)) {
 				for (const variableType of variableTypes) {

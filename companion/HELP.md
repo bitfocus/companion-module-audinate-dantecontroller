@@ -15,27 +15,21 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Timeout Interval** — how long a device may go unheard before it is dropped (1 s – 5 min, default
   3 s). Dante hardware sends heartbeats several times a second and is unaffected; software endpoints
   are kept alive only by the sweep, so anything below twice the Update Interval is raised to it.
-- **Variable Names** — what each device's variables are named after. _Device id_ (the default) stays
-  the same when a device is renamed; _Device name_ is easier to type but breaks every reference when
-  the device is renamed. Connections created before version 3.0 keep _Device name_.
 - **Create Module Variables** — on by default. Turn it off to skip the per-device property variables and
   read the same values through the Device Property feedback instead.
 - **Create Routing Variables** — on by default. Publishes each channel's name, each receive channel's
-  subscription and whether it is connected, and each device's id and name. Router integrations such
+  subscription and whether it is connected, and each device's name. Router integrations such
   as Bitfocus Buttons read these. Only values that change are sent, so a large network costs little
   to keep up to date.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
 
 ## Devices
 
-Devices are identified by their Dante device id, which a device keeps when it is renamed or gets a new
-address. Actions and feedbacks store it, so they keep pointing at the same device across a rename.
-Actions saved by earlier versions hold a device name or address instead; those keep working while a
-device with that name or address is on the network, and are converted when the action is edited.
-
-Dante itself routes by name: a receiver keeps the names it subscribed with after the transmitter is
-renamed, and keeps receiving until it next re-resolves them. A replacement unit given the old name
-takes over those subscriptions in Dante, but is a new device here.
+Devices are identified by their Dante name, as Dante itself routes by name. Actions and feedbacks
+store it, so a device that gets a new address keeps working, but renaming a device means pointing
+its actions, feedbacks and variables at the new name. Actions saved by early versions hold an address
+instead; those keep working while a device has that address. A replacement unit given the old name
+takes over both the Dante subscriptions and the actions.
 
 ## Actions
 
@@ -85,10 +79,9 @@ channel of the selected type, not both. Use two actions to clear audio and video
 
 ### Per device
 
-Named `<device>_<suffix>`, where `<device>` is the device id, or the device name with characters
-Companion cannot use replaced by `_`, per the **Variable Names** option. A device with id
-`001dc1fffe843ea2` called `Amp-1` has `$(dante:001dc1fffe843ea2_sr)` or `$(dante:Amp-1_sr)`.
-The same values are available through the Device Property feedback.
+Named `<device>_<suffix>`, where `<device>` is the device name with characters Companion cannot use
+replaced by `_`, so a device called `Amp-1` has `$(dante:Amp-1_sr)` and one called `Stage Box` has
+`$(dante:Stage_Box_sr)`. The same values are available through the Device Property feedback.
 
 - Dante model (`_dante_model`)
 - Dante software build (`_dante_software_build`)
@@ -121,13 +114,10 @@ The same values are available through the Device Property feedback.
 
 Per device, with the same `<device>` prefix:
 
-- Device id (`_device_id`)
-- Device name (`_device_name`)
+- Device name (`_device_name`) - the name as it is, which `<device>` cannot be turned back into
 - Receive channel name (`_rx_<n>_name`, `_rx_video_<n>_name`)
 - Receive channel source (`_rx_<n>_source`, `_rx_video_<n>_source`) - what the channel is subscribed
   to as `channel@device`, the names it subscribed with; empty when it is not subscribed
-- Receive channel source id (`_rx_<n>_source_id`, `_rx_video_<n>_source_id`) - the same subscription
-  as `<device id>/<transmit channel number>`, which still resolves after the transmitter is renamed
 - Receive channel connected (`_rx_<n>_connected`, `_rx_video_<n>_connected`) - `true` only when the
   channel is subscribed and the receiver reports media arriving; `false` otherwise, including when it
   is not subscribed. A source shows in `_source` as soon as the receiver takes the subscription, even

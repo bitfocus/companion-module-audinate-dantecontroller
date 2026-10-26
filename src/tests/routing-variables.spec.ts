@@ -2,29 +2,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
 	cancelCheckVariables,
 	cancelUpdateData,
-	danteDiscovery,
-	danteDeviceIdFromTxt,
 	DANTE_CONST,
 	parseReply,
 	type AudioRxChannel,
 	type DevicesData,
-	type MdnsResponsePacket,
 } from '../api/index.js'
 import type DanteInstance from '../main.js'
 import { VariablePublisher } from '../variable-publisher.js'
 import { CheckVariables, UpdateVariableDefinitions } from '../variables.js'
-import { ch, id, ip, name } from './ids.js'
+import { ch, ip, name } from './ids.js'
 
 const STAGE = ip('10.0.0.5')
 const AMP = ip('10.0.0.6')
-const STAGE_ID = id(1)
-const AMP_ID = id(2)
+const STAGE_NAME = name('Stage Box')
+const AMP_NAME = name('Amp')
 
 function devicesData(): DevicesData {
 	return {
 		[STAGE]: {
 			name: name('Stage Box'),
-			id: STAGE_ID,
 			ports: { ARC: 4440 },
 			audioTx: {
 				count: 2,
@@ -35,7 +31,6 @@ function devicesData(): DevicesData {
 		},
 		[AMP]: {
 			name: name('Amp'),
-			id: AMP_ID,
 			ports: { ARC: 4440 },
 			audioRx: {
 				count: 2,
@@ -62,42 +57,27 @@ function instance(config: Record<string, unknown> = {}) {
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: false, verbose: false, ...config },
 		devicesData: devicesData(),
 		devicesChoices: [
-			{ id: AMP_ID, label: 'Amp' },
-			{ id: STAGE_ID, label: 'Stage Box' },
+			{ id: AMP_NAME, label: 'Amp' },
+			{ id: STAGE_NAME, label: 'Stage Box' },
 		],
 		rxChannelsChoices: {
-			[AMP_ID]: [
+			[AMP_NAME]: [
 				{ id: ch(1), label: 'Left' },
 				{ id: ch(2), label: 'Right' },
 			],
 		},
 		txChannelsChoices: {
-			[STAGE_ID]: [
+			[STAGE_NAME]: [
 				{ id: ch(1), label: 'Mic 1' },
 				{ id: ch(2), label: '02' },
 			],
 		},
-		videoRxChannelsChoices: { [AMP_ID]: [{ id: ch(1), label: 'HDMI' }] },
+		videoRxChannelsChoices: { [AMP_NAME]: [{ id: ch(1), label: 'HDMI' }] },
 		videoTxChannelsChoices: {},
-		deviceIdsByName: { [name('Amp')]: AMP_ID, [name('Stage Box')]: STAGE_ID },
-		deviceNamesById: { [AMP_ID]: name('Amp'), [STAGE_ID]: name('Stage Box') },
 		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
 		log: vi.fn(),
 	} as unknown as DanteInstance
-}
-
-/** The same network before any device id has been seen: no ids, so nothing keyed by one. */
-function instanceWithoutIds() {
-	const self = instance()
-	for (const device of Object.values(self.devicesData)) delete device.id
-	self.devicesChoices = []
-	self.rxChannelsChoices = {}
-	self.txChannelsChoices = {}
-	self.videoRxChannelsChoices = {}
-	self.deviceIdsByName = {}
-	self.deviceNamesById = {}
-	return self
 }
 
 const definitionCalls = (self: DanteInstance) => (self.setVariableDefinitions as ReturnType<typeof vi.fn>).mock.calls
@@ -155,110 +135,34 @@ describe('VariablePublisher', () => {
 	})
 })
 
-describe('danteDeviceIdFromTxt', () => {
-	it('reads and lower-cases the id key', () => {
-		expect(
-			danteDeviceIdFromTxt([Buffer.from('txtvers=1'), Buffer.from('id=001DC1FFFE0A1B2C'), Buffer.from('mf=Audinate')]),
-		).toBe('001dc1fffe0a1b2c')
-		expect(danteDeviceIdFromTxt('id=0000c0a80a050001')).toBe('0000c0a80a050001')
-	})
+describe('routing variables', () => {
+	// keyed by the device name, with characters Companion cannot use in an id replaced
+	const amp = 'Amp'
+	const stage = 'Stage_Box'
+	const keyed = () => instance()
 
-	it('ignores a missing or malformed id', () => {
-		expect(danteDeviceIdFromTxt([Buffer.from('model=DAI2')])).toBeUndefined()
-		expect(danteDeviceIdFromTxt([Buffer.from('id=001dc1')])).toBeUndefined()
-		expect(danteDeviceIdFromTxt([Buffer.from('rid=001dc1fffe0a1b2c')])).toBeUndefined()
-	})
-
-	afterEach(() => {
-		vi.useRealTimers()
-	})
-
-	/** A CMC TXT answer for `deviceName`, as it arrives behind the PTR record that announces it. */
-	function cmcTxt(deviceName: string, deviceId: string): MdnsResponsePacket {
-		return {
-			answers: [{ type: 'PTR', name: '_netaudio-cmc._udp.local', data: `${deviceName}._netaudio-cmc._udp.local` }],
-			additionals: [
-				{ type: 'TXT', name: `${deviceName}._netaudio-cmc._udp.local`, data: [Buffer.from(`id=${deviceId}`)] },
-				// an ARC TXT record carries no device id and must not be read as one
-				{ type: 'TXT', name: 'Amp._netaudio-arc._udp.local', data: [Buffer.from('id=ffffffffffffffff')] },
-			],
-		}
-	}
-
-	function discover(self: DanteInstance, response: MdnsResponsePacket, from = STAGE) {
-		;(self as unknown as { mdns: { query: ReturnType<typeof vi.fn> } }).mdns = { query: vi.fn() }
-		danteDiscovery(self, response, { address: from, family: 'IPv4', port: 5353, size: 0 })
-	}
-
-	it('records the id from a CMC TXT answer and asks for it with the SRV record', () => {
-		vi.useFakeTimers()
-		const self = instanceWithoutIds()
-
-		discover(self, cmcTxt('Stage Box', '001dc1fffe0a9999'))
-		cancelUpdateData(self)
-
-		expect(self.deviceIdsByName).toEqual({ 'Stage Box': '001dc1fffe0a9999' })
-		expect(self.deviceNamesById).toEqual({ '001dc1fffe0a9999': 'Stage Box' })
-		const query = (self.mdns.query as ReturnType<typeof vi.fn>).mock.calls[0][0]
-		expect(query.questions).toEqual([
-			{ name: 'Stage Box._netaudio-cmc._udp.local', type: 'SRV' },
-			{ name: 'Stage Box._netaudio-cmc._udp.local', type: 'TXT' },
-		])
-	})
-
-	it('gives a device registered before its id arrived its id, channel choices and dropdown entry', () => {
-		vi.useFakeTimers()
-		const self = instanceWithoutIds()
-		expect(self.devicesChoices).toEqual([])
-
-		discover(self, cmcTxt('Stage Box', STAGE_ID))
-		cancelUpdateData(self)
-
-		expect(self.devicesData[STAGE].id).toBe(STAGE_ID)
-		expect(self.devicesChoices).toEqual([{ id: STAGE_ID, label: 'Stage Box' }])
-		expect(self.txChannelsChoices[STAGE_ID]).toEqual([
-			{ id: 1, label: 'Mic 1' },
-			{ id: 2, label: '02' },
-		])
-		// the other device's id has not arrived, so it is still not offered
-		expect(self.devicesData[AMP].id).toBeUndefined()
-		expect(self.rxChannelsChoices[AMP_ID]).toBeUndefined()
-	})
-})
-
-describe.each([
-	{ mode: 'ids', amp: AMP_ID, stage: STAGE_ID },
-	{ mode: 'names', amp: 'Amp', stage: 'Stage_Box' },
-])('routing variables keyed by $mode', ({ mode, amp, stage }) => {
-	const keyed = () => instance({ variableKeys: mode })
-
-	it('defines one variable per channel, plus the id and name of each device', () => {
+	it('defines one variable per channel, plus the name of each device', () => {
 		const self = keyed()
 		UpdateVariableDefinitions(self)
 
 		expect(Object.keys(definitionCalls(self)[0][0]).sort()).toEqual(
 			[
-				`${amp}_device_id`,
 				`${amp}_device_name`,
 				`${amp}_rx_1_name`,
 				`${amp}_rx_1_label`,
 				`${amp}_rx_1_source`,
-				`${amp}_rx_1_source_id`,
 				`${amp}_rx_1_connected`,
 				`${amp}_rx_1_status`,
 				`${amp}_rx_2_name`,
 				`${amp}_rx_2_label`,
 				`${amp}_rx_2_source`,
-				`${amp}_rx_2_source_id`,
 				`${amp}_rx_2_connected`,
 				`${amp}_rx_2_status`,
 				`${amp}_rx_video_1_name`,
 				`${amp}_rx_video_1_label`,
 				`${amp}_rx_video_1_source`,
-				`${amp}_rx_video_1_source_id`,
 				`${amp}_rx_video_1_connected`,
 				`${amp}_rx_video_1_status`,
-				`${stage}_device_id`,
 				`${stage}_device_name`,
 				`${stage}_tx_1_name`,
 				`${stage}_tx_1_label`,
@@ -274,12 +178,10 @@ describe.each([
 		CheckVariables(self)
 
 		expect(valueCalls(self)[0][0]).toEqual({
-			[`${amp}_device_id`]: AMP_ID,
 			[`${amp}_device_name`]: 'Amp',
 			[`${amp}_rx_1_name`]: 'Left',
 			[`${amp}_rx_1_label`]: 'Left',
 			[`${amp}_rx_1_source`]: 'Mic 1@Stage Box',
-			[`${amp}_rx_1_source_id`]: `${STAGE_ID}/1`,
 			[`${amp}_rx_1_connected`]: true,
 			[`${amp}_rx_1_status`]: 'connected (0x0009)',
 			[`${amp}_rx_2_name`]: 'Right',
@@ -291,7 +193,6 @@ describe.each([
 			[`${amp}_rx_video_1_source`]: 'Cam@Encoder',
 			[`${amp}_rx_video_1_connected`]: true,
 			[`${amp}_rx_video_1_status`]: 'active',
-			[`${stage}_device_id`]: STAGE_ID,
 			[`${stage}_device_name`]: 'Stage Box',
 			[`${stage}_tx_1_name`]: 'Mic 1',
 			[`${stage}_tx_1_label`]: 'Mic 1',
@@ -335,7 +236,6 @@ describe.each([
 
 		expect(valueCalls(self)[1][0]).toEqual({
 			[`${amp}_rx_2_source`]: '02@Stage Box',
-			[`${amp}_rx_2_source_id`]: `${STAGE_ID}/2`,
 			[`${amp}_rx_2_connected`]: true,
 			[`${amp}_rx_2_status`]: 'connected (0x0009)',
 		})
@@ -344,7 +244,7 @@ describe.each([
 	it('does not re-send definitions when only a channel is renamed', () => {
 		const self = keyed()
 		UpdateVariableDefinitions(self)
-		self.rxChannelsChoices[AMP_ID]![0] = { id: ch(1), label: 'Left (FOH)' }
+		self.rxChannelsChoices[AMP_NAME]![0] = { id: ch(1), label: 'Left (FOH)' }
 		self.devicesData[AMP].audioRx![1].name = 'Left (FOH)'
 		UpdateVariableDefinitions(self)
 		CheckVariables(self, AMP, 'rx_names')
@@ -363,7 +263,7 @@ describe.each([
 	})
 
 	it('can be turned off', () => {
-		const self = instance({ variableKeys: mode, routingVariables: false })
+		const self = instance({ routingVariables: false })
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 
@@ -372,37 +272,14 @@ describe.each([
 	})
 })
 
-describe('routing variables keyed by id', () => {
-	it('defines none for a device whose id has not arrived, and keys nothing on its name instead', () => {
-		const self = instanceWithoutIds()
-		UpdateVariableDefinitions(self)
-
-		expect(definitionCalls(self)[0][0]).toEqual({})
-	})
-
-	it('keeps the same variable ids when a device is renamed', () => {
-		const self = instance()
-		UpdateVariableDefinitions(self)
-		CheckVariables(self)
-
-		self.devicesData[STAGE].name = name('Stage Box B')
-		self.deviceNamesById[STAGE_ID] = name('Stage Box B')
-		CheckVariables(self, STAGE, 'tx_names')
-
-		expect(valueCalls(self).at(-1)?.[0]).toEqual({ [`${STAGE_ID}_device_name`]: 'Stage Box B' })
-	})
-})
-
 /**
  * `_connected` and `_status` say whether the subscription `_source` names is actually carrying
  * anything. `_source` follows what the receiver was asked for, so a refused or unresolved route
  * moves it all the same - these are what tell such a route from a working one.
  */
-describe.each([
-	{ mode: 'ids', amp: AMP_ID },
-	{ mode: 'names', amp: 'Amp' },
-])('subscription health variables keyed by $mode', ({ mode, amp }) => {
-	const keyed = () => instance({ variableKeys: mode })
+describe('subscription health variables', () => {
+	const amp = 'Amp'
+	const keyed = () => instance()
 
 	/** Replaces one of Amp's receive channels, as a new rx directory reply would. */
 	function setRx(self: DanteInstance, channel: 1 | 2, record: Omit<AudioRxChannel, 'number'>) {
@@ -451,7 +328,6 @@ describe.each([
 
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
 			[`${amp}_rx_2_source`]: '',
-			[`${amp}_rx_2_source_id`]: '',
 			[`${amp}_rx_2_connected`]: false,
 			[`${amp}_rx_2_status`]: '',
 		})
@@ -571,15 +447,15 @@ describe('subscription health from the device', () => {
 		// the transmitter went away: same subscription, now unresolved
 		deliver(0x0001)
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`${AMP_ID}_rx_1_connected`]: false,
-			[`${AMP_ID}_rx_1_status`]: 'unresolved (0x0001)',
+			[`Amp_rx_1_connected`]: false,
+			[`Amp_rx_1_status`]: 'unresolved (0x0001)',
 		})
 
 		// and back
 		deliver(0x0009)
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`${AMP_ID}_rx_1_connected`]: true,
-			[`${AMP_ID}_rx_1_status`]: 'connected (0x0009)',
+			[`Amp_rx_1_connected`]: true,
+			[`Amp_rx_1_status`]: 'connected (0x0009)',
 		})
 		cancelCheckVariables(self)
 		cancelUpdateData(self)

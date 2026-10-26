@@ -4,7 +4,7 @@ import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateActions } from '../actions.js'
 import { DANTE_CONST, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
-import { ch, id, ip, name } from './ids.js'
+import { ch, ip, name } from './ids.js'
 import { answeringSend } from './fake-device.js'
 
 /**
@@ -17,14 +17,13 @@ import { answeringSend } from './fake-device.js'
 
 const DEST = ip('10.0.0.5')
 const SOURCE = ip('10.0.0.6')
-const A_ID = id(0xa)
-const B_ID = id(0xb)
+const A_ID = name('DeviceA')
+const B_ID = name('DeviceB')
 
 function devicesData(): DevicesData {
 	return {
 		[DEST]: {
 			name: name('DeviceA'),
-			id: A_ID,
 			ports: { ARC: 4440 },
 			audioRx: {
 				count: 1,
@@ -58,7 +57,6 @@ function devicesData(): DevicesData {
 		},
 		[SOURCE]: {
 			name: name('DeviceB'),
-			id: B_ID,
 			ports: { ARC: 4440 },
 			audioRx: { count: 1, 1: { number: ch(1), name: 'Audio In 1' } },
 			audioTx: { count: 1, 1: { number: ch(1), name: '01' } },
@@ -72,7 +70,7 @@ function instance(data: DevicesData = devicesData(), overrides: Partial<DanteIns
 	return {
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		devicesData: data,
-		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.id!, label: device.name! })),
+		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 		rxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio In 1' }], [B_ID]: [{ id: ch(1), label: 'Audio In 1' }] },
 		txChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio Out 1' }], [B_ID]: [{ id: ch(1), label: '01' }] },
 		videoRxChannelsChoices: {
@@ -228,7 +226,7 @@ describe('Crosspoint - Connected feedback learn, video', () => {
 		return feedbackDefinition(self, feedbackId).learn({ id: 'rb-video', options }, {})
 	}
 
-	it('learns the video source device id and its per-device video channel key', () => {
+	it('learns the video source device and its per-device video channel key', () => {
 		expect(
 			learn(instance(), 'routing_bg', {
 				channelType: 'video',
@@ -333,7 +331,7 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(refreshes(sendFn)).toEqual([DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY])
 	})
 
-	it('makeCrosspointDropDown sends a plain audio command for options saved by 2.x, keyed by name', async () => {
+	it('makeCrosspointDropDown sends a plain audio command for options keyed by device name', async () => {
 		// DeviceA rx 1 already reports 01@DeviceB as connected, so the acknowledgement is all it waits for
 		const self = instance()
 		const sendFn = answering(self)
@@ -488,8 +486,8 @@ describe('Channel Name - Set/Reset actions, video', () => {
 describe('missing-channel warnings', () => {
 	const AUDIO_ONLY = ip('10.0.0.7')
 	const VIDEO_ONLY = ip('10.0.0.8')
-	const AUDIO_ONLY_ID = id(0xc)
-	const VIDEO_ONLY_ID = id(0xd)
+	const AUDIO_ONLY_ID = name('AudioOnly')
+	const VIDEO_ONLY_ID = name('VideoOnly')
 
 	/** The realistic mixed network: most devices are audio-only, a couple carry video. */
 	function mixedDevices(): DevicesData {
@@ -497,14 +495,12 @@ describe('missing-channel warnings', () => {
 			...devicesData(),
 			[AUDIO_ONLY]: {
 				name: name('AudioOnly'),
-				id: AUDIO_ONLY_ID,
 				ports: { ARC: 4440 },
 				audioRx: { count: 1, 1: { number: ch(1), name: 'In 1' } },
 				audioTx: { count: 1, 1: { number: ch(1), name: 'Out 1' } },
 			},
 			[VIDEO_ONLY]: {
 				name: name('VideoOnly'),
-				id: VIDEO_ONLY_ID,
 				ports: { ARC: 4440 },
 				videoRx: { count: 1, 1: { number: ch(1), name: 'V In 1' } },
 				videoTx: { count: 1, 1: { number: ch(1), name: 'V Out 1' } },
@@ -515,7 +511,7 @@ describe('missing-channel warnings', () => {
 	function mixedInstance() {
 		const data = mixedDevices()
 		return instance(data, {
-			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.id!, label: device.name! })),
+			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 			rxChannelsChoices: {
 				[A_ID]: [{ id: ch(1), label: 'Audio In 1' }],
 				[B_ID]: [{ id: ch(1), label: 'Audio In 1' }],
@@ -558,8 +554,6 @@ describe('missing-channel warnings', () => {
 		expect(warning?.type).toBe('static-text')
 		expect(warning?.value).toContain('AudioOnly has no video receive channels')
 		expect(warning?.isVisibleExpression).toContain("$(options:channelType) == 'video'")
-		// the id 3.x saves, and the name 2.x saved
-		expect(warning?.isVisibleExpression).toContain(`$(options:destinationDevice) == '${AUDIO_ONLY_ID}'`)
 		expect(warning?.isVisibleExpression).toContain("$(options:destinationDevice) == 'AudioOnly'")
 	})
 
@@ -591,7 +585,7 @@ describe('missing-channel warnings', () => {
 		// lists rather than from devicesData.
 		const data = mixedDevices()
 		const self = instance(data, {
-			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.id!, label: device.name! })),
+			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 			rxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio In 1' }] },
 			txChannelsChoices: {
 				[A_ID]: [{ id: ch(1), label: 'Audio Out 1' }],

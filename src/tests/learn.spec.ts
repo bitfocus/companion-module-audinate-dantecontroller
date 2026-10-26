@@ -3,7 +3,7 @@ import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import type { DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
-import { ch, id, ip, name } from './ids.js'
+import { ch, ip, name } from './ids.js'
 
 /**
  * Learn callbacks, against a two-device network where DeviceB ch2 is routed from DeviceA ch3.
@@ -14,15 +14,14 @@ import { ch, id, ip, name } from './ids.js'
  */
 
 const A = ip('10.0.0.5')
-const A_ID = id(5)
+const A_ID = name('DeviceA')
 const B = ip('10.0.0.6')
-const B_ID = id(6)
+const B_ID = name('DeviceB')
 
 function devicesData(): DevicesData {
 	return {
 		[A]: {
 			name: name('DeviceA'),
-			id: A_ID,
 			ports: { ARC: 4440 },
 			latency: 2,
 			sr: 48000,
@@ -42,7 +41,6 @@ function devicesData(): DevicesData {
 		},
 		[B]: {
 			name: name('DeviceB'),
-			id: B_ID,
 			ports: { ARC: 4440 },
 			latency: 5,
 			sr: 96000,
@@ -64,8 +62,8 @@ function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
 	for (const device of Object.values(data)) {
 		const io = (channelType === 'rx' ? device.audioRx : device.audioTx) as
 			Record<string, { number?: number; name?: string }> | undefined
-		if (!device.id || !io) continue
-		byDevice[device.id] = Object.entries(io)
+		if (!device.name || !io) continue
+		byDevice[device.name] = Object.entries(io)
 			.filter(([key]) => !isNaN(Number(key)))
 			.map(([key, channel]) => ({ id: Number(key), label: channel?.name ?? '' }))
 	}
@@ -75,7 +73,7 @@ function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
 function instance(data: DevicesData = devicesData()) {
 	return {
 		devicesData: data,
-		devicesChoices: Object.values(data).map((device) => ({ id: device.id!, label: device.name! })),
+		devicesChoices: Object.values(data).map((device) => ({ id: device.name!, label: device.name! })),
 		// derived from the devices' channels, as updateChannelChoices does in production - a fixture
 		// with fewer choices than channels would let a learn return an unselectable value
 		rxChannelsChoices: channelChoicesFor(data, 'rx'),
@@ -182,12 +180,6 @@ describe('makeCrosspointDropDown learn', () => {
 		expect(Object.keys(learnt).sort()).toEqual([`sourceChannel_${A_ID}`, 'sourceDevice'].sort())
 	})
 
-	it('still learns for an action 2.x saved against device names, writing ids', async () => {
-		expect(
-			await learn('makeCrosspointDropDown', { destinationDevice: 'DeviceB', destinationChannel_DeviceB: 2 }),
-		).toEqual({ sourceDevice: A_ID, [`sourceChannel_${A_ID}`]: 3 })
-	})
-
 	it('still learns for an action saved against an address', async () => {
 		expect(await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })).toEqual({
 			sourceDevice: A_ID,
@@ -237,10 +229,6 @@ describe('settings learn', () => {
 	it('setSampleRate learns into the selected device its own option key', async () => {
 		expect(await learn('setSampleRate', { device: A_ID })).toEqual({ [`sr_${A_ID}`]: '48000' })
 		expect(await learn('setSampleRate', { device: B_ID })).toEqual({ [`sr_${B_ID}`]: '96000' })
-	})
-
-	it('setSampleRate still learns for an action 2.x saved against the device name, into the id key', async () => {
-		expect(await learn('setSampleRate', { device: 'DeviceA' })).toEqual({ [`sr_${A_ID}`]: '48000' })
 	})
 
 	it('setSampleRate declines when the current rate is not one of the offered options', async () => {
@@ -435,11 +423,11 @@ describe('the 2.0 contract', () => {
 	})
 })
 
-describe('learn keys match the declared option ids, whatever the device is called', () => {
+describe('learn keys match the declared option ids', () => {
 	/**
 	 * A learn writes straight into the option store, so the key it returns has to be exactly the id
-	 * the field was declared with. Both are built from the device id, so a name Companion could not
-	 * use in an id - which 2.x had to sanitise, and where the two could drift apart - changes nothing.
+	 * the field was declared with. Both are built from the device name, so a name needing sanitising
+	 * is where the two can drift apart - a learn would then appear to succeed and change nothing.
 	 */
 	const MESSY = 'Studio 1 (Rack A)'
 
@@ -465,27 +453,27 @@ describe('learn keys match the declared option ids, whatever the device is calle
 			data,
 		)
 
-		expect(learnt.sourceDevice).toBe(A_ID)
+		expect(learnt.sourceDevice).toBe(MESSY)
 		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
-		expect(channelKey).toBe(`sourceChannel_${A_ID}`)
+		expect(channelKey).toBe('sourceChannel_Studio_1__Rack_A_')
 		expect(declaredIds('makeCrosspointDropDown', data)).toContain(channelKey)
 	})
 
 	it('setSampleRate learns into an id its own options declare', async () => {
 		const data = messyData()
-		const learnt = await learn('setSampleRate', { device: A_ID }, data)
+		const learnt = await learn('setSampleRate', { device: MESSY }, data)
 
 		const [key] = Object.keys(learnt)
-		expect(key).toBe(`sr_${A_ID}`)
+		expect(key).toBe('sr_Studio_1__Rack_A_')
 		expect(declaredIds('setSampleRate', data)).toContain(key)
 	})
 
 	it('setPullup learns into an id its own options declare', async () => {
 		const data = messyData()
-		const learnt = await learn('setPullup', { device: A_ID }, data)
+		const learnt = await learn('setPullup', { device: MESSY }, data)
 
 		const [key] = Object.keys(learnt)
-		expect(key).toBe(`pullup_${A_ID}`)
+		expect(key).toBe('pullup_Studio_1__Rack_A_')
 		expect(declaredIds('setPullup', data)).toContain(key)
 	})
 
@@ -498,7 +486,7 @@ describe('learn keys match the declared option ids, whatever the device is calle
 		)
 
 		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
-		expect(channelKey).toBe(`sourceChannel_${A_ID}`)
+		expect(channelKey).toBe('sourceChannel_Studio_1__Rack_A_')
 
 		const declared = (feedbackDefinitions(data).routing_bg.options ?? []).map((option: { id: string }) => option.id)
 		expect(declared).toContain(channelKey)

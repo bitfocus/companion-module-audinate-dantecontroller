@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { scheduleCheckFeedbacks, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
-import { ch, id, ip, name } from './ids.js'
+import { ch, ip, name } from './ids.js'
 
 const DEST = ip('10.0.0.5')
 const SOURCE = ip('10.0.0.6')
-const DEVICE_A = id(1)
-const DEVICE_B = id(2)
+const DEVICE_A = name('DeviceA')
+const DEVICE_B = name('DeviceB')
 
 /**
  * DeviceA ch1 is self-routed, ch2 comes from DeviceB, ch3 is unrouted, ch4 names a source that is
@@ -17,7 +17,6 @@ function devicesData(): DevicesData {
 	return {
 		[DEST]: {
 			name: name('DeviceA'),
-			id: DEVICE_A,
 			ports: { ARC: 4440 },
 			audioRx: {
 				count: 4,
@@ -32,7 +31,6 @@ function devicesData(): DevicesData {
 		},
 		[SOURCE]: {
 			name: name('DeviceB'),
-			id: DEVICE_B,
 			ports: { ARC: 4440 },
 			audioRx: { count: 1, 1: { number: ch(1), name: 'In 1' } },
 			audioTx: {
@@ -48,7 +46,7 @@ function instance(data: DevicesData = devicesData()) {
 	return {
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		devicesData: data,
-		devicesChoices: Object.values(data).map((device) => ({ id: device.id!, label: device.name! })),
+		devicesChoices: Object.values(data).map((device) => ({ id: device.name!, label: device.name! })),
 		rxChannelsChoices: { [DEVICE_A]: [{ id: 1, label: 'In 1' }], [DEVICE_B]: [{ id: 1, label: 'In 1' }] },
 		txChannelsChoices: { [DEVICE_A]: [{ id: 1, label: 'Local Out' }], [DEVICE_B]: [{ id: 1, label: '01' }] },
 		setFeedbackDefinitions: vi.fn(),
@@ -122,10 +120,6 @@ describe('Channel Subscription feedback', () => {
 	it('returns the same shape when no channel is selected', () => {
 		const self = instance()
 		expect(definition(self).callback({ id: 'cs', options: { device: DEVICE_A } }, {})).toEqual(EMPTY)
-	})
-
-	it('still reads a feedback 2.x saved against the device name', () => {
-		expect(read(2, 'DeviceA')).toMatchObject({ device: { name: 'DeviceB' } })
 	})
 
 	it('still reads a feedback saved against the device address', () => {

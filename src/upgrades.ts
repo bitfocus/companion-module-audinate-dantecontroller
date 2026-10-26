@@ -254,18 +254,4 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedFeedbacks: changedFeedbacks,
 		}
 	},
-	function (
-		_context: CompanionUpgradeContext<ModuleConfig>,
-		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
-	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
-		// 3.0 names variables after device ids by default. A connection from before then has buttons
-		// built on name-keyed variables, so it keeps them until its owner chooses otherwise. A new
-		// connection never runs this, and takes the field's default.
-		const config = props.config
-		return {
-			updatedConfig: config && config.variableKeys === undefined ? { ...config, variableKeys: 'names' } : null,
-			updatedActions: [],
-			updatedFeedbacks: [],
-		}
-	},
 ]

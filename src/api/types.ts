@@ -2,7 +2,7 @@
  * Shared shapes for the Dante protocol and the device registry.
  */
 import type dgram from 'node:dgram'
-import type { ChannelNumber, DanteDeviceId, DeviceIp, DeviceName } from './ids.js'
+import type { ChannelNumber, DeviceIp, DeviceName } from './ids.js'
 
 export type ServiceName = 'ARC' | 'SETTINGS' | 'CMC' | 'HEARTBEAT'
 
@@ -114,8 +114,6 @@ export interface MdnsResponsePacket {
 
 export interface DeviceData {
 	name?: DeviceName
-	/** Known once the device's `_netaudio-cmc` TXT record has been seen. See `DanteDeviceId`. */
-	id?: DanteDeviceId
 	/** True when the device is locked and will refuse configuration changes. */
 	locked?: boolean
 	/**

@@ -30,7 +30,14 @@ function instance(device: Record<string, unknown>): { self: DanteInstance; sent:
 		log: vi.fn(),
 		// what parsing a reply reaches: the variable and feedback pushes it schedules
 		config: { variables: false, routingVariables: false },
+		devicesChoices: [],
 		txChannelsChoices: {},
+		rxChannelsChoices: {},
+		videoTxChannelsChoices: {},
+		videoRxChannelsChoices: {},
+		// a learnt channel list rebuilds the definitions
+		setActionDefinitions: vi.fn(),
+		setFeedbackDefinitions: vi.fn(),
 		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
 		checkFeedbacks: vi.fn(),
