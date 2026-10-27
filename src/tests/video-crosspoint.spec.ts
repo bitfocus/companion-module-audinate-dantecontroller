@@ -17,8 +17,8 @@ import { answeringSend } from './fake-device.js'
 
 const DEST = ip('10.0.0.5')
 const SOURCE = ip('10.0.0.6')
-const A_ID = name('DeviceA')
-const B_ID = name('DeviceB')
+const A_NAME = name('DeviceA')
+const B_NAME = name('DeviceB')
 
 function devicesData(): DevicesData {
 	return {
@@ -71,16 +71,22 @@ function instance(data: DevicesData = devicesData(), overrides: Partial<DanteIns
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
-		rxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio In 1' }], [B_ID]: [{ id: ch(1), label: 'Audio In 1' }] },
-		txChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio Out 1' }], [B_ID]: [{ id: ch(1), label: '01' }] },
+		rxChannelsChoices: {
+			[A_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+			[B_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+		},
+		txChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }], [B_NAME]: [{ id: ch(1), label: '01' }] },
 		videoRxChannelsChoices: {
-			[A_ID]: [
+			[A_NAME]: [
 				{ id: ch(1), label: 'Video In 1' },
 				{ id: ch(2), label: 'Video In 2' },
 			],
-			[B_ID]: [{ id: ch(1), label: 'Video In 1' }],
+			[B_NAME]: [{ id: ch(1), label: 'Video In 1' }],
 		},
-		videoTxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Video Out 1' }], [B_ID]: [{ id: ch(1), label: 'Cam 1' }] },
+		videoTxChannelsChoices: {
+			[A_NAME]: [{ id: ch(1), label: 'Video Out 1' }],
+			[B_NAME]: [{ id: ch(1), label: 'Cam 1' }],
+		},
 		sockets: {},
 		counter: Buffer.from('0000', 'hex'),
 		setActionDefinitions: vi.fn(),
@@ -138,8 +144,8 @@ describe('Channel Subscription feedback, video', () => {
 
 	it('offers a distinctly-labeled video channel field alongside the audio one', () => {
 		const options = feedbackDefinition(instance(), 'channel_subscription').options as { id: string; label: string }[]
-		expect(options.find((option) => option.id === `channel_${A_ID}`)?.label).toBe('Channel')
-		expect(options.find((option) => option.id === `channelVideo_${A_ID}`)?.label).toBe('Video channel')
+		expect(options.find((option) => option.id === `channel_${A_NAME}`)?.label).toBe('Channel')
+		expect(options.find((option) => option.id === `channelVideo_${A_NAME}`)?.label).toBe('Video channel')
 	})
 
 	it('reports the video source device and channel of a cross-device subscription', () => {
@@ -233,7 +239,7 @@ describe('Crosspoint - Connected feedback learn, video', () => {
 				destinationDevice: 'DeviceA',
 				destinationChannelVideo_DeviceA: 1,
 			}),
-		).toEqual({ sourceDevice: B_ID, [`sourceChannelVideo_${B_ID}`]: 1 })
+		).toEqual({ sourceDevice: B_NAME, [`sourceChannelVideo_${B_NAME}`]: 1 })
 	})
 
 	it('reads the audio route instead when channelType is audio', () => {
@@ -244,7 +250,7 @@ describe('Crosspoint - Connected feedback learn, video', () => {
 				destinationDevice: 'DeviceA',
 				destinationChannel_DeviceA: 1,
 			}),
-		).toEqual({ sourceDevice: B_ID, [`sourceChannel_${B_ID}`]: 1 })
+		).toEqual({ sourceDevice: B_NAME, [`sourceChannel_${B_NAME}`]: 1 })
 	})
 
 	it('declines for a video channel that is not routed', () => {
@@ -311,14 +317,14 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 				sourceChannel: 'Cam 1',
 			}
 		})
-		// as 3.x saves it: devices by id, channel pickers keyed by id
+		// as the dropdowns save it: devices and channel pickers keyed by device name
 		await actionDefinition(self, 'makeCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
-				destinationDevice: A_ID,
-				[`destinationChannelVideo_${A_ID}`]: 2,
-				sourceDevice: B_ID,
-				[`sourceChannelVideo_${B_ID}`]: 1,
+				destinationDevice: A_NAME,
+				[`destinationChannelVideo_${A_NAME}`]: 2,
+				sourceDevice: B_NAME,
+				[`sourceChannelVideo_${B_NAME}`]: 1,
 			},
 		})
 
@@ -358,8 +364,8 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		await actionDefinition(self, 'clearCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
-				destinationDevice: A_ID,
-				[`destinationChannelVideo_${A_ID}`]: 1,
+				destinationDevice: A_NAME,
+				[`destinationChannelVideo_${A_NAME}`]: 1,
 				clearAll: false,
 			},
 		})
@@ -486,8 +492,8 @@ describe('Channel Name - Set/Reset actions, video', () => {
 describe('missing-channel warnings', () => {
 	const AUDIO_ONLY = ip('10.0.0.7')
 	const VIDEO_ONLY = ip('10.0.0.8')
-	const AUDIO_ONLY_ID = name('AudioOnly')
-	const VIDEO_ONLY_ID = name('VideoOnly')
+	const AUDIO_ONLY_NAME = name('AudioOnly')
+	const VIDEO_ONLY_NAME = name('VideoOnly')
 
 	/** The realistic mixed network: most devices are audio-only, a couple carry video. */
 	function mixedDevices(): DevicesData {
@@ -513,27 +519,27 @@ describe('missing-channel warnings', () => {
 		return instance(data, {
 			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 			rxChannelsChoices: {
-				[A_ID]: [{ id: ch(1), label: 'Audio In 1' }],
-				[B_ID]: [{ id: ch(1), label: 'Audio In 1' }],
-				[AUDIO_ONLY_ID]: [{ id: ch(1), label: 'In 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'In 1' }],
 			},
 			txChannelsChoices: {
-				[A_ID]: [{ id: ch(1), label: 'Audio Out 1' }],
-				[B_ID]: [{ id: ch(1), label: '01' }],
-				[AUDIO_ONLY_ID]: [{ id: ch(1), label: 'Out 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }],
+				[B_NAME]: [{ id: ch(1), label: '01' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'Out 1' }],
 			},
 			videoRxChannelsChoices: {
-				[A_ID]: [
+				[A_NAME]: [
 					{ id: ch(1), label: 'Video In 1' },
 					{ id: ch(2), label: 'Video In 2' },
 				],
-				[B_ID]: [{ id: ch(1), label: 'Video In 1' }],
-				[VIDEO_ONLY_ID]: [{ id: ch(1), label: 'V In 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Video In 1' }],
+				[VIDEO_ONLY_NAME]: [{ id: ch(1), label: 'V In 1' }],
 			},
 			videoTxChannelsChoices: {
-				[A_ID]: [{ id: ch(1), label: 'Video Out 1' }],
-				[B_ID]: [{ id: ch(1), label: 'Cam 1' }],
-				[VIDEO_ONLY_ID]: [{ id: ch(1), label: 'V Out 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Video Out 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Cam 1' }],
+				[VIDEO_ONLY_NAME]: [{ id: ch(1), label: 'V Out 1' }],
 			},
 		})
 	}
@@ -549,7 +555,7 @@ describe('missing-channel warnings', () => {
 
 	it('warns that an audio-only device has no video channels, shown only in video mode', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_ID}`,
+			(option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`,
 		)
 		expect(warning?.type).toBe('static-text')
 		expect(warning?.value).toContain('AudioOnly has no video receive channels')
@@ -559,7 +565,7 @@ describe('missing-channel warnings', () => {
 
 	it('warns symmetrically for a video-only device selected in audio mode', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === `destinationDeviceNoAudioRXChannels_${VIDEO_ONLY_ID}`,
+			(option) => option.id === `destinationDeviceNoAudioRXChannels_${VIDEO_ONLY_NAME}`,
 		)
 		expect(warning?.value).toContain('VideoOnly has no audio receive channels')
 		expect(warning?.isVisibleExpression).toContain("$(options:channelType) == 'audio'")
@@ -567,15 +573,15 @@ describe('missing-channel warnings', () => {
 
 	it('says transmit, not receive, for a source picker', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === `sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_ID}`,
+			(option) => option.id === `sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`,
 		)
 		expect(warning?.value).toContain('AudioOnly has no video transmit channels')
 	})
 
 	it('emits no warning for a device that has channels of both kinds', () => {
 		const ids = options(mixedInstance(), 'makeCrosspointDropDown').map((option) => option.id)
-		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${A_ID}`)
-		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${A_ID}`)
+		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${A_NAME}`)
+		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${A_NAME}`)
 	})
 
 	it('emits no warning for a device the picker never offers in that direction', () => {
@@ -586,32 +592,32 @@ describe('missing-channel warnings', () => {
 		const data = mixedDevices()
 		const self = instance(data, {
 			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
-			rxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Audio In 1' }] },
+			rxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Audio In 1' }] },
 			txChannelsChoices: {
-				[A_ID]: [{ id: ch(1), label: 'Audio Out 1' }],
-				[AUDIO_ONLY_ID]: [{ id: ch(1), label: 'Out 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'Out 1' }],
 			},
-			videoRxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Video In 1' }] },
-			videoTxChannelsChoices: { [A_ID]: [{ id: ch(1), label: 'Video Out 1' }] },
+			videoRxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Video In 1' }] },
+			videoTxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Video Out 1' }] },
 		})
 
 		const ids = options(self, 'makeCrosspointDropDown').map((option) => option.id)
 		// AudioOnly has no receive channels of either kind here, so neither warning applies...
-		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_ID}`)
-		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${AUDIO_ONLY_ID}`)
+		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
+		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${AUDIO_ONLY_NAME}`)
 		// ...but it does still transmit audio, so the source picker warns about its missing video.
-		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_ID}`)
+		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`)
 	})
 
 	it('keeps showing the warning while Clear All is on, unlike the channel picker', () => {
 		// Hiding it alongside the picker implied that "clear every channel" escapes the Channel Type.
 		// It does not - a device with no video channels has no video channels to clear either way.
 		const fields = options(mixedInstance(), 'clearCrosspointDropDown')
-		const warning = fields.find((option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_ID}`)
+		const warning = fields.find((option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
 		expect(warning?.isVisibleExpression).not.toContain('clearAll')
 
 		// the picker itself is still hidden by it, which is what the checkbox genuinely replaces
-		const picker = fields.find((option) => option.id === `destinationChannelVideo_${A_ID}`)
+		const picker = fields.find((option) => option.id === `destinationChannelVideo_${A_NAME}`)
 		expect(picker?.isVisibleExpression).toContain('!$(options:clearAll)')
 	})
 
@@ -627,7 +633,7 @@ describe('missing-channel warnings', () => {
 		UpdateFeedbacks(self)
 		const definitions = (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 		const ids = (definitions.routing_bg.options as { id: string }[]).map((option) => option.id)
-		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_ID}`)
-		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_ID}`)
+		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
+		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`)
 	})
 })
