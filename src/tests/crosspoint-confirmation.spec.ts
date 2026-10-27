@@ -8,6 +8,7 @@ import {
 	makeAudioCrosspointConfirmed,
 	clearAudioCrosspointConfirmed,
 	makeCommand,
+	notifyRxStateChanged,
 	sendCommand,
 	type DevicesData,
 } from '../api/index.js'
@@ -212,6 +213,30 @@ describe('confirmed crosspoints', () => {
 			'not connected: unresolved (0x0001)',
 		)
 		expect(Date.now() - started).toBeGreaterThanOrEqual(FAST.confirm.timeoutMs - 5)
+	})
+
+	it('finishes when an unresolved route connects, on the device announcing it', async () => {
+		// A route that needs a new flow is reported unresolved (0x0001) at once and connected (0x0009)
+		// about 150 ms later on Ultimo X2 hardware, announced by a change notification.
+		const { self } = instance((command) =>
+			isSubscribe(command)
+				? {
+						apply: () => {
+							subscribe(self, 'Mic 1', 0x0001)()
+							setTimeout(() => {
+								subscribe(self, 'Mic 1', 0x0009)()
+								notifyRxStateChanged(self, DEST)
+							}, 150)
+						},
+					}
+				: undefined,
+		)
+
+		const started = Date.now()
+		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+		const elapsed = Date.now() - started
+		expect(elapsed).toBeGreaterThanOrEqual(140)
+		expect(elapsed).toBeLessThan(SLOW.confirm.timeoutMs / 2)
 	})
 
 	it('accepts a route to a source that is not on the network, which Dante resolves later', async () => {
