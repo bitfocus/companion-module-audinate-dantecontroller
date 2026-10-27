@@ -7,7 +7,6 @@ import { createModuleLogger } from '@companion-module/base'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../main.js'
 import type { MdnsResponsePacket, ServiceName } from './types.js'
-import type { MdnsSender } from './mdns-group.js'
 import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
@@ -51,12 +50,7 @@ function onChosenCard(self: DanteInstance, sourceIp: string): boolean {
  * registers/updates the announcing device and its per-service port, kicking off follow-up
  * queries (channel count/settings for ARC, settings port for CMC) when a port is newly learned.
  */
-export function danteDiscovery(
-	self: DanteInstance,
-	response: MdnsResponsePacket,
-	rinfo: dgram.RemoteInfo,
-	via: MdnsSender = self.mdns,
-): void {
+export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket, rinfo: dgram.RemoteInfo): void {
 	if (!onChosenCard(self, rinfo.address)) return
 
 	const answers = [...response.answers, ...response.additionals]
@@ -67,8 +61,7 @@ export function danteDiscovery(
 			if (self.debug) {
 				logger.debug(`mDNS PTR from ${rinfo.address} : ${name} -> ${answer.data}, asking for its SRV record`)
 			}
-			// back out the card the response came in on, which is the one that reaches the device
-			via.query(
+			self.mdns.query(
 				{
 					questions: [
 						{

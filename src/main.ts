@@ -4,7 +4,7 @@ import {
 	type DropdownChoice,
 	type SomeCompanionConfigField,
 } from '@companion-module/base'
-import type { MdnsGroup } from './api/mdns-group.js'
+import type multidns from 'multicast-dns'
 import { GetConfigFields, type ModuleConfig, type NetworkInterfaceInfo } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
 import {
@@ -64,11 +64,11 @@ export default class DanteInstance extends InstanceBase<DanteModuleTypes> {
 	set sockets(value: DanteSockets) {
 		this.connection.sockets = value
 	}
-	get mdns(): MdnsGroup {
+	get mdns(): multidns.MulticastDNS {
 		// only read after initConnection has created it
-		return this.connection.mdns as MdnsGroup
+		return this.connection.mdns as multidns.MulticastDNS
 	}
-	set mdns(value: MdnsGroup) {
+	set mdns(value: multidns.MulticastDNS) {
 		this.connection.mdns = value
 	}
 	get counter(): Buffer {

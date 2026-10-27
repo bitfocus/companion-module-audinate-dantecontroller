@@ -2,6 +2,7 @@
  * The network connection: sockets, discovery, and their lifecycle.
  */
 
+import multidns from 'multicast-dns'
 import dgram from 'node:dgram'
 import { InstanceStatus, createModuleLogger } from '@companion-module/base'
 import { DANTE_CONST } from './const.js'
@@ -13,8 +14,7 @@ import {
 	type NetworkInterfaceInfo,
 } from '../config.js'
 import type DanteInstance from '../main.js'
-import type { ConnectionName, ServiceName, DanteSockets } from './types.js'
-import { MdnsGroup } from './mdns-group.js'
+import type { ConnectionName, ServiceName, DanteSockets, MdnsResponsePacket } from './types.js'
 import {
 	cancelCheckFeedbacks,
 	cancelCheckVariables,
@@ -119,8 +119,7 @@ function silenceThreshold(self: DanteInstance): number {
  */
 export class DanteConnection {
 	sockets: DanteSockets = {}
-	/** mDNS discovery, one socket per card - see {@link MdnsGroup}. */
-	mdns?: MdnsGroup
+	mdns?: multidns.MulticastDNS
 	activeConnections: Partial<Record<ConnectionName, boolean>> = {}
 	/** True once every socket and discovery are up. */
 	connected = false
@@ -251,7 +250,6 @@ export class DanteConnection {
 		const period = this.self.config?.interval ?? 0
 		if (period > 0) {
 			this.interval = setInterval(() => {
-				syncAutomaticCards(this.self)
 				getMdnsServices(this.self)
 				// ride the same tick rather than owning a timer - see retryMissingVideoDirectories
 				retryMissingAudioDirectories(this.self)
@@ -701,94 +699,63 @@ export function initConnection(self: DanteInstance): void {
 	// Armed here, but inert until the first datagram arrives - see `startWatchdog`.
 	self.connection.startWatchdog()
 
-	// One mDNS socket per card: the chosen one, or every card when automatic - see `MdnsGroup` for
-	// why a single socket is not enough. Incoming is not scoped by card even when one is chosen, as
-	// every socket binds the wildcard address - `danteDiscovery` filters by subnet instead.
-	self.mdns = new MdnsGroup({
-		response: (response, rinfo, via) => {
-			self.connection.noteTraffic('MDNS')
-			// multicast-dns has parsed the packet by now, but danteDiscovery still walks records it
-			// supplied and sends follow-up queries, either of which can throw on something unexpected
-			handlePacket(self, 'MDNS', rinfo.address, () => danteDiscovery(self, response, rinfo, via))
-		},
-
-		// Fires once a card's socket is bound. Sends issued before this are queued by multicast-dns,
-		// so the discovery query below is safe to send immediately - this only tracks liveness.
-		ready: () => {
-			self.activeConnections.MDNS = true
-			checkConnections(self)
-		},
-
-		// Only EACCES/EADDRINUSE on a socket or a failed bind arrive as 'error', and each means that
-		// card's discovery is dead. Discovery as a whole is down only once no card is left.
-		error: (error, nic, allFailed) => {
-			logger.error(`mDNS on ${nic.name} (${nic.address}) : ${error.message}`)
-			if (!allFailed) return
-			self.activeConnections.MDNS = false
-			if (self.CONNECTED) {
-				self.updateStatus(InstanceStatus.Disconnected)
-				self.CONNECTED = false
-			}
-		},
-
-		// Non-fatal problems all arrive as 'warning': malformed packets from anything on the network
-		// (potentially noisy, hence debug-gated) but also addMembership/setMulticastInterface failures,
-		// which are the difference between "no Dante devices here" and "discovery never started".
-		warning: (error, nic) => {
-			const message = `mDNS on ${nic.name} (${nic.address}) : ${error.message}`
-			if (self.debug) {
-				logger.warn(message)
-			} else {
-				logger.debug(message)
-			}
-		},
-
-		cardsChanged: (added, removed) => {
-			if (self.debug) {
-				const list = (nics: NetworkInterfaceInfo[]) => nics.map((nic) => `${nic.name} (${nic.address})`).join(', ')
-				logger.debug(
-					`mDNS cards changed` +
-						(added.length ? ` - added ${list(added)}` : '') +
-						(removed.length ? ` - removed ${list(removed)}` : ''),
-				)
-			}
-		},
+	if (boundAddress !== undefined) {
+		// `multicast-dns` binds its socket to `bind ?? interface` - passing only `interface` binds
+		// to that specific unicast address, which (like our own sockets above) can silently drop
+		// incoming multicast-addressed replies on macOS/BSD. Bind the socket to the wildcard address
+		// explicitly, while still scoping outgoing queries and group membership to the chosen card.
+		// Incoming is therefore not scoped - `danteDiscovery` filters by subnet instead.
+		self.mdns = multidns({ interface: boundAddress, bind: '0.0.0.0' })
+	} else {
+		self.mdns = multidns()
+	}
+	self.mdns.on('response', (response, rinfo) => {
+		self.connection.noteTraffic('MDNS')
+		// multicast-dns has parsed the packet by now, but danteDiscovery still walks records it
+		// supplied and sends follow-up queries, either of which can throw on something unexpected
+		handlePacket(self, 'MDNS', rinfo.address, () =>
+			danteDiscovery(self, response as unknown as MdnsResponsePacket, rinfo),
+		)
 	})
-	self.mdns.sync(resolved ? [resolved.nic] : available)
+
+	// `multicast-dns` returns a bare EventEmitter, so an unhandled 'error' event would throw and
+	// take down the module process. It only emits 'error' for EACCES/EADDRINUSE on the socket and
+	// for a failed bind - all of which mean discovery is dead, so report it rather than crash.
+	self.mdns.on('error', (error) => {
+		logger.error(`mDNS : ${error.message}`)
+		self.activeConnections.MDNS = false
+		if (self.CONNECTED) {
+			self.updateStatus(InstanceStatus.Disconnected)
+			self.CONNECTED = false
+		}
+	})
+
+	// Non-fatal problems all arrive as 'warning': malformed packets from anything on the network
+	// (potentially noisy, hence debug-gated) but also addMembership/setMulticastInterface failures,
+	// which are the difference between "no Dante devices here" and "discovery never started".
+	self.mdns.on('warning', (error) => {
+		if (self.debug) {
+			logger.warn(`mDNS : ${error.message}`)
+		} else {
+			logger.debug(`mDNS : ${error.message}`)
+		}
+	})
+
+	// Fires once the socket is bound. Sends issued before this are queued by multicast-dns, so
+	// the discovery query below is safe to send immediately - this only tracks liveness.
+	self.mdns.on('ready', () => {
+		self.activeConnections.MDNS = true
+		checkConnections(self)
+	})
+
+	self.mdns.on('networkInterface', () => {
+		if (self.debug) {
+			logger.debug('mDNS multicast memberships updated')
+		}
+	})
 
 	// dante devices discover
 	getMdnsServices(self)
-}
-
-/**
- * With the network card automatic, follows cards appearing and going away between discovery sweeps.
- *
- * A card plugged in after the connection started - a USB adapter, a link that came up late - was
- * otherwise never discovered on until the connection was re-initialised, because the cards were
- * listed once, in `initConnection`. A new card gets an mDNS socket, and the SETTINGS and HEARTBEAT
- * sockets join their groups on it, so its devices' announcements and heartbeats reach the module
- * too. A card that went away needs nothing: the OS drops its memberships with it.
- */
-export function syncAutomaticCards(self: DanteInstance): void {
-	// an explicitly chosen card is the only one, and a missing one is reported as a config error
-	if (self.config.mac || !self.connection.mdns) return
-
-	const before = new Set(self.connection.mdns.cards.map((nic) => nic.address))
-	const available = listNetworkInterfaces()
-	self.connection.mdns.sync(available)
-
-	const added = available.filter((nic) => !before.has(nic.address))
-	if (added.length === 0) return
-
-	logger.info(
-		`Network card automatic - now also discovering on ${added.map((nic) => `${nic.name} (${nic.address})`).join(', ')}`,
-	)
-	const addresses = added.map((nic) => nic.address)
-	const settingsListener = self.connection.settingsMulticast ?? self.sockets.SETTINGS
-	if (settingsListener) joinMulticastGroup(settingsListener, DANTE_CONST.MULTICAST_IP.INFO, 'SETTINGS', addresses)
-	if (self.sockets.HEARTBEAT) {
-		joinMulticastGroup(self.sockets.HEARTBEAT, DANTE_CONST.MULTICAST_IP.HEARTBEAT, 'HEARTBEAT', addresses)
-	}
 }
 
 /**
