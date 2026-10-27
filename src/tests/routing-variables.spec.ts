@@ -54,7 +54,15 @@ function devicesData(): DevicesData {
 
 function instance(config: Record<string, unknown> = {}) {
 	return {
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: false, verbose: false, ...config },
+		config: {
+			mac: '',
+			interval: 1000,
+			timeoutInterval: 3000,
+			variables: false,
+			routingVariables: true,
+			verbose: false,
+			...config,
+		},
 		devicesData: devicesData(),
 		devicesChoices: [
 			{ id: AMP_NAME, label: 'Amp' },
@@ -262,8 +270,8 @@ describe('routing variables', () => {
 		expect(valueCalls(self)).toHaveLength(1)
 	})
 
-	it('can be turned off', () => {
-		const self = instance({ routingVariables: false })
+	it('is off unless turned on', () => {
+		const self = instance({ routingVariables: undefined })
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 

@@ -691,6 +691,7 @@ describe('scheduleCheckVariables', () => {
 				interval: 1000,
 				timeoutInterval: 3000,
 				variables: true,
+				routingVariables: true,
 				verbose: false,
 			},
 		})
