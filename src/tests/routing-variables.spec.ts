@@ -159,17 +159,14 @@ describe('routing variables', () => {
 				`${amp}_rx_1_name`,
 				`${amp}_rx_1_label`,
 				`${amp}_rx_1_source`,
-				`${amp}_rx_1_connected`,
 				`${amp}_rx_1_status`,
 				`${amp}_rx_2_name`,
 				`${amp}_rx_2_label`,
 				`${amp}_rx_2_source`,
-				`${amp}_rx_2_connected`,
 				`${amp}_rx_2_status`,
 				`${amp}_rx_video_1_name`,
 				`${amp}_rx_video_1_label`,
 				`${amp}_rx_video_1_source`,
-				`${amp}_rx_video_1_connected`,
 				`${amp}_rx_video_1_status`,
 				`${stage}_device_name`,
 				`${stage}_tx_1_name`,
@@ -190,17 +187,14 @@ describe('routing variables', () => {
 			[`${amp}_rx_1_name`]: 'Left',
 			[`${amp}_rx_1_label`]: 'Left',
 			[`${amp}_rx_1_source`]: 'Mic 1@Stage Box',
-			[`${amp}_rx_1_connected`]: true,
-			[`${amp}_rx_1_status`]: 'connected (0x0009)',
+			[`${amp}_rx_1_status`]: 'connected',
 			[`${amp}_rx_2_name`]: 'Right',
 			[`${amp}_rx_2_label`]: 'Right',
-			// not subscribed: false, and its status stays at the '' every new variable starts as
-			[`${amp}_rx_2_connected`]: false,
+			[`${amp}_rx_2_status`]: 'not subscribed',
 			[`${amp}_rx_video_1_name`]: 'HDMI',
 			[`${amp}_rx_video_1_label`]: 'HDMI',
 			[`${amp}_rx_video_1_source`]: 'Cam@Encoder',
-			[`${amp}_rx_video_1_connected`]: true,
-			[`${amp}_rx_video_1_status`]: 'active',
+			[`${amp}_rx_video_1_status`]: 'connected',
 			[`${stage}_device_name`]: 'Stage Box',
 			[`${stage}_tx_1_name`]: 'Mic 1',
 			[`${stage}_tx_1_label`]: 'Mic 1',
@@ -244,8 +238,7 @@ describe('routing variables', () => {
 
 		expect(valueCalls(self)[1][0]).toEqual({
 			[`${amp}_rx_2_source`]: '02@Stage Box',
-			[`${amp}_rx_2_connected`]: true,
-			[`${amp}_rx_2_status`]: 'connected (0x0009)',
+			[`${amp}_rx_2_status`]: 'connected',
 		})
 	})
 
@@ -281,9 +274,9 @@ describe('routing variables', () => {
 })
 
 /**
- * `_connected` and `_status` say whether the subscription `_source` names is actually carrying
- * anything. `_source` follows what the receiver was asked for, so a refused or unresolved route
- * moves it all the same - these are what tell such a route from a working one.
+ * `_status` says whether the subscription `_source` names is actually carrying anything. `_source`
+ * follows what the receiver was asked for, so a refused or unresolved route moves it all the same -
+ * this is what tells such a route from a working one.
  */
 describe('subscription health variables', () => {
 	const amp = 'Amp'
@@ -305,8 +298,7 @@ describe('subscription health variables', () => {
 		CheckVariables(self)
 
 		expect(published(self)).toMatchObject({
-			[`${amp}_rx_1_connected`]: true,
-			[`${amp}_rx_1_status`]: 'connected (0x0009)',
+			[`${amp}_rx_1_status`]: 'connected',
 		})
 	})
 
@@ -319,16 +311,15 @@ describe('subscription health variables', () => {
 
 		expect(published(self)).toMatchObject({
 			[`${amp}_rx_2_source`]: 'Left@Amp',
-			[`${amp}_rx_2_connected`]: false,
-			[`${amp}_rx_2_status`]: 'unsupported (0x001c)',
+			[`${amp}_rx_2_status`]: 'unsupported',
 		})
 	})
 
-	it('reports an unsubscribed channel as not connected, with an empty status', () => {
+	it('reports an unsubscribed channel as not subscribed', () => {
 		const self = keyed()
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
-		// connect it, then clear it again, so '' is a value sent rather than the host's initial one
+		// connect it, then clear it again
 		setRx(self, 2, { name: 'Right', sourceDevice: 'Stage Box', sourceChannel: '02', subscriptionStatus: 9 })
 		CheckVariables(self, AMP, 'rx')
 		setRx(self, 2, { name: 'Right', subscriptionStatus: 0 })
@@ -336,9 +327,17 @@ describe('subscription health variables', () => {
 
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
 			[`${amp}_rx_2_source`]: '',
-			[`${amp}_rx_2_connected`]: false,
-			[`${amp}_rx_2_status`]: '',
+			[`${amp}_rx_2_status`]: 'not subscribed',
 		})
+	})
+
+	it('reports a status with no name as its code', () => {
+		const self = keyed()
+		setRx(self, 2, { name: 'Right', sourceDevice: 'Stage Box', sourceChannel: '02', subscriptionStatus: 0x0042 })
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		expect(published(self)).toMatchObject({ [`${amp}_rx_2_status`]: '0x0042' })
 	})
 
 	it('follows a pre-patched route to an offline source coming online, sending only that channel', () => {
@@ -348,17 +347,15 @@ describe('subscription health variables', () => {
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		expect(published(self)).toMatchObject({
-			[`${amp}_rx_1_connected`]: false,
-			[`${amp}_rx_1_status`]: 'unresolved (0x0001)',
+			[`${amp}_rx_1_status`]: 'unresolved',
 		})
 
 		setRx(self, 1, { name: 'Left', sourceDevice: 'Stage Box', sourceChannel: 'Mic 1', subscriptionStatus: 0x0009 })
 		CheckVariables(self, AMP, 'rx')
 
-		// the source did not move, so neither did _source: just the two health values
+		// the source did not move, so neither did _source: just the status
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`${amp}_rx_1_connected`]: true,
-			[`${amp}_rx_1_status`]: 'connected (0x0009)',
+			[`${amp}_rx_1_status`]: 'connected',
 		})
 		// a status change is a value change, never a definitions resend
 		expect(definitionCalls(self)).toHaveLength(1)
@@ -369,15 +366,13 @@ describe('subscription health variables', () => {
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		expect(published(self)).toMatchObject({
-			[`${amp}_rx_video_1_connected`]: true,
-			[`${amp}_rx_video_1_status`]: 'active',
+			[`${amp}_rx_video_1_status`]: 'connected',
 		})
 
 		// resolved, but the source sending nothing: Dante Controller's "Subscription is not active"
 		self.devicesData[AMP].videoRx![1].subscriptionActive = 0
 		CheckVariables(self, AMP, 'rx_video')
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`${amp}_rx_video_1_connected`]: false,
 			[`${amp}_rx_video_1_status`]: 'not active',
 		})
 
@@ -455,15 +450,13 @@ describe('subscription health from the device', () => {
 		// the transmitter went away: same subscription, now unresolved
 		deliver(0x0001)
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`Amp_rx_1_connected`]: false,
-			[`Amp_rx_1_status`]: 'unresolved (0x0001)',
+			[`Amp_rx_1_status`]: 'unresolved',
 		})
 
 		// and back
 		deliver(0x0009)
 		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`Amp_rx_1_connected`]: true,
-			[`Amp_rx_1_status`]: 'connected (0x0009)',
+			[`Amp_rx_1_status`]: 'connected',
 		})
 		cancelCheckVariables(self)
 		cancelUpdateData(self)

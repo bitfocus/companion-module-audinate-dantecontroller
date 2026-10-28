@@ -30,6 +30,12 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED,
 ]
 
+/** The `_status` value of a receive channel with no subscription. */
+export const SUBSCRIPTION_STATE_NOT_SUBSCRIBED = 'not subscribed'
+
+/** The `_status` value of a receive channel whose subscription is working. */
+export const SUBSCRIPTION_STATE_CONNECTED = 'connected'
+
 /**
  * Readable names for rx subscription status codes, for error messages and the `_rx_<n>_status`
  * variables. From the netaudio project's catalogue; only the connected ones above, 0x0001
@@ -38,12 +44,12 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
  * The connected codes are all plain `connected`: the code beside it says which kind.
  */
 const SUBSCRIPTION_STATUS_NAMES: Readonly<Record<number, string>> = {
-	0x0000: 'no subscription',
+	0x0000: SUBSCRIPTION_STATE_NOT_SUBSCRIBED,
 	0x0001: 'unresolved',
-	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF]: 'connected',
-	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST]: 'connected',
-	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST]: 'connected',
-	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED]: 'connected',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED]: SUBSCRIPTION_STATE_CONNECTED,
 	0x0002: 'resolved, connecting',
 	0x0003: 'resolve failed',
 	0x0005: 'resolved to nothing',
@@ -77,8 +83,22 @@ const SUBSCRIPTION_STATUS_NAMES: Readonly<Record<number, string>> = {
 /** A subscription status as a message names it: `unresolved (0x0001)`. */
 export function subscriptionStatusLabel(status: number | undefined): string {
 	if (status === undefined) return 'unknown status'
-	const code = `0x${status.toString(16).padStart(4, '0')}`
+	const code = statusCode(status)
 	return SUBSCRIPTION_STATUS_NAMES[status] ? `${SUBSCRIPTION_STATUS_NAMES[status]} (${code})` : code
+}
+
+/**
+ * A subscription status as the `_rx_<n>_status` variable holds it: the name alone, so every
+ * connected code reads `connected` and a variable can be compared against it. A code with no name
+ * reads as the code itself (`0x0042`), so nothing the device reports is hidden.
+ */
+export function subscriptionStateValue(status: number | undefined): string {
+	if (status === undefined) return 'unknown status'
+	return SUBSCRIPTION_STATUS_NAMES[status] ?? statusCode(status)
+}
+
+function statusCode(status: number): string {
+	return `0x${status.toString(16).padStart(4, '0')}`
 }
 
 /**
@@ -136,10 +156,11 @@ export function isVideoSubscriptionActive(active: number | undefined): boolean {
 }
 
 /**
- * A video subscription's state in words, the counterpart of {@link subscriptionStatusLabel}.
+ * A video subscription's state as the `_rx_video_<n>_status` variable holds it, the counterpart of
+ * {@link subscriptionStateValue}.
  *
  * Video rx records carry two flags rather than a status code, so this names the combinations:
- * `active` when media is flowing; otherwise `unresolved` while the source has not been located,
+ * `connected` when media is flowing; otherwise `unresolved` while the source has not been located,
  * and `not active` once it has (Dante Controller's "Subscription is not active"). `resolved` lags a
  * source going away, so an absent source can read `not active` for a while before `unresolved` -
  * the `active` test, which is the one that matters, does not lag. `unknown status` when the
@@ -147,7 +168,7 @@ export function isVideoSubscriptionActive(active: number | undefined): boolean {
  */
 export function videoSubscriptionStatusLabel(resolved: number | undefined, active: number | undefined): string {
 	if (active === undefined) return 'unknown status'
-	if (isVideoSubscriptionActive(active)) return 'active'
+	if (isVideoSubscriptionActive(active)) return SUBSCRIPTION_STATE_CONNECTED
 	return resolved === 0 ? 'unresolved' : 'not active'
 }
 

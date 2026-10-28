@@ -5,8 +5,8 @@ import {
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
-	isVideoSubscriptionActive,
-	subscriptionStatusLabel,
+	SUBSCRIPTION_STATE_NOT_SUBSCRIBED,
+	subscriptionStateValue,
 	channelDisplayLabel,
 	videoSubscriptionStatusLabel,
 	type DeviceData,
@@ -85,9 +85,6 @@ function addRoutingDefinitions(
 			variables[`${id}_rx_${choice.id}_name`] = { name: `${name} audio receive channel ${choice.id} name` }
 			variables[`${id}_rx_${choice.id}_label`] = { name: `${name} audio receive channel ${choice.id} label` }
 			variables[`${id}_rx_${choice.id}_source`] = { name: `${name} audio receive channel ${choice.id} source` }
-			variables[`${id}_rx_${choice.id}_connected`] = {
-				name: `${name} audio receive channel ${choice.id} subscription connected`,
-			}
 			variables[`${id}_rx_${choice.id}_status`] = {
 				name: `${name} audio receive channel ${choice.id} subscription status`,
 			}
@@ -103,9 +100,6 @@ function addRoutingDefinitions(
 			}
 			variables[`${id}_rx_video_${choice.id}_source`] = {
 				name: `${name} video receive channel ${choice.id} source`,
-			}
-			variables[`${id}_rx_video_${choice.id}_connected`] = {
-				name: `${name} video receive channel ${choice.id} subscription connected`,
 			}
 			variables[`${id}_rx_video_${choice.id}_status`] = {
 				name: `${name} video receive channel ${choice.id} subscription status`,
@@ -250,12 +244,11 @@ function addRoutingValues(
 		variableValues[`${id}_rx_${channel}_label`] = channelDisplayLabel(device.audioRx?.[channel]?.name, channel)
 		variableValues[`${id}_rx_${channel}_source`] = subscriptionValue(source)
 		// The health of the subscription `_source` names. Every rx directory reply - a crosspoint's
-		// confirmation, a change notification, a refresh - lands here, so these follow the device's
+		// confirmation, a change notification, a refresh - lands here, so this follows the device's
 		// own status rather than what an action last asked for.
-		variableValues[`${id}_rx_${channel}_connected`] = source?.connected === true
 		variableValues[`${id}_rx_${channel}_status`] = source
-			? subscriptionStatusLabel(device.audioRx?.[channel]?.subscriptionStatus)
-			: ''
+			? subscriptionStateValue(device.audioRx?.[channel]?.subscriptionStatus)
+			: SUBSCRIPTION_STATE_NOT_SUBSCRIBED
 	}
 	for (const channel of channelNumbers(device.audioTx?.count)) {
 		variableValues[`${id}_tx_${channel}_name`] = getChannelSubscriptionName(device.audioTx?.[channel]) ?? ''
@@ -270,11 +263,9 @@ function addRoutingValues(
 		variableValues[`${id}_rx_video_${channel}_name`] = record?.name ?? ''
 		variableValues[`${id}_rx_video_${channel}_label`] = channelDisplayLabel(record?.name, channel)
 		variableValues[`${id}_rx_video_${channel}_source`] = subscriptionValue(source)
-		variableValues[`${id}_rx_video_${channel}_connected`] =
-			source !== undefined && isVideoSubscriptionActive(record?.subscriptionActive)
 		variableValues[`${id}_rx_video_${channel}_status`] = source
 			? videoSubscriptionStatusLabel(record?.subscriptionResolved, record?.subscriptionActive)
-			: ''
+			: SUBSCRIPTION_STATE_NOT_SUBSCRIBED
 	}
 	for (const channel of channelNumbers(device.videoTx?.count)) {
 		variableValues[`${id}_tx_video_${channel}_name`] = device.videoTx?.[channel]?.name ?? ''

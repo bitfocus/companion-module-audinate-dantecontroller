@@ -70,14 +70,13 @@ export interface DanteDeviceVariables {
  * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
  *   subscribed to, as `channel@device`, or empty when it is not subscribed. These are the names the
  *   receiver subscribed with, which it keeps after the transmitter is renamed.
- * - `<device>_rx_<n>_connected`, `<device>_rx_video_<n>_connected` - true only when the channel
- *   has a subscription and the receiver reports it connected (audio: `isSubscriptionConnected`,
- *   video: `isVideoSubscriptionActive`). False when it is not subscribed, so a refused or
- *   unresolved route never reads as a working one just because `_source` names it.
- * - `<device>_rx_<n>_status`, `<device>_rx_video_<n>_status` - why, as the receiver reports it:
- *   `subscriptionStatusLabel` for audio (`connected (0x0009)`, `unsupported (0x001c)`),
- *   `videoSubscriptionStatusLabel` for video (`active`, `not active`, `unresolved`). Empty when the
- *   channel is not subscribed.
+ * - `<device>_rx_<n>_status`, `<device>_rx_video_<n>_status` - the state of that subscription:
+ *   `connected` only when the receiver reports it working (audio: `isSubscriptionConnected`,
+ *   video: `isVideoSubscriptionActive`), `not subscribed` without one, and otherwise why not, as
+ *   the receiver reports it (`subscriptionStateValue` for audio, such as `unresolved` or
+ *   `unsupported`; `videoSubscriptionStatusLabel` for video, `not active` or `unresolved`). A
+ *   refused or unresolved route therefore never reads as a working one just because `_source`
+ *   names it.
  * - `<device>_rx_<n>_name`, `<device>_tx_<n>_name` and their `_video_` forms - one channel's name.
  *   A transmit channel's is the name subscriptions use, so its friendly name when it has one.
  * - `<device>_rx_<n>_label`, `<device>_tx_<n>_label` and their `_video_` forms - how to show the
