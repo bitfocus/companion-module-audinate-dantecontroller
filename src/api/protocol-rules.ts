@@ -208,11 +208,14 @@ export const DANTE_NAME_MAX_LENGTH = 31
  * like "01 IMAG-MIX-XLR-L", set in Dante Controller. Rejecting the space made those names impossible
  * to set again - including renaming a channel back to what it was. Device names stay without spaces.
  *
+ * `allowSlash` is for channel names too, for the same reason: Neutrik NA2-D-LINE units name an
+ * unnamed channel `01 n/a` from the factory, so renaming one back to that needs the `/`.
+ *
  * An empty name is accepted here because the module uses it to mean "reset to default".
  */
 export function validateDanteName(
 	name: string,
-	options: { allowColon?: boolean; allowSpace?: boolean } = {},
+	options: { allowColon?: boolean; allowSpace?: boolean; allowSlash?: boolean } = {},
 ): string | undefined {
 	if (name === '') {
 		return undefined
@@ -221,12 +224,16 @@ export function validateDanteName(
 		return `must be ${DANTE_NAME_MAX_LENGTH} characters or fewer (got ${name.length})`
 	}
 
-	const allowedChars = `A-Za-z0-9-${options.allowColon ? ':' : ''}${options.allowSpace ? ' ' : ''}`
+	const allowedChars = `A-Za-z0-9-${options.allowColon ? ':' : ''}${options.allowSpace ? ' ' : ''}${options.allowSlash ? '/' : ''}`
 	const allowed = new RegExp(`^[${allowedChars}]+$`)
 	if (!allowed.test(name)) {
 		// 'letters, digits and hyphens', optionally extended with 'colons'/'spaces' - built rather
 		// than hardcoded per combination so the phrasing stays natural ('X, Y and Z') either way.
-		const extras = [options.allowColon && 'colons', options.allowSpace && 'spaces'].filter(Boolean) as string[]
+		const extras = [
+			options.allowColon && 'colons',
+			options.allowSpace && 'spaces',
+			options.allowSlash && 'slashes',
+		].filter(Boolean) as string[]
 		const parts = ['letters', 'digits', ...(extras.length > 0 ? ['hyphens', ...extras] : ['hyphens'])]
 		const last = parts.pop()
 		return `may only contain ${parts.join(', ')} and ${last}`

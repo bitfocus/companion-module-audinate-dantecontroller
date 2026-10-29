@@ -135,6 +135,15 @@ describe('validateDanteName', () => {
 		// device names still may not
 		expect(validateDanteName('IMAG IO2')).toBeDefined()
 	})
+
+	it('allows a slash inside a channel name, as in the factory name 01 n/a', () => {
+		const channel = { allowColon: true, allowSpace: true, allowSlash: true }
+		expect(validateDanteName('01 n/a', channel)).toBeUndefined()
+		expect(validateDanteName('n/a', { allowSpace: true, allowSlash: true })).toBeUndefined()
+		expect(validateDanteName('01 n=a', channel)).toMatch(/hyphens, colons, spaces and slashes/)
+		// device names still may not
+		expect(validateDanteName('IMAG/IO2')).toBeDefined()
+	})
 })
 
 describe('channelDisplayLabel', () => {

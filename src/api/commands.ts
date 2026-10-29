@@ -82,8 +82,9 @@ export function setChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
-	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -127,8 +128,9 @@ export function setAudioRxChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
-	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -157,8 +159,9 @@ export function setAudioTxChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	// allowSpace: audio channels carry names like "01 IMAG-MIX-XLR-L" as well - see validateDanteName.
-	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -694,9 +697,9 @@ function setVideoChannelName(
 ): void {
 	if (!hasChannel(channelNumber, 'video channel rename')) return
 
-	// allowSpace: real hardware ships with (and accepted, live) names like "Decoder Video Channel" -
-	// see the note on validateDanteName's allowSpace option.
-	const invalid = validateDanteName(channelName, { allowSpace: true })
+	// allowSpace, allowSlash: real hardware ships with (and accepted, live) names like "Decoder Video
+	// Channel", and channel names follow one rule - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
