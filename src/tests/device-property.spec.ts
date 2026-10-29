@@ -11,15 +11,16 @@ import {
 	type DevicesData,
 } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, ip, name } from './ids.js'
 
-const A = '10.0.0.5'
-const CONTROLLER = '10.0.0.1'
+const A = ip('10.0.0.5')
+const CONTROLLER = ip('10.0.0.1')
 
 function devicesData(): DevicesData {
 	return {
-		[CONTROLLER]: { name: 'AController', ports: {} },
+		[CONTROLLER]: { name: name('AController'), ports: {} },
 		[A]: {
-			name: 'DeviceA',
+			name: name('DeviceA'),
 			ports: { ARC: 4440 },
 			locked: false,
 			sr: 48000,
@@ -44,10 +45,14 @@ function devicesData(): DevicesData {
 			hardwareVersionMajor: 4,
 			hardwareVersionMinor: 2,
 			hardwareVersionPatch: 3,
-			audioRx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
-			audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
-			videoRx: { count: 1, 1: { number: 1, name: 'Video In 1' } },
-			videoTx: { count: 2, 1: { number: 1, name: 'Cam 1' }, 2: { number: 2, name: 'Cam 2' } },
+			audioRx: { count: 2, 1: { number: ch(1), name: 'In 1' }, 2: { number: ch(2), name: 'In 2' } },
+			audioTx: {
+				count: 2,
+				1: { number: ch(1), name: '01' },
+				2: { number: ch(2), name: '02', friendlyName: 'Talkback' },
+			},
+			videoRx: { count: 1, 1: { number: ch(1), name: 'Video In 1' } },
+			videoTx: { count: 2, 1: { number: ch(1), name: 'Cam 1' }, 2: { number: ch(2), name: 'Cam 2' } },
 		},
 	}
 }
@@ -61,6 +66,7 @@ function instance(data: DevicesData = devicesData()) {
 		rxChannelsChoices: {},
 		txChannelsChoices: {},
 		setFeedbackDefinitions: vi.fn(),
+		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		log: vi.fn(),
@@ -244,6 +250,7 @@ describe('Device Property feedback', () => {
 describe('the feedback and the variables cannot disagree', () => {
 	it('reports the same value the corresponding variable holds', () => {
 		const self = instance()
+		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
@@ -299,7 +306,7 @@ describe('property changes schedule a feedback check', () => {
 describe('the Create Module Variables option', () => {
 	function withVariables(enabled: boolean) {
 		const self = instance()
-		self.config = { ...self.config, variables: enabled }
+		self.config = { ...self.config, variables: enabled, routingVariables: enabled }
 		self.setVariableDefinitions = vi.fn()
 		self.setVariableValues = vi.fn()
 		return self
@@ -321,7 +328,7 @@ describe('the Create Module Variables option', () => {
 		expect(self.setVariableValues).not.toHaveBeenCalled()
 	})
 
-	it('clears the definitions when disabled, so variables from a previous run do not linger', () => {
+	it('clears the definitions when both options are off, so variables from a previous run do not linger', () => {
 		const self = withVariables(false)
 		UpdateVariableDefinitions(self)
 
@@ -343,7 +350,7 @@ describe('variable ids are sanitised', () => {
 
 	function withMessyDeviceName() {
 		const data = devicesData()
-		data[A].name = MESSY
+		data[A].name = name(MESSY)
 		const self = instance(data)
 		self.setVariableDefinitions = vi.fn()
 		self.setVariableValues = vi.fn()
@@ -379,6 +386,7 @@ describe('variable ids are sanitised', () => {
 
 	it('keeps the unsanitised name in the devices list, which reports real device names', () => {
 		const self = withMessyDeviceName()
+		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 
 		const written = (self.setVariableValues as ReturnType<typeof vi.fn>).mock.calls[0][0]

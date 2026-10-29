@@ -3,8 +3,8 @@
  */
 
 import { DANTE_CONST } from './const.js'
-import { validateDanteName } from './protocol-rules.js'
-import { Regex, createModuleLogger } from '@companion-module/base'
+import { isSubscriptionRefused, subscriptionStatusLabel, validateDanteName } from './protocol-rules.js'
+import { createModuleLogger } from '@companion-module/base'
 import type DanteInstance from '../main.js'
 import { intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
@@ -14,22 +14,28 @@ import {
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
 	findDeviceIpByName,
+	requireDeviceIp,
 	findVideoRxChannelByName,
+	getAudioRxChannelSource,
 	getChannelSubscriptionName,
+	getVideoRxChannelSource,
 } from './devices.js'
-import { getVideoRxChannels, getVideoTxChannels } from './queries.js'
+import { getRxChannels, getVideoRxChannels, getVideoTxChannels } from './queries.js'
+import { awaitCommandAck, awaitRxState, DanteCommandError, type AckOptions, type ConfirmOptions } from './requests.js'
+import type { ChannelMediaType } from './types.js'
+import { type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:commands')
 
 /** Resets a device's name back to its factory default. */
-export function resetDeviceName(self: DanteInstance, ipaddress: string): void {
+export function resetDeviceName(self: DanteInstance, ipaddress: DeviceIp): void {
 	logCommand(self, deviceLabel(self, ipaddress), 'reset device name to factory default')
 	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.setDeviceName)
 	sendCommand(self, commandBuffer, ipaddress)
 }
 
 /** Sets a device's name. */
-export function setDeviceName(self: DanteInstance, ipaddress: string, name: string): void {
+export function setDeviceName(self: DanteInstance, ipaddress: DeviceIp, name: string): void {
 	const invalid = validateDanteName(name)
 	if (invalid) {
 		logger.error(`Device name '${name}' ${invalid}`)
@@ -68,7 +74,7 @@ function hasChannel(channelNumber: number, what: string): boolean {
 /** Sets the name of an rx or tx channel on a device. */
 export function setChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelName = '',
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
@@ -76,7 +82,9 @@ export function setChannelName(
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -113,14 +121,16 @@ export function setChannelName(
 /** Sets the name of an rx channel on a device. */
 export function setAudioRxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -142,14 +152,16 @@ export function setAudioRxChannelName(
 /** Sets the name of a tx channel on a device. */
 export function setAudioTxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
 	if (!hasChannel(channelNumber, 'channel rename')) return
 
 	// An empty name is how the reset actions ask for the factory default, so it stays allowed.
-	const invalid = validateDanteName(channelName, { allowColon: true })
+	// allowSpace, allowSlash: audio channels carry names like "01 IMAG-MIX-XLR-L" and "01 n/a" as
+	// well - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowColon: true, allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -175,7 +187,7 @@ export function setAudioTxChannelName(
 /** Clears the name of an rx or tx channel on a device back to its default. */
 export function resetChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelType: 'rx' | 'tx' = 'rx',
 	channelNumber = 0,
 ): void {
@@ -183,12 +195,12 @@ export function resetChannelName(
 }
 
 /** Clears the name of an rx channel on a device back to its default. */
-export function resetAudioRxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetAudioRxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setAudioRxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Clears the name of a tx channel on a device back to its default. */
-export function resetAudioTxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetAudioTxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setAudioTxChannelName(self, ipaddress, channelNumber)
 }
 
@@ -210,14 +222,7 @@ const MAX_UNSUBSCRIBE_PER_COMMAND = 16
  * count as a u16 here is what makes the bytes line up; widening it would shift the whole payload.
  */
 export function clearAllAudioCrosspoints(self: DanteInstance, destinationDevice: string): void {
-	// Check if destinationDevice is an IP or a name
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-
-	if (!ipaddress) {
-		logger.error("Can't find " + destinationDevice + ' IP address')
-		return
-	}
+	const ipaddress = requireDeviceIp(self, destinationDevice)
 
 	const rxCount = self.devicesData[ipaddress]?.audioRx?.count ?? 0
 	if (rxCount < 1) {
@@ -262,35 +267,73 @@ export function clearAllVideoCrosspoints(self: DanteInstance, destinationDevice:
 	logger.info(`Cleared all ${videoRxCount} video receive channels on ${destinationDevice}`)
 }
 
-/** Subscribes a destination rx channel to a source tx channel, creating a Dante crosspoint. */
+/** A crosspoint command as sent: where it went, and what the receive channel shows once applied. */
+export interface SentCrosspoint {
+	ip: DeviceIp
+	/** The destination device as named in messages. */
+	destination: string
+	mediaType: ChannelMediaType
+	channel: number
+	command: Buffer
+	/** The subscription the channel reports once the command has taken effect, or undefined when cleared. */
+	expected: { deviceName: string; channelName: string } | undefined
+}
 
+/**
+ * Resolves a crosspoint's destination device to the address to send to, refusing a device that is
+ * locked: a Dante-locked device does not change its subscriptions, and saying so beats a command
+ * that silently does nothing.
+ */
+function crosspointDestination(self: DanteInstance, destinationDevice: string): DeviceIp {
+	const ipaddress = requireDeviceIp(self, destinationDevice)
+	if (self.devicesData[ipaddress]?.locked) {
+		throw new DanteCommandError(`${deviceLabel(self, ipaddress)} is locked, so it will not change its subscriptions`)
+	}
+	return ipaddress
+}
+
+/** A destination channel number, or an error naming what was asked for. */
+function crosspointChannel(channel: string | number, what: string): number {
+	const channelNumber = Number(channel)
+	if (!Number.isInteger(channelNumber) || channelNumber < 1) {
+		throw new DanteCommandError(`No channel selected for ${what} - pick one in the action's Channel dropdown`)
+	}
+	return channelNumber
+}
+
+function sendCrosspoint(self: DanteInstance, sent: SentCrosspoint): SentCrosspoint {
+	if (!sendCommand(self, sent.command, sent.ip)) {
+		throw new DanteCommandError(`Could not send to ${sent.destination}`)
+	}
+	return sent
+}
+
+/**
+ * Subscribes a destination rx channel to a source tx channel, creating a Dante crosspoint. Throws
+ * {@link DanteCommandError} when the command cannot be sent; see {@link confirmCrosspoint} for
+ * knowing it took effect.
+ */
 export function makeAudioCrosspoint(
 	self: DanteInstance,
 	destinationDevice: string,
 	sourceChannelName: string,
 	sourceDeviceName: string,
 	destinationChannel: string | number,
-): void {
+): SentCrosspoint {
 	const sourceChannel = findAudioTxChannelByName(self, sourceDeviceName, sourceChannelName)
 	const sourceSubscriptionName = getChannelSubscriptionName(sourceChannel) || sourceChannelName
 	const sourceChannelNameBuffer = Buffer.from(sourceSubscriptionName, 'ascii')
 	const sourceDeviceNameBuffer = Buffer.from(sourceDeviceName, 'ascii')
 
-	const destinationChannelNumber =
-		findAudioRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel
-
-	// Check if destinationDevice is an IP or a name
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-
-	if (!ipaddress) {
-		logger.error("Can't find " + destinationDevice + ' IP address')
-		return
-	}
+	const ipaddress = crosspointDestination(self, destinationDevice)
+	const destinationChannelNumber = crosspointChannel(
+		findAudioRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel,
+		'crosspoint',
+	)
 
 	const commandArguments = Buffer.concat([
 		Buffer.from('0001', 'hex'), // unknown code
-		intToBuffer(Number(destinationChannelNumber)), // destination channel number
+		intToBuffer(destinationChannelNumber), // destination channel number
 		intToBuffer(22), // Byte index of source channel Name
 		intToBuffer(22 + sourceChannelNameBuffer.length + 1), // Byte index of source device name
 		Buffer.alloc(4), // padding until byte index of source channel name
@@ -305,46 +348,175 @@ export function makeAudioCrosspoint(
 		`subscribe to ${sourceDeviceName} / ${sourceSubscriptionName}`,
 	)
 
-	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.subscription, commandArguments)
-
-	sendCommand(self, commandBuffer, ipaddress)
-
-	// get updated routing for feedback
-	//		getRxChannels(self, ipaddress);
+	return sendCrosspoint(self, {
+		ip: ipaddress,
+		destination: deviceLabel(self, ipaddress),
+		mediaType: 'audio',
+		channel: destinationChannelNumber,
+		command: makeCommand(self, DANTE_CONST.COMMANDS.subscription, commandArguments),
+		expected: { deviceName: sourceDeviceName, channelName: sourceSubscriptionName },
+	})
 }
 
-/** Unsubscribes a destination rx channel, clearing its Dante crosspoint. */
+/** Unsubscribes a destination rx channel, clearing its Dante crosspoint. See {@link makeAudioCrosspoint}. */
 export function clearAudioCrosspoint(
 	self: DanteInstance,
 	destinationDevice: string,
 	destinationChannel: string | number,
-): void {
-	const destinationChannelNumber =
-		findAudioRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel
-
-	if (!hasChannel(Number(destinationChannelNumber), 'clear crosspoint')) return
-
-	// Check if destinationDevice is an IP or a name
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-
-	if (!ipaddress) {
-		logger.error("Can't find " + destinationDevice + ' IP address')
-		return
-	}
+): SentCrosspoint {
+	const ipaddress = crosspointDestination(self, destinationDevice)
+	const destinationChannelNumber = crosspointChannel(
+		findAudioRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel,
+		'clear crosspoint',
+	)
 
 	logCommand(self, `${destinationDevice} ch${destinationChannelNumber}`, 'clear subscription')
 
 	const commandArguments = Buffer.concat([
 		Buffer.from('0401', 'hex'),
-		intToBuffer(Number(destinationChannelNumber)),
+		intToBuffer(destinationChannelNumber),
 		Buffer.from('005c006d', 'hex'),
 		Buffer.alloc(1),
 	])
 
-	const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.subscription, commandArguments)
+	return sendCrosspoint(self, {
+		ip: ipaddress,
+		destination: deviceLabel(self, ipaddress),
+		mediaType: 'audio',
+		channel: destinationChannelNumber,
+		command: makeCommand(self, DANTE_CONST.COMMANDS.subscription, commandArguments),
+		expected: undefined,
+	})
+}
 
-	sendCommand(self, commandBuffer, ipaddress)
+/** Dante names are case-insensitive, and devices do not always echo the case they were given. */
+const sameName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0
+
+/** Whether the destination channel now reports what the command asked for. */
+export function crosspointApplied(self: DanteInstance, sent: SentCrosspoint): boolean {
+	const source =
+		sent.mediaType === 'video'
+			? getVideoRxChannelSource(self, sent.ip, sent.channel)
+			: getAudioRxChannelSource(self, sent.ip, sent.channel)
+	if (!sent.expected) return source === undefined
+	return (
+		source !== undefined &&
+		sameName(source.deviceName, sent.expected.deviceName) &&
+		sameName(source.channelName, sent.expected.channelName)
+	)
+}
+
+export interface ConfirmCrosspointOptions {
+	ack?: AckOptions
+	confirm?: ConfirmOptions
+}
+
+/**
+ * Waits for a crosspoint command to take effect: the device's acknowledgement first, then its
+ * receive channel reporting the requested subscription. Throws {@link DanteCommandError} saying
+ * which of the two failed.
+ *
+ * The state is what decides. A rejection fails at once, but a missing acknowledgement does not -
+ * the command may have arrived and the reply been lost - so the channel gets its chance to show the
+ * change either way.
+ *
+ * Must be called straight after the command was sent, before anything is awaited.
+ */
+export async function confirmCrosspoint(
+	self: DanteInstance,
+	sent: SentCrosspoint,
+	options: ConfirmCrosspointOptions = {},
+): Promise<void> {
+	const what = `${sent.mediaType} channel ${sent.channel} on ${sent.destination}`
+	const ack = await awaitCommandAck(self, sent.ip, sent.command, options.ack)
+	if (ack.kind === 'rejected') {
+		throw new DanteCommandError(
+			`${sent.destination} rejected the change to ${sent.mediaType} channel ${sent.channel} ` +
+				`(result 0x${ack.code.toString(16).padStart(4, '0')})`,
+		)
+	}
+
+	const applied = await awaitRxState(
+		self,
+		sent.ip,
+		() => crosspointApplied(self, sent),
+		() => (sent.mediaType === 'video' ? getVideoRxChannels(self, sent.ip) : getRxChannels(self, sent.ip)),
+		options.confirm,
+	)
+	const wanted = sent.expected ? `${sent.expected.channelName}@${sent.expected.deviceName}` : 'no source'
+	if (applied) {
+		await confirmAudioConnected(self, sent, wanted, options.confirm)
+		return
+	}
+
+	throw new DanteCommandError(
+		ack.kind === 'unanswered'
+			? `${sent.destination} did not answer, and ${what} does not show ${wanted}`
+			: `${sent.destination} accepted the change, but ${what} does not show ${wanted}`,
+	)
+}
+
+/**
+ * For an audio route from a device that is on the network, waits for the subscription to connect.
+ *
+ * A device takes any source name, existing or not, and reports it straight back - it stays
+ * "unresolved" until a transmitter by that name appears, which is how Dante pre-patching works. So
+ * when the source is not online the subscription is all that can be confirmed. When it is online,
+ * failing to connect is a real failure (no flows left, a clock domain mismatch, a refused
+ * self-route), and the device's status code says which. A new flow was measured to take ~130 ms.
+ *
+ * Video channels report no comparable status, so they are confirmed by subscription alone.
+ */
+async function confirmAudioConnected(
+	self: DanteInstance,
+	sent: SentCrosspoint,
+	wanted: string,
+	options: ConfirmOptions | undefined,
+): Promise<void> {
+	if (sent.mediaType !== 'audio' || !sent.expected) return
+	if (findDeviceIpByName(self, sent.expected.deviceName) === undefined) return
+
+	const isConnected = () => getAudioRxChannelSource(self, sent.ip, sent.channel)?.connected === true
+	const statusNow = () => self.devicesData[sent.ip]?.audioRx?.[sent.channel]?.subscriptionStatus
+	// A refusal (0x001c for a self-route, say) ends the wait at once instead of after the timeout.
+	// Only a reply that arrives during the wait can refuse: the first check sees what the device
+	// reported before, which for a repeated route can be the refusal of an earlier attempt.
+	let checks = 0
+	const settled = () => {
+		checks += 1
+		return isConnected() || (checks > 1 && isSubscriptionRefused(statusNow()))
+	}
+	await awaitRxState(self, sent.ip, settled, () => getRxChannels(self, sent.ip), options)
+	if (isConnected()) return
+
+	const status = statusNow()
+	throw new DanteCommandError(
+		`${sent.destination} audio channel ${sent.channel} is subscribed to ${wanted} but not connected: ` +
+			subscriptionStatusLabel(status),
+	)
+}
+
+/** {@link makeAudioCrosspoint}, resolving once the device shows the route. See {@link confirmCrosspoint}. */
+export async function makeAudioCrosspointConfirmed(
+	self: DanteInstance,
+	destinationDevice: string,
+	sourceChannelName: string,
+	sourceDeviceName: string,
+	destinationChannel: string | number,
+	options?: ConfirmCrosspointOptions,
+): Promise<void> {
+	const sent = makeAudioCrosspoint(self, destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
+	await confirmCrosspoint(self, sent, options)
+}
+
+/** {@link clearAudioCrosspoint}, resolving once the device shows the channel cleared. */
+export async function clearAudioCrosspointConfirmed(
+	self: DanteInstance,
+	destinationDevice: string,
+	destinationChannel: string | number,
+	options?: ConfirmCrosspointOptions,
+): Promise<void> {
+	await confirmCrosspoint(self, clearAudioCrosspoint(self, destinationDevice, destinationChannel), options)
 }
 
 /**
@@ -399,11 +571,6 @@ function makeVideoCrosspointArguments(
 }
 
 /**
- * Subscribes a destination video rx channel to a source video tx channel, using the `AV_EXTENDED`
- * protocol these AV-X-capable devices carry video routing over - there is no video crosspoint under
- * the plain `CONTROL` protocol {@link makeAudioCrosspoint} uses for audio.
- */
-/**
  * Re-reads a device's video channel directory after a command that changed it.
  *
  * Audio needs no equivalent: Dante devices announce their own routing and naming changes over the
@@ -417,28 +584,29 @@ function makeVideoCrosspointArguments(
  * query, confirmed live by issuing the two back-to-back and reading the updated directory every
  * time, across repeated set/clear cycles.
  */
-function refreshVideoChannels(self: DanteInstance, ipaddress: string, direction: 'rx' | 'tx'): void {
+function refreshVideoChannels(self: DanteInstance, ipaddress: DeviceIp, direction: 'rx' | 'tx'): void {
 	if (direction === 'rx') getVideoRxChannels(self, ipaddress)
 	else getVideoTxChannels(self, ipaddress)
 }
 
+/**
+ * Subscribes a destination video rx channel to a source video tx channel, using the `AV_EXTENDED`
+ * protocol these AV-X-capable devices carry video routing over - there is no video crosspoint under
+ * the plain `CONTROL` protocol {@link makeAudioCrosspoint} uses for audio. The device's video
+ * channels are re-read straight after - see `refreshVideoChannels`.
+ */
 export function makeVideoCrosspoint(
 	self: DanteInstance,
 	destinationDevice: string,
 	sourceChannelName: string,
 	sourceDeviceName: string,
 	destinationChannel: string | number,
-): void {
-	const destinationChannelNumber =
-		findVideoRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel
-	if (!hasChannel(Number(destinationChannelNumber), 'video crosspoint')) return
-
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-	if (!ipaddress) {
-		logger.error("Can't find " + destinationDevice + ' IP address')
-		return
-	}
+): SentCrosspoint {
+	const ipaddress = crosspointDestination(self, destinationDevice)
+	const destinationChannelNumber = crosspointChannel(
+		findVideoRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel,
+		'video crosspoint',
+	)
 
 	logCommand(
 		self,
@@ -446,13 +614,20 @@ export function makeVideoCrosspoint(
 		`subscribe to ${sourceDeviceName} / ${sourceChannelName}`,
 	)
 
-	const commandArguments = makeVideoCrosspointArguments(Number(destinationChannelNumber), {
+	const commandArguments = makeVideoCrosspointArguments(destinationChannelNumber, {
 		channelName: sourceChannelName,
 		deviceName: sourceDeviceName,
 	})
-	const commandBuffer = makeAvCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL, commandArguments)
-	sendCommand(self, commandBuffer, ipaddress)
+	const sent = sendCrosspoint(self, {
+		ip: ipaddress,
+		destination: deviceLabel(self, ipaddress),
+		mediaType: 'video',
+		channel: destinationChannelNumber,
+		command: makeAvCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL, commandArguments),
+		expected: { deviceName: sourceDeviceName, channelName: sourceChannelName },
+	})
 	refreshVideoChannels(self, ipaddress, 'rx')
+	return sent
 }
 
 /** Unsubscribes a destination video rx channel, clearing its video crosspoint. */
@@ -460,24 +635,49 @@ export function clearVideoCrosspoint(
 	self: DanteInstance,
 	destinationDevice: string,
 	destinationChannel: string | number,
-): void {
-	const destinationChannelNumber =
-		findVideoRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel
-	if (!hasChannel(Number(destinationChannelNumber), 'clear video crosspoint')) return
-
-	const IP = RegExp(Regex.IP.slice(1, -1))
-	const ipaddress = IP.test(destinationDevice) ? destinationDevice : findDeviceIpByName(self, destinationDevice)
-	if (!ipaddress) {
-		logger.error("Can't find " + destinationDevice + ' IP address')
-		return
-	}
+): SentCrosspoint {
+	const ipaddress = crosspointDestination(self, destinationDevice)
+	const destinationChannelNumber = crosspointChannel(
+		findVideoRxChannelByName(self, destinationDevice, String(destinationChannel))?.number ?? destinationChannel,
+		'clear video crosspoint',
+	)
 
 	logCommand(self, `${destinationDevice} video ch${destinationChannelNumber}`, 'clear video subscription')
 
-	const commandArguments = makeVideoCrosspointArguments(Number(destinationChannelNumber), undefined)
-	const commandBuffer = makeAvCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL, commandArguments)
-	sendCommand(self, commandBuffer, ipaddress)
+	const commandArguments = makeVideoCrosspointArguments(destinationChannelNumber, undefined)
+	const sent = sendCrosspoint(self, {
+		ip: ipaddress,
+		destination: deviceLabel(self, ipaddress),
+		mediaType: 'video',
+		channel: destinationChannelNumber,
+		command: makeAvCommand(self, DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL, commandArguments),
+		expected: undefined,
+	})
 	refreshVideoChannels(self, ipaddress, 'rx')
+	return sent
+}
+
+/** {@link makeVideoCrosspoint}, resolving once the device shows the route. See {@link confirmCrosspoint}. */
+export async function makeVideoCrosspointConfirmed(
+	self: DanteInstance,
+	destinationDevice: string,
+	sourceChannelName: string,
+	sourceDeviceName: string,
+	destinationChannel: string | number,
+	options?: ConfirmCrosspointOptions,
+): Promise<void> {
+	const sent = makeVideoCrosspoint(self, destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
+	await confirmCrosspoint(self, sent, options)
+}
+
+/** {@link clearVideoCrosspoint}, resolving once the device shows the channel cleared. */
+export async function clearVideoCrosspointConfirmed(
+	self: DanteInstance,
+	destinationDevice: string,
+	destinationChannel: string | number,
+	options?: ConfirmCrosspointOptions,
+): Promise<void> {
+	await confirmCrosspoint(self, clearVideoCrosspoint(self, destinationDevice, destinationChannel), options)
 }
 
 /**
@@ -491,15 +691,15 @@ const VIDEO_NAME_GAP = 12
 function setVideoChannelName(
 	self: DanteInstance,
 	opcode: number,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName: string,
 ): void {
 	if (!hasChannel(channelNumber, 'video channel rename')) return
 
-	// allowSpace: real hardware ships with (and accepted, live) names like "Decoder Video Channel" -
-	// see the note on validateDanteName's allowSpace option.
-	const invalid = validateDanteName(channelName, { allowSpace: true })
+	// allowSpace, allowSlash: real hardware ships with (and accepted, live) names like "Decoder Video
+	// Channel", and channel names follow one rule - see validateDanteName.
+	const invalid = validateDanteName(channelName, { allowSpace: true, allowSlash: true })
 	if (invalid) {
 		logger.error(`Channel name '${channelName}' ${invalid}`)
 		return
@@ -533,7 +733,7 @@ function setVideoChannelName(
 /** Sets the name of a video rx channel on a device. */
 export function setVideoRxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -549,7 +749,7 @@ export function setVideoRxChannelName(
 /** Sets the name of a video tx channel on a device. */
 export function setVideoTxChannelName(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	channelNumber: number,
 	channelName = '',
 ): void {
@@ -563,17 +763,17 @@ export function setVideoTxChannelName(
 }
 
 /** Clears the name of a video rx channel on a device back to its default. */
-export function resetVideoRxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetVideoRxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setVideoRxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Clears the name of a video tx channel on a device back to its default. */
-export function resetVideoTxChannelName(self: DanteInstance, ipaddress: string, channelNumber = 0): void {
+export function resetVideoTxChannelName(self: DanteInstance, ipaddress: DeviceIp, channelNumber = 0): void {
 	setVideoTxChannelName(self, ipaddress, channelNumber)
 }
 
 /** Sets a device's link-offset latency. */
-export function setLatency(self: DanteInstance, ipaddress: string, latency: number): void {
+export function setLatency(self: DanteInstance, ipaddress: DeviceIp, latency: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), `set latency to ${latency}ms`)
 	const commandArguments = Buffer.from('050382050020021100108301002400000000000000000000000000000000', 'hex')
 	commandArguments.writeUInt32BE(latency * 1000000, 22)
@@ -586,7 +786,7 @@ export function setLatency(self: DanteInstance, ipaddress: string, latency: numb
  * Sets a device's sample rate. A `sampleRate` of 0 queries the current value instead of changing it
  * (see {@link getSampleRate}).
  */
-export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate: number): void {
+export function setSampleRate(self: DanteInstance, ipaddress: DeviceIp, sampleRate: number): void {
 	// 0 is the query form of this command, not a rate anyone set
 	logCommand(
 		self,
@@ -605,7 +805,7 @@ export function setSampleRate(self: DanteInstance, ipaddress: string, sampleRate
 }
 
 /** Sets a device's sample rate pullup. */
-export function setPullup(self: DanteInstance, ipaddress: string, pullup: number): void {
+export function setPullup(self: DanteInstance, ipaddress: DeviceIp, pullup: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), `set sample rate pullup to ${pullup}`)
 	const flag = intToBuffer(3, 4)
 	const commandArguments = Buffer.concat([
@@ -627,7 +827,7 @@ export function setPullup(self: DanteInstance, ipaddress: string, pullup: number
  * Sets a device's audio encoding (bit depth). An `encoding` of 0 queries the current value instead
  * of changing it (see {@link getEncoding}).
  */
-export function setEncoding(self: DanteInstance, ipaddress: string, encoding: number): void {
+export function setEncoding(self: DanteInstance, ipaddress: DeviceIp, encoding: number): void {
 	logCommand(self, deviceLabel(self, ipaddress), encoding === 0 ? 'query encoding' : `set encoding to ${encoding}`)
 	const flag = intToBuffer(encoding > 0 ? 1 : 0, 4)
 	const commandArguments = Buffer.concat([Buffer.from('00000064', 'hex'), flag, intToBuffer(encoding, 4)])
@@ -644,7 +844,7 @@ export function setEncoding(self: DanteInstance, ipaddress: string, encoding: nu
 /** Sets the output level for a channel on a device. */
 export function setLevel(
 	self: DanteInstance,
-	ipaddress: string,
+	ipaddress: DeviceIp,
 	_direction: 'out',
 	channelNumber: number,
 	levelSetting: number,

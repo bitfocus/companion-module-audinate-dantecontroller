@@ -59,6 +59,39 @@ export interface DanteDeviceVariables {
 	hardware_build: number
 }
 
+/**
+ * The routing variables, published when the `routingVariables` config option is on. Built for a
+ * router integration, so each one is a single value that changes on its own:
+ *
+ * `<device>` is the device name with characters Companion cannot use replaced by `_`.
+ *
+ * - `<device>_device_name` - the device's name as it is, which the sanitised prefix cannot be
+ *   turned back into.
+ * - `<device>_rx_<n>_source`, `<device>_rx_video_<n>_source` - what a receive channel is
+ *   subscribed to, as `channel@device`, or empty when it is not subscribed. These are the names the
+ *   receiver subscribed with, which it keeps after the transmitter is renamed.
+ * - `<device>_rx_<n>_status`, `<device>_rx_video_<n>_status` - the state of that subscription:
+ *   `connected` only when the receiver reports it working (audio: `isSubscriptionConnected`,
+ *   video: `isVideoSubscriptionActive`), `not subscribed` without one, and otherwise why not, as
+ *   the receiver reports it (`subscriptionStateValue` for audio, such as `unresolved` or
+ *   `unsupported`; `videoSubscriptionStatusLabel` for video, `not active` or `unresolved`). A
+ *   refused or unresolved route therefore never reads as a working one just because `_source`
+ *   names it.
+ * - `<device>_rx_<n>_name`, `<device>_tx_<n>_name` and their `_video_` forms - one channel's name.
+ *   A transmit channel's is the name subscriptions use, so its friendly name when it has one.
+ * - `<device>_rx_<n>_label`, `<device>_tx_<n>_label` and their `_video_` forms - how to show the
+ *   channel: its name, or `Ch <n>` when the name is empty or a placeholder such as `01 n/a`
+ *   (`channelDisplayLabel`). Display only; the `_name` keeps the exact name Dante routes by.
+ */
+export interface DanteRoutingVariables {
+	device_name: string
+	source: string
+	connected: boolean
+	status: string
+	name: string
+	label: string
+}
+
 /** A `<deviceName>_<suffix>` variable id for one of the {@link DanteDeviceVariables} suffixes. */
 export type DanteDeviceVariableId = `${string}_${keyof DanteDeviceVariables & string}`
 
@@ -79,6 +112,8 @@ export type DanteVariableValues = {
 	devices: string[]
 } & {
 	[Suffix in keyof DanteDeviceVariables as `${string}_${Suffix & string}`]: DanteDeviceVariables[Suffix] | undefined
+} & {
+	[Suffix in keyof DanteRoutingVariables as `${string}_${Suffix & string}`]: DanteRoutingVariables[Suffix] | undefined
 }
 
 export interface DanteModuleTypes {

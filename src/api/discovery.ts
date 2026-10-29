@@ -11,6 +11,7 @@ import { keepAlive, registerDevice, scheduleUpdateData } from './devices.js'
 import { updateDeviceChoice } from './choices.js'
 import { getChannelCount, getSettings, getSettingsPort, getVideoRxChannels, getVideoTxChannels } from './queries.js'
 import { addressOnInterface } from '../config.js'
+import { asDeviceName, brandedKeys, deviceIpOf } from './ids.js'
 
 const logger = createModuleLogger('api:discovery')
 
@@ -79,11 +80,11 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 			// register services and port
 			for (const [id, danteService] of Object.entries(DANTE_CONST.SERVICES)) {
 				const dotIndex = name.indexOf('.')
-				const deviceName = name.slice(0, dotIndex)
+				const deviceName = asDeviceName(name.slice(0, dotIndex))
 				const serviceName = name.slice(dotIndex + 1)
 
 				if (serviceName == danteService) {
-					const deviceIp = rinfo.address
+					const deviceIp = deviceIpOf(rinfo)
 					if (self.debug) {
 						logger.debug(`mDNS SRV from ${deviceIp} : ${deviceName} offers ${id} on port ${answer.data.port}`)
 					}
@@ -98,12 +99,9 @@ export function danteDiscovery(self: DanteInstance, response: MdnsResponsePacket
 					}
 
 					if (currDevice.name != deviceName) {
-						// updateDeviceChoice reads the outgoing name off the device record to find the choice
-						// it must replace, so the record has to still hold it. Assigning first left the old
-						// entry in `devicesChoices` alongside the new one.
+						// records the new name and rebuilds the dropdown; it reads the outgoing name off the
+						// record for its log line, so the record must not be renamed first
 						updateDeviceChoice(self, deviceIp, deviceName)
-						currDevice.name = deviceName
-						scheduleUpdateData(self)
 					}
 					if (!currDevice.ports) {
 						currDevice.ports = {}
@@ -145,7 +143,7 @@ export function getMdnsServices(self: DanteInstance): void {
 	if (self.debug) {
 		logger.debug(
 			`mDNS discovery sweep: asking for ${DANTE_CONST.SERVICES_ARRAY.length} Dante service types` +
-				` (${Object.keys(self.devicesData).length} device(s) currently known)`,
+				` (${brandedKeys(self.devicesData).length} device(s) currently known)`,
 		)
 	}
 

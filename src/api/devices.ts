@@ -23,7 +23,17 @@ import type {
 } from './types.js'
 import { isSubscriptionConnected } from './protocol-rules.js'
 import type { DanteDeviceVariables } from '../types.js'
-import { insertDeviceChoice } from './choices.js'
+import { refreshDeviceChoices } from './choices.js'
+import { DanteCommandError } from './requests.js'
+import {
+	brandedEntries,
+	brandedKeys,
+	channelNumbers,
+	asDeviceIp,
+	asDeviceName,
+	type DeviceIp,
+	type DeviceName,
+} from './ids.js'
 
 const logger = createModuleLogger('api:devices')
 
@@ -141,7 +151,7 @@ function formatVersion(major?: number, minor?: number, patch?: number): string |
 	return `${major ?? 0}.${minor ?? 0}.${patch ?? 0}`
 }
 
-function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceProperty): unknown {
+function computeDeviceProperty(device: DeviceData, ip: DeviceIp, property: DeviceProperty): unknown {
 	switch (property) {
 		case 'ip':
 			return ip
@@ -210,7 +220,7 @@ function computeDeviceProperty(device: DeviceData, ip: string, property: DeviceP
  */
 export function deviceProperty<Property extends DeviceProperty>(
 	device: DeviceData,
-	ip: string,
+	ip: DeviceIp,
 	property: Property,
 ): DanteDeviceVariables[Property] | undefined {
 	return computeDeviceProperty(device, ip, property) as DanteDeviceVariables[Property] | undefined
@@ -235,112 +245,68 @@ export function hasVideoTxChannels(device: DeviceData | undefined): boolean {
 	return (device?.videoTx?.count ?? 0) > 0
 }
 
-/** @returns The IP address of the device with this name, if known. */
-export function findDeviceIpByName(self: DanteInstance, deviceName: string): string | undefined {
-	for (const [ip, device] of Object.entries(self.devicesData)) {
-		if (device?.name == deviceName) {
-			return ip
-		}
+/**
+ * The address of the device with this name, if it is online. Exact first, then ignoring case: Dante
+ * names are case-insensitive, and a name typed into an action need not match the device's case.
+ */
+export function findDeviceIpByName(self: DanteInstance, name: string): DeviceIp | undefined {
+	const entries = brandedEntries(self.devicesData)
+	const exact = entries.find(([, device]) => device.name === name)
+	if (exact) return exact[0]
+	const wanted = name.toLowerCase()
+	return entries.find(([, device]) => device.name?.toLowerCase() === wanted)?.[0]
+}
+
+/** Finds a channel on a device by name, matching any of the names `names` reads from it. */
+function findChannelByName<Channel extends { name?: string }>(
+	channels: (Record<number, Channel> & { count?: number }) | undefined,
+	channelName: string,
+	names: (channel: Channel) => (string | undefined)[] = (channel) => [channel.name],
+): Channel | undefined {
+	for (const number of channelNumbers(channels?.count)) {
+		const channel = channels?.[number]
+		if (channel && names(channel).includes(channelName)) return channel
 	}
 	return undefined
 }
 
-/** Finds a tx channel by name (or friendly name) on a device, identified by IP or device name. */
+/** Finds a tx channel by name (or friendly name) on a device. See {@link resolveDeviceIp} for `deviceIdentifier`. */
 export function findAudioTxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
 ): AudioTxChannel | undefined {
-	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
-	if (!device) {
-		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
-		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	}
-	if (!device?.audioTx) {
-		return undefined
-	}
-	// `audioTx`/`audioRx` also carry a non-numeric `count` property alongside the numeric channel
-	// keys, so Object.entries()'s value type includes it too - the isNaN check filters it out.
-	for (const [channelNumber, channel] of Object.entries(device.audioTx)) {
-		if (isNaN(Number(channelNumber))) continue
-		const txChannel = channel as AudioTxChannel
-		if (txChannel?.name == channelName || txChannel?.friendlyName == channelName) {
-			return txChannel
-		}
-	}
-	return undefined
+	return findChannelByName(deviceByIdentifier(self, deviceIdentifier)?.audioTx, channelName, (channel) => [
+		channel.name,
+		channel.friendlyName,
+	])
 }
 
-/** Finds an rx channel by name on a device, identified by IP or device name. */
+/** Finds an rx channel by name on a device. See {@link resolveDeviceIp} for `deviceIdentifier`. */
 export function findAudioRxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
 ): AudioRxChannel | undefined {
-	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
-	if (!device) {
-		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
-		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	}
-	if (!device?.audioRx) {
-		return undefined
-	}
-	for (const [channelNumber, channel] of Object.entries(device.audioRx)) {
-		if (isNaN(Number(channelNumber))) continue
-		const rxChannel = channel as AudioRxChannel
-		if (rxChannel?.name == channelName) {
-			return rxChannel
-		}
-	}
-	return undefined
+	return findChannelByName(deviceByIdentifier(self, deviceIdentifier)?.audioRx, channelName)
 }
 
-/** Finds a video tx channel by name on a device, identified by IP or device name. */
+/** Finds a video tx channel by name on a device. See {@link resolveDeviceIp} for `deviceIdentifier`. */
 export function findVideoTxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
 ): VideoTxChannel | undefined {
-	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
-	if (!device) {
-		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
-		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	}
-	if (!device?.videoTx) {
-		return undefined
-	}
-	// `videoTx`/`videoRx` also carry a non-numeric `count` property alongside the numeric channel
-	// keys, so Object.entries()'s value type includes it too - the isNaN check filters it out.
-	for (const [channelNumber, channel] of Object.entries(device.videoTx)) {
-		if (isNaN(Number(channelNumber))) continue
-		if ((channel as VideoTxChannel)?.name == channelName) {
-			return channel as VideoTxChannel
-		}
-	}
-	return undefined
+	return findChannelByName(deviceByIdentifier(self, deviceIdentifier)?.videoTx, channelName)
 }
 
-/** Finds a video rx channel by name on a device, identified by IP or device name. */
+/** Finds a video rx channel by name on a device. See {@link resolveDeviceIp} for `deviceIdentifier`. */
 export function findVideoRxChannelByName(
 	self: DanteInstance,
 	deviceIdentifier: string,
 	channelName: string,
 ): VideoRxChannel | undefined {
-	let device: DeviceData | undefined = self.devicesData[deviceIdentifier]
-	if (!device) {
-		const deviceIp = findDeviceIpByName(self, deviceIdentifier)
-		device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	}
-	if (!device?.videoRx) {
-		return undefined
-	}
-	for (const [channelNumber, channel] of Object.entries(device.videoRx)) {
-		if (isNaN(Number(channelNumber))) continue
-		if ((channel as VideoRxChannel)?.name == channelName) {
-			return channel as VideoRxChannel
-		}
-	}
-	return undefined
+	return findChannelByName(deviceByIdentifier(self, deviceIdentifier)?.videoRx, channelName)
 }
 
 /**
@@ -371,15 +337,17 @@ export function getAudioRxChannelSource(
 	deviceIdentifier: string,
 	channelNumber: number,
 ): AudioRxChannelSource | undefined {
-	const deviceIp = self.devicesData[deviceIdentifier] ? deviceIdentifier : findDeviceIpByName(self, deviceIdentifier)
-	const device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
+	const device = deviceByIdentifier(self, deviceIdentifier)
 	const channel = device?.audioRx?.[channelNumber]
 	if (!channel?.sourceDevice || !channel.sourceChannel) {
 		return undefined
 	}
 
 	return {
-		deviceName: channel.sourceDevice === '.' ? (device?.name ?? channel.sourceDevice) : channel.sourceDevice,
+		deviceName:
+			channel.sourceDevice === '.'
+				? (device?.name ?? asDeviceName(channel.sourceDevice))
+				: asDeviceName(channel.sourceDevice),
 		channelName: channel.sourceChannel,
 		connected: isSubscriptionConnected(channel.subscriptionStatus),
 	}
@@ -397,14 +365,12 @@ export function getVideoRxChannelSource(
 	deviceIdentifier: string,
 	channelNumber: number,
 ): VideoRxChannelSource | undefined {
-	const deviceIp = self.devicesData[deviceIdentifier] ? deviceIdentifier : findDeviceIpByName(self, deviceIdentifier)
-	const device = deviceIp !== undefined ? self.devicesData[deviceIp] : undefined
-	const channel = device?.videoRx?.[channelNumber]
+	const channel = deviceByIdentifier(self, deviceIdentifier)?.videoRx?.[channelNumber]
 	if (!channel?.sourceDevice || !channel.sourceChannel) {
 		return undefined
 	}
 
-	return { deviceName: channel.sourceDevice, channelName: channel.sourceChannel }
+	return { deviceName: asDeviceName(channel.sourceDevice), channelName: channel.sourceChannel }
 }
 
 /**
@@ -414,9 +380,9 @@ export function getVideoRxChannelSource(
  * reassigned by DHCP and link-local autoconfiguration while its name is chosen by the user and
  * persists - but actions saved before that store an address, and those keep working through here.
  */
-export function resolveDeviceIp(self: DanteInstance, identifier: string): string | undefined {
+export function resolveDeviceIp(self: DanteInstance, identifier: string | undefined): DeviceIp | undefined {
 	if (!identifier) return undefined
-	if (self.devicesData[identifier]) return identifier
+	if (Object.hasOwn(self.devicesData, identifier)) return asDeviceIp(identifier)
 	return findDeviceIpByName(self, identifier)
 }
 
@@ -426,13 +392,23 @@ export function resolveDeviceIp(self: DanteInstance, identifier: string): string
  * Logs are read by someone matching what they see against a device list and a patch panel, so both
  * halves matter: the name is what they recognise, the address is what they can ping.
  */
-export function deviceLabel(self: DanteInstance, deviceIp: string): string {
+export function deviceLabel(self: DanteInstance, deviceIp: DeviceIp): string {
 	const name = self.devicesData[deviceIp]?.name
 	return name ? `${name} (${deviceIp})` : deviceIp
 }
 
-/** The device record behind an identifier, which may be a name or an IP. */
-export function deviceByIdentifier(self: DanteInstance, identifier: string): DeviceData | undefined {
+/**
+ * {@link resolveDeviceIp}, for a command that cannot be sent without the device: throws when it is
+ * not online, naming it the way the user will recognise.
+ */
+export function requireDeviceIp(self: DanteInstance, identifier: string | undefined): DeviceIp {
+	const ip = resolveDeviceIp(self, identifier)
+	if (ip !== undefined) return ip
+	throw new DanteCommandError(`Can't find ${identifier ?? 'the device'} - it may be offline`)
+}
+
+/** The device record behind an identifier. See {@link resolveDeviceIp}. */
+export function deviceByIdentifier(self: DanteInstance, identifier: string | undefined): DeviceData | undefined {
 	const ip = resolveDeviceIp(self, identifier)
 	return ip !== undefined ? self.devicesData[ip] : undefined
 }
@@ -449,7 +425,7 @@ export function deviceByIdentifier(self: DanteInstance, identifier: string): Dev
  *
  * Stored as a hex string rather than a Buffer because device records pass through `merge()`.
  */
-function resolveDeviceInterface(self: DanteInstance, deviceIp: string): string | undefined {
+function resolveDeviceInterface(self: DanteInstance, deviceIp: DeviceIp): string | undefined {
 	// An explicitly chosen card is honoured for every device.
 	if (self.config.mac) return undefined
 
@@ -465,12 +441,12 @@ function resolveDeviceInterface(self: DanteInstance, deviceIp: string): string |
  *
  * Falls back to the instance address, which is the explicitly configured card when there is one.
  */
-export function macForDevice(self: DanteInstance, device: string): Buffer {
+export function macForDevice(self: DanteInstance, device: DeviceIp): Buffer {
 	const deviceMac = deviceByIdentifier(self, device)?.interfaceMac
 	return deviceMac ? Buffer.from(deviceMac, 'hex') : self.mac
 }
 
-export function registerDevice(self: DanteInstance, deviceIp: string, deviceName: string): DeviceData {
+export function registerDevice(self: DanteInstance, deviceIp: DeviceIp, deviceName: DeviceName): DeviceData {
 	self.devicesData[deviceIp] = {
 		name: deviceName,
 		ports: {},
@@ -495,7 +471,10 @@ export function registerDevice(self: DanteInstance, deviceIp: string, deviceName
 		)
 	}
 
-	insertDeviceChoice(self, deviceIp, deviceName)
+	// Make and model are not known yet - they arrive with the settings reply, which logs the fuller
+	// line once it does. See `logDeviceIdentity`.
+	logger.info(`Discovered ${deviceName} at ${deviceIp}`)
+	refreshDeviceChoices(self)
 	return currDevice
 }
 
@@ -503,17 +482,9 @@ export function registerDevice(self: DanteInstance, deviceIp: string, deviceName
  * Removes a device (considered offline) from `devicesData` and its associated dropdown choices,
  * then rebuilds action/feedback/variable definitions.
  */
-export function destroyDevice(self: DanteInstance, deviceIp: string): void {
+export function destroyDevice(self: DanteInstance, deviceIp: DeviceIp): void {
 	const deviceName = self.devicesData[deviceIp]?.name
 	logger.warn(`${deviceName ?? deviceIp} (${deviceIp}) went offline - nothing heard for ${self.timeout}ms`)
-
-	// Everything below is keyed by name, and another address may still be announcing this one - see
-	// `devicesByName`. The common case is a device whose address changed: it re-registers under the
-	// new one immediately, and this fires for the old record a timeout later. Deleting by name then
-	// would strip the channel choices and the dropdown entry of a device that is still online.
-	const nameStillOnline =
-		deviceName !== undefined &&
-		Object.entries(self.devicesData).some(([ip, device]) => ip !== deviceIp && device.name === deviceName)
 
 	// The channel choice lists are deliberately *kept*. They are what `channelFieldDevices` builds
 	// per-device option fields from, and an option id missing from a definition loses the value
@@ -521,7 +492,7 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	// action and feedback pointing at this device, permanently, for a device that had merely blipped.
 	// See `channelFieldDevices` in choices.ts for the full reasoning.
 	//
-	// They are bounded by the number of distinct device names seen, and `initConnection` clears them
+	// They are bounded by the number of distinct devices seen, and `initConnection` clears them
 	// outright, so a decommissioned device is forgotten on the next reconnect rather than lingering
 	// for the life of the process.
 	//
@@ -530,26 +501,21 @@ export function destroyDevice(self: DanteInstance, deviceIp: string): void {
 	// rebuild. That is correct - the fields never went away, so there is nothing to rebuild - and
 	// registration still schedules one for the device dropdown below.
 
-	// delete device choice, which is keyed by name
-	if (deviceName !== undefined && !nameStillOnline) {
-		const index = self.devicesChoices.findIndex((choice) => choice.id === deviceName)
-		if (index !== -1) {
-			self.devicesChoices.splice(index, 1)
-		}
-	}
-
 	//delete timeout
 	clearTimeout(self.devicesData[deviceIp]?.timeoutArray?.[0])
 	channelSettleDeadlines.get(self)?.delete(deviceIp)
 
 	// delete object from devicesData
 	delete self.devicesData[deviceIp]
+	// Rebuilt from the records that remain, so a device that has already re-registered under a new
+	// address keeps its entry - the common case, this firing for the old record a timeout later.
+	refreshDeviceChoices(self)
 
 	scheduleUpdateData(self)
 }
 
 /** Resets a device's offline timeout, keeping it from being considered offline. */
-export function keepAlive(self: DanteInstance, deviceIp: string): void {
+export function keepAlive(self: DanteInstance, deviceIp: DeviceIp): void {
 	const toArray = self.devicesData[deviceIp]?.timeoutArray
 	if (toArray) {
 		clearTimeout(toArray[0])
@@ -630,7 +596,7 @@ const VARIABLES_THROTTLE_MS = 30
  * Instead every request is unioned in here and the tick applies the combined result.
  */
 interface PendingVariables {
-	ips: Set<string>
+	ips: Set<DeviceIp>
 	/** A request arrived with no IP, so every device needs refreshing. */
 	allDevices: boolean
 	types: Set<string>
@@ -678,7 +644,7 @@ function getThrottledVariables(self: DanteInstance): DebouncedFunc<() => void> {
  * single push to Companion. Arguments match {@link CheckVariables} and are unioned across the
  * window rather than overwritten.
  */
-export function scheduleCheckVariables(self: DanteInstance, ipAddress?: string, ...variableTypes: string[]): void {
+export function scheduleCheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...variableTypes: string[]): void {
 	let pending = pendingVariables.get(self)
 	if (!pending) {
 		pending = { ips: new Set(), allDevices: false, types: new Set(), allTypes: false }
@@ -832,7 +798,7 @@ function getThrottledFeedbacks(self: DanteInstance): DebouncedFunc<() => void> {
  * @param deviceIp The device whose data changed. Omit to re-check every feedback, for changes that
  * are not attributable to a single device (such as a full definitions rebuild).
  */
-export function scheduleCheckFeedbacks(self: DanteInstance, deviceIp?: string): void {
+export function scheduleCheckFeedbacks(self: DanteInstance, deviceIp?: DeviceIp): void {
 	let pending = pendingFeedbacks.get(self)
 	if (!pending) {
 		pending = { devices: new Set(), allDevices: false }
@@ -877,7 +843,7 @@ const channelSettleDeadlines = new WeakMap<DanteInstance, Map<string, number>>()
  * a 32-channel device logs a rename line per channel per page on discovery, drowning the log at
  * the exact moment an operator is reading it, and saying nothing: nobody renamed anything.
  */
-export function markChannelsSettling(self: DanteInstance, deviceIp: string): void {
+export function markChannelsSettling(self: DanteInstance, deviceIp: DeviceIp): void {
 	let deadlines = channelSettleDeadlines.get(self)
 	if (!deadlines) {
 		deadlines = new Map()
@@ -887,7 +853,7 @@ export function markChannelsSettling(self: DanteInstance, deviceIp: string): voi
 }
 
 /** Whether {@link markChannelsSettling}'s window is still open for this device. */
-export function channelsAreSettling(self: DanteInstance, deviceIp: string): boolean {
+export function channelsAreSettling(self: DanteInstance, deviceIp: DeviceIp): boolean {
 	return (channelSettleDeadlines.get(self)?.get(deviceIp) ?? 0) > Date.now()
 }
 
@@ -902,19 +868,15 @@ export function resetIdCollisionWarnings(self: DanteInstance): void {
 /**
  * Warns when two device names sanitise to the same id.
  *
- * Both the variable ids and the per-device option ids are built from a device's name run through
- * `sanitiseVariableId`, which is lossy - `Rack 1` and `Rack-1` both become `Rack_1`. The two devices
- * then share every variable and every per-device action field, and the last one discovered wins.
- * Nothing about the symptoms points at the cause, so say so plainly rather than leaving it to be
- * puzzled out from a device whose values keep changing under it.
- *
- * Checked over the names the definitions are actually built from, which includes devices whose
- * channels are only remembered - those still generate option fields, so they still collide.
+ * Variable and per-device option ids run the name through `sanitiseVariableId`, which is lossy -
+ * `Rack 1` and `Rack-1` both become `Rack_1`. The two devices then share every variable and
+ * per-device field and the last one discovered wins. Nothing about the symptoms points at the
+ * cause, so say so plainly.
  */
 function warnOnIdCollisions(self: DanteInstance): void {
 	const names = new Set<string>()
-	for (const device of Object.values(self.devicesData)) {
-		if (device?.name) names.add(device.name)
+	for (const [, device] of brandedEntries(self.devicesData)) {
+		if (device.name) names.add(device.name)
 	}
 	for (const byDevice of [
 		self.rxChannelsChoices,
@@ -922,7 +884,7 @@ function warnOnIdCollisions(self: DanteInstance): void {
 		self.videoRxChannelsChoices ?? {},
 		self.videoTxChannelsChoices ?? {},
 	]) {
-		for (const name of Object.keys(byDevice)) names.add(name)
+		for (const name of brandedKeys(byDevice)) names.add(name)
 	}
 
 	const collisions = collidingIds(names)
@@ -951,7 +913,7 @@ function warnOnIdCollisions(self: DanteInstance): void {
 /** Rebuilds and re-registers this instance's actions, variables, and feedbacks after device data changes. */
 export function updateData(self: DanteInstance): void {
 	if (self.debug) {
-		logger.debug(`Rebuilding definitions for ${Object.keys(self.devicesData).length} device(s)`)
+		logger.debug(`Rebuilding definitions for ${brandedKeys(self.devicesData).length} device(s)`)
 	}
 	warnOnIdCollisions(self)
 	UpdateActions(self)

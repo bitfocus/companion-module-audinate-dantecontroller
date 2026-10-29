@@ -3,6 +3,7 @@ import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import type { DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, ip, name } from './ids.js'
 
 /**
  * Learn callbacks, against a two-device network where DeviceB ch2 is routed from DeviceA ch3.
@@ -12,13 +13,15 @@ import type DanteInstance from '../main.js'
  * that were merely read.
  */
 
-const A = '10.0.0.5'
-const B = '10.0.0.6'
+const A = ip('10.0.0.5')
+const A_NAME = name('DeviceA')
+const B = ip('10.0.0.6')
+const B_NAME = name('DeviceB')
 
 function devicesData(): DevicesData {
 	return {
 		[A]: {
-			name: 'DeviceA',
+			name: name('DeviceA'),
 			ports: { ARC: 4440 },
 			latency: 2,
 			sr: 48000,
@@ -28,27 +31,27 @@ function devicesData(): DevicesData {
 			encoding: 'PCM24',
 			encodingOptions: ['16', '24'],
 			output_levels: ['+18dBu', '+4dBu'],
-			audioRx: { count: 2, 1: { number: 1, name: 'In 1' }, 2: { number: 2, name: 'In 2' } },
+			audioRx: { count: 2, 1: { number: ch(1), name: 'In 1' }, 2: { number: ch(2), name: 'In 2' } },
 			audioTx: {
 				count: 3,
-				1: { number: 1, name: '01' },
-				2: { number: 2, name: '02' },
-				3: { number: 3, name: '03', friendlyName: 'Talkback' },
+				1: { number: ch(1), name: '01' },
+				2: { number: ch(2), name: '02' },
+				3: { number: ch(3), name: '03', friendlyName: 'Talkback' },
 			},
 		},
 		[B]: {
-			name: 'DeviceB',
+			name: name('DeviceB'),
 			ports: { ARC: 4440 },
 			latency: 5,
 			sr: 96000,
 			srOptions: ['48000', '96000'],
 			audioRx: {
 				count: 2,
-				1: { number: 1, name: 'In 1' },
+				1: { number: ch(1), name: 'In 1' },
 				// routed from DeviceA's channel 3, which the device reports by its label
-				2: { number: 2, name: 'In 2', sourceDevice: 'DeviceA', sourceChannel: 'Talkback' },
+				2: { number: ch(2), name: 'In 2', sourceDevice: 'DeviceA', sourceChannel: 'Talkback' },
 			},
-			audioTx: { count: 1, 1: { number: 1, name: '01' } },
+			audioTx: { count: 1, 1: { number: ch(1), name: '01' } },
 		},
 	}
 }
@@ -70,7 +73,7 @@ function channelChoicesFor(data: DevicesData, channelType: 'rx' | 'tx') {
 function instance(data: DevicesData = devicesData()) {
 	return {
 		devicesData: data,
-		devicesChoices: Object.entries(data).map(([ip, device]) => ({ id: ip, label: device.name! })),
+		devicesChoices: Object.values(data).map((device) => ({ id: device.name!, label: device.name! })),
 		// derived from the devices' channels, as updateChannelChoices does in production - a fixture
 		// with fewer choices than channels would let a learn return an unselectable value
 		rxChannelsChoices: channelChoicesFor(data, 'rx'),
@@ -147,7 +150,7 @@ describe('makeCrosspoint learn', () => {
 	it('resolves a self-route to the device its own name', async () => {
 		const data = devicesData()
 		;(data[A].audioRx as Record<number, unknown>)[1] = {
-			number: 1,
+			number: ch(1),
 			name: 'In 1',
 			sourceDevice: '.',
 			sourceChannel: '01',
@@ -162,24 +165,31 @@ describe('makeCrosspointDropDown learn', () => {
 	it('learns the source device and its per-device channel key', async () => {
 		expect(
 			await learn('makeCrosspointDropDown', {
-				destinationDevice: B,
-				[`destinationChannel_${B}`]: 2,
+				destinationDevice: B_NAME,
+				[`destinationChannel_${B_NAME}`]: 2,
 			}),
-		).toEqual({ sourceDevice: 'DeviceA', sourceChannel_DeviceA: 3 })
+		).toEqual({ sourceDevice: A_NAME, [`sourceChannel_${A_NAME}`]: 3 })
 	})
 
 	it('returns only the source fields', async () => {
 		const learnt = await learn('makeCrosspointDropDown', {
-			destinationDevice: B,
-			[`destinationChannel_${B}`]: 2,
+			destinationDevice: B_NAME,
+			[`destinationChannel_${B_NAME}`]: 2,
 			sourceDevice: 'stale',
 		})
-		expect(Object.keys(learnt).sort()).toEqual(['sourceChannel_DeviceA', 'sourceDevice'].sort())
+		expect(Object.keys(learnt).sort()).toEqual([`sourceChannel_${A_NAME}`, 'sourceDevice'].sort())
+	})
+
+	it('still learns for an action saved against an address', async () => {
+		expect(await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })).toEqual({
+			sourceDevice: A_NAME,
+			[`sourceChannel_${A_NAME}`]: 3,
+		})
 	})
 
 	it('declines when the destination channel is unrouted', async () => {
 		expect(
-			await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 1 }),
+			await learn('makeCrosspointDropDown', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 1 }),
 		).toBeUndefined()
 	})
 
@@ -187,104 +197,110 @@ describe('makeCrosspointDropDown learn', () => {
 		const data = devicesData()
 		;(data[B].audioRx as Record<number, { sourceDevice: string }>)[2].sourceDevice = 'AbsentDevice'
 		expect(
-			await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
+			await learn('makeCrosspointDropDown', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 }, data),
 		).toBeUndefined()
 	})
 })
 
 describe('channel name learn', () => {
 	it('setRxChannelName learns the current name', async () => {
-		expect(await learn('setRxChannelName', { device: A, [`channel_${A}`]: 2 })).toEqual({ newName: 'In 2' })
+		expect(await learn('setRxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 2 })).toEqual({ newName: 'In 2' })
 	})
 
 	it('setTxChannelName prefers the channel label over the canonical name', async () => {
-		expect(await learn('setTxChannelName', { device: A, [`channel_${A}`]: 3 })).toEqual({ newName: 'Talkback' })
+		expect(await learn('setTxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 3 })).toEqual({
+			newName: 'Talkback',
+		})
 	})
 
 	it('setTxChannelName falls back to the canonical name when there is no label', async () => {
-		expect(await learn('setTxChannelName', { device: A, [`channel_${A}`]: 1 })).toEqual({ newName: '01' })
+		expect(await learn('setTxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 1 })).toEqual({ newName: '01' })
 	})
 
 	it('declines for a channel the device does not have', async () => {
-		expect(await learn('setRxChannelName', { device: A, [`channel_${A}`]: 99 })).toBeUndefined()
+		expect(await learn('setRxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 99 })).toBeUndefined()
 	})
 })
 
 describe('settings learn', () => {
 	it('setLatency learns from the selected device', async () => {
-		expect(await learn('setLatency', { destinationDevice: A })).toEqual({ latency: 2 })
-		expect(await learn('setLatency', { destinationDevice: B })).toEqual({ latency: 5 })
+		expect(await learn('setLatency', { destinationDevice: A_NAME })).toEqual({ latency: 2 })
+		expect(await learn('setLatency', { destinationDevice: B_NAME })).toEqual({ latency: 5 })
 	})
 
 	it('setSampleRate learns into the selected device its own option key', async () => {
-		expect(await learn('setSampleRate', { device: 'DeviceA' })).toEqual({ sr_DeviceA: '48000' })
-		expect(await learn('setSampleRate', { device: 'DeviceB' })).toEqual({ sr_DeviceB: '96000' })
+		expect(await learn('setSampleRate', { device: A_NAME })).toEqual({ [`sr_${A_NAME}`]: '48000' })
+		expect(await learn('setSampleRate', { device: B_NAME })).toEqual({ [`sr_${B_NAME}`]: '96000' })
 	})
 
 	it('setSampleRate declines when the current rate is not one of the offered options', async () => {
 		const data = devicesData()
 		data[A].sr = 192000
-		expect(await learn('setSampleRate', { device: A }, data)).toBeUndefined()
+		expect(await learn('setSampleRate', { device: A_NAME }, data)).toBeUndefined()
 	})
 
 	it('setPullup learns the code behind the reported label', async () => {
 		// device reports '+0.1%', whose code in DANTE_CONST.PULLUPS is 2
-		expect(await learn('setPullup', { device: 'DeviceA' })).toEqual({ pullup_DeviceA: '2' })
+		expect(await learn('setPullup', { device: A_NAME })).toEqual({ [`pullup_${A_NAME}`]: '2' })
 	})
 
 	it('setPullup declines for a device that does not support pullup', async () => {
-		expect(await learn('setPullup', { device: B })).toBeUndefined()
+		expect(await learn('setPullup', { device: B_NAME })).toBeUndefined()
 	})
 
 	it('setOutputLevel learns the level of the selected channel', async () => {
 		// output_levels is indexed from 0, so channel 2 is '+4dBu', whose code is 2
-		expect(await learn('setOutputLevel', { device: A, [`channel_${A}`]: 2 })).toEqual({ level: '2' })
-		expect(await learn('setOutputLevel', { device: A, [`channel_${A}`]: 1 })).toEqual({ level: '1' })
+		expect(await learn('setOutputLevel', { device: A_NAME, [`channel_${A_NAME}`]: 2 })).toEqual({ level: '2' })
+		expect(await learn('setOutputLevel', { device: A_NAME, [`channel_${A_NAME}`]: 1 })).toEqual({ level: '1' })
 	})
 
 	it('setOutputLevel declines for a device that reports no levels', async () => {
-		expect(await learn('setOutputLevel', { device: B, [`channel_${B}`]: 1 })).toBeUndefined()
+		expect(await learn('setOutputLevel', { device: B_NAME, [`channel_${B_NAME}`]: 1 })).toBeUndefined()
 	})
 })
 
 describe('routing_bg feedback learn', () => {
 	it('learns the source device and its per-device channel key', async () => {
-		expect(await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })).toEqual({
-			sourceDevice: 'DeviceA',
-			sourceChannel_DeviceA: 3,
+		expect(
+			await learnFeedback('routing_bg', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 }),
+		).toEqual({
+			sourceDevice: A_NAME,
+			[`sourceChannel_${A_NAME}`]: 3,
 		})
 	})
 
 	it('returns only the source fields, leaving the destination selection untouched', async () => {
 		const learnt = await learnFeedback('routing_bg', {
-			destinationDevice: B,
-			[`destinationChannel_${B}`]: 2,
+			destinationDevice: B_NAME,
+			[`destinationChannel_${B_NAME}`]: 2,
 			sourceDevice: 'stale',
 		})
-		expect(Object.keys(learnt).sort()).toEqual(['sourceChannel_DeviceA', 'sourceDevice'].sort())
+		expect(Object.keys(learnt).sort()).toEqual([`sourceChannel_${A_NAME}`, 'sourceDevice'].sort())
 	})
 
 	it('learns a value the source channel dropdown can select', async () => {
-		const learnt = await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 })
+		const learnt = await learnFeedback('routing_bg', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 })
 		const option = (feedbackDefinitions().routing_bg.options ?? []).find(
-			(candidate: { id: string }) => candidate.id === 'sourceChannel_DeviceA',
+			(candidate: { id: string }) => candidate.id === `sourceChannel_${A_NAME}`,
 		)
-		expect(option?.choices.map((choice: { id: unknown }) => choice.id)).toContain(learnt.sourceChannel_DeviceA)
+		expect(option?.choices.map((choice: { id: unknown }) => choice.id)).toContain(learnt[`sourceChannel_${A_NAME}`])
 	})
 
 	it('declines when the destination channel is unrouted', async () => {
-		expect(await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 1 })).toBeUndefined()
+		expect(
+			await learnFeedback('routing_bg', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 1 }),
+		).toBeUndefined()
 	})
 
 	it('declines when the destination channel option is missing entirely', async () => {
-		expect(await learnFeedback('routing_bg', { destinationDevice: B })).toBeUndefined()
+		expect(await learnFeedback('routing_bg', { destinationDevice: B_NAME })).toBeUndefined()
 	})
 
 	it('declines when the source device is not on the network', async () => {
 		const data = devicesData()
 		;(data[B].audioRx as Record<number, { sourceDevice: string }>)[2].sourceDevice = 'AbsentDevice'
 		expect(
-			await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
+			await learnFeedback('routing_bg', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 }, data),
 		).toBeUndefined()
 	})
 
@@ -292,7 +308,7 @@ describe('routing_bg feedback learn', () => {
 		const data = devicesData()
 		;(data[B].audioRx as Record<number, { sourceChannel: string }>)[2].sourceChannel = 'Unknown'
 		expect(
-			await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data),
+			await learnFeedback('routing_bg', { destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 }, data),
 		).toBeUndefined()
 	})
 })
@@ -336,7 +352,7 @@ describe('routing_bg_manual feedback learn', () => {
 	it('resolves a self-route to the device its own name', async () => {
 		const data = devicesData()
 		;(data[A].audioRx as Record<number, unknown>)[1] = {
-			number: 1,
+			number: ch(1),
 			name: 'In 1',
 			sourceDevice: '.',
 			sourceChannel: '01',
@@ -354,13 +370,13 @@ describe('learnt values are selectable', () => {
 	 * strings here, while the underlying protocol values are numbers.
 	 */
 	const cases: [string, Record<string, unknown>, string][] = [
-		['setSampleRate', { device: 'DeviceA' }, 'sr_DeviceA'],
-		['setPullup', { device: 'DeviceA' }, 'pullup_DeviceA'],
-		['setOutputLevel', { device: 'DeviceA', channel_DeviceA: 1 }, 'level'],
+		['setSampleRate', { device: A_NAME }, `sr_${A_NAME}`],
+		['setPullup', { device: A_NAME }, `pullup_${A_NAME}`],
+		['setOutputLevel', { device: A_NAME, [`channel_${A_NAME}`]: 1 }, 'level'],
 		[
 			'makeCrosspointDropDown',
-			{ destinationDevice: 'DeviceB', destinationChannel_DeviceB: 2 },
-			'sourceChannel_DeviceA',
+			{ destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 },
+			`sourceChannel_${A_NAME}`,
 		],
 	]
 
@@ -383,12 +399,12 @@ describe('the 2.0 contract', () => {
 			{ destinationDeviceAddress: B, destinationChannelNumber: '2' },
 			['sourceChannelName', 'sourceDeviceName'],
 		],
-		['setRxChannelName', { device: A, [`channel_${A}`]: 1 }, ['newName']],
-		['setTxChannelName', { device: A, [`channel_${A}`]: 3 }, ['newName']],
-		['setLatency', { destinationDevice: A }, ['latency']],
-		['setSampleRate', { device: 'DeviceA' }, ['sr_DeviceA']],
-		['setPullup', { device: 'DeviceA' }, ['pullup_DeviceA']],
-		['setOutputLevel', { device: A, [`channel_${A}`]: 1 }, ['level']],
+		['setRxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 1 }, ['newName']],
+		['setTxChannelName', { device: A_NAME, [`channel_${A_NAME}`]: 3 }, ['newName']],
+		['setLatency', { destinationDevice: A_NAME }, ['latency']],
+		['setSampleRate', { device: A_NAME }, [`sr_${A_NAME}`]],
+		['setPullup', { device: A_NAME }, [`pullup_${A_NAME}`]],
+		['setOutputLevel', { device: A_NAME, [`channel_${A_NAME}`]: 1 }, ['level']],
 	]
 
 	it.each(cases)('%s returns only the fields it learnt', async (actionId, options, expected) => {
@@ -397,7 +413,11 @@ describe('the 2.0 contract', () => {
 	})
 
 	const feedbackCases: [string, Record<string, unknown>, string[]][] = [
-		['routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, ['sourceDevice', 'sourceChannel_DeviceA']],
+		[
+			'routing_bg',
+			{ destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 },
+			['sourceDevice', `sourceChannel_${A_NAME}`],
+		],
 		[
 			'routing_bg_manual',
 			{ destinationDeviceId: B, destinationChannelId: '2' },
@@ -422,7 +442,7 @@ describe('learn keys match the declared option ids', () => {
 	/** The same network, with the source device renamed to something Companion cannot use as an id. */
 	function messyData(): DevicesData {
 		const data = devicesData()
-		;(data[A] as { name: string }).name = MESSY
+		data[A].name = name(MESSY)
 		const rx = (data[B] as { audioRx: Record<string, { sourceDevice?: string }> }).audioRx
 		rx[2].sourceDevice = MESSY
 		return data
@@ -435,7 +455,11 @@ describe('learn keys match the declared option ids', () => {
 
 	it('makeCrosspointDropDown learns into an id its own options declare', async () => {
 		const data = messyData()
-		const learnt = await learn('makeCrosspointDropDown', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data)
+		const learnt = await learn(
+			'makeCrosspointDropDown',
+			{ destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 },
+			data,
+		)
 
 		expect(learnt.sourceDevice).toBe(MESSY)
 		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
@@ -445,7 +469,7 @@ describe('learn keys match the declared option ids', () => {
 
 	it('setSampleRate learns into an id its own options declare', async () => {
 		const data = messyData()
-		const learnt = await learn('setSampleRate', { device: A }, data)
+		const learnt = await learn('setSampleRate', { device: MESSY }, data)
 
 		const [key] = Object.keys(learnt)
 		expect(key).toBe('sr_Studio_1__Rack_A_')
@@ -454,7 +478,7 @@ describe('learn keys match the declared option ids', () => {
 
 	it('setPullup learns into an id its own options declare', async () => {
 		const data = messyData()
-		const learnt = await learn('setPullup', { device: A }, data)
+		const learnt = await learn('setPullup', { device: MESSY }, data)
 
 		const [key] = Object.keys(learnt)
 		expect(key).toBe('pullup_Studio_1__Rack_A_')
@@ -463,7 +487,11 @@ describe('learn keys match the declared option ids', () => {
 
 	it('routing_bg learns into an id its own feedback options declare', async () => {
 		const data = messyData()
-		const learnt = await learnFeedback('routing_bg', { destinationDevice: B, [`destinationChannel_${B}`]: 2 }, data)
+		const learnt = await learnFeedback(
+			'routing_bg',
+			{ destinationDevice: B_NAME, [`destinationChannel_${B_NAME}`]: 2 },
+			data,
+		)
 
 		const [channelKey] = Object.keys(learnt).filter((key) => key.startsWith('sourceChannel'))
 		expect(channelKey).toBe('sourceChannel_Studio_1__Rack_A_')

@@ -2,6 +2,7 @@
  * Shared shapes for the Dante protocol and the device registry.
  */
 import type dgram from 'node:dgram'
+import type { ChannelNumber, DeviceIp, DeviceName } from './ids.js'
 
 export type ServiceName = 'ARC' | 'SETTINGS' | 'CMC' | 'HEARTBEAT'
 
@@ -14,16 +15,17 @@ export type ConnectionName = ServiceName | 'MDNS'
 export type DanteSockets = Partial<Record<ServiceName, dgram.Socket>>
 
 export interface AudioTxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 	friendlyName?: string
 	sampleRate?: number
 }
 
 export interface AudioRxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 	sourceChannel?: string
+	/** As the device reports it: the name it subscribed with, or `.` for itself. */
 	sourceDevice?: string
 	channelStatus?: number
 	subscriptionStatus?: number
@@ -42,7 +44,7 @@ export type AudioRxChannels = Record<number, AudioRxChannel> & { count?: number 
  * legacy protocol's channel queries do.
  */
 export interface VideoTxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 }
 
@@ -96,7 +98,14 @@ export interface MdnsSrvAnswer {
 	data: { port: number }
 }
 
-export type MdnsAnswer = MdnsPtrAnswer | MdnsSrvAnswer
+/** `dns-packet` decodes TXT data as one buffer per `key=value` string. */
+export interface MdnsTxtAnswer {
+	type: 'TXT'
+	name: string
+	data: Buffer | string | (Buffer | string)[]
+}
+
+export type MdnsAnswer = MdnsPtrAnswer | MdnsSrvAnswer | MdnsTxtAnswer
 
 export interface MdnsResponsePacket {
 	answers: MdnsAnswer[]
@@ -104,7 +113,7 @@ export interface MdnsResponsePacket {
 }
 
 export interface DeviceData {
-	name?: string
+	name?: DeviceName
 	/** True when the device is locked and will refuse configuration changes. */
 	locked?: boolean
 	/**
@@ -114,6 +123,11 @@ export interface DeviceData {
 	interfaceMac?: string
 	ports?: Partial<Record<ServiceName, number>>
 	audioTx?: AudioTxChannels
+	/**
+	 * True from sending a tx friendly-names query until a reply to it arrives. A device answers even
+	 * when it has no friendly names, so a query still pending at the next sweep was dropped.
+	 */
+	txFriendlyNamesPending?: boolean
 	audioRx?: AudioRxChannels
 	videoTx?: VideoTxChannels
 	videoRx?: VideoRxChannels
@@ -150,12 +164,13 @@ export interface DeviceData {
 	timeoutArray?: [NodeJS.Timeout]
 }
 
-export type DevicesData = Record<string, DeviceData>
+/** Device records by the address they were discovered at. */
+export type DevicesData = Record<DeviceIp, DeviceData>
 
 /** What an rx channel is currently subscribed to, as the device reports it. */
 export interface AudioRxChannelSource {
 	/** Name of the transmitting device, with the '.' self-route shorthand already resolved. */
-	deviceName: string
+	deviceName: DeviceName
 	/** Name of the transmitting channel. */
 	channelName: string
 	/**
@@ -176,6 +191,6 @@ export interface AudioRxChannelSource {
  * are simply absent when there is no live source, so presence of this value already means connected.
  */
 export interface VideoRxChannelSource {
-	deviceName: string
+	deviceName: DeviceName
 	channelName: string
 }

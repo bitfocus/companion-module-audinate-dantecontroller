@@ -30,6 +30,105 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 	DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED,
 ]
 
+/** The `_status` value of a receive channel with no subscription. */
+export const SUBSCRIPTION_STATE_NOT_SUBSCRIBED = 'not subscribed'
+
+/** The `_status` value of a receive channel whose subscription is working. */
+export const SUBSCRIPTION_STATE_CONNECTED = 'connected'
+
+/**
+ * Readable names for rx subscription status codes, for error messages and the `_rx_<n>_status`
+ * variables. From the netaudio project's catalogue; only the connected ones above, 0x0001
+ * (unresolved) and 0x001c (seen for a refused self-route on an Ultimo X2) have been observed here.
+ *
+ * The connected codes are all plain `connected`: the code beside it says which kind.
+ */
+const SUBSCRIPTION_STATUS_NAMES: Readonly<Record<number, string>> = {
+	0x0000: SUBSCRIPTION_STATE_NOT_SUBSCRIBED,
+	0x0001: 'unresolved',
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_SELF]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNICAST]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_MULTICAST]: SUBSCRIPTION_STATE_CONNECTED,
+	[DANTE_CONST.SUBSCRIPTION_STATUS.CONNECTED_UNVERIFIED]: SUBSCRIPTION_STATE_CONNECTED,
+	0x0002: 'resolved, connecting',
+	0x0003: 'resolve failed',
+	0x0005: 'resolved to nothing',
+	0x0007: 'idle',
+	0x0008: 'connecting',
+	0x000f: 'no connection',
+	0x0010: 'channel format mismatch',
+	0x0011: 'bundle format mismatch',
+	0x0012: 'no receive resources',
+	0x0013: 'receive failure',
+	0x0014: 'no transmit resources',
+	0x0015: 'transmit failure',
+	0x0016: 'receive QoS failure',
+	0x0017: 'transmit QoS failure',
+	0x0018: 'transmitter rejected the address',
+	0x0019: 'invalid message',
+	0x001a: 'latency too low',
+	0x001b: 'different clock domain',
+	0x001c: 'unsupported',
+	0x001d: 'receive link down',
+	0x001e: 'transmit link down',
+	0x0020: 'invalid channel',
+	0x0022: 'self-subscription not allowed',
+	0x0025: 'transmitter flow limit reached',
+	0x0026: 'transmit channel encrypted',
+	0x0060: 'transmit access denied',
+	0x0061: 'transmit access pending',
+	0x00ff: 'system failure',
+}
+
+/** A subscription status as a message names it: `unresolved (0x0001)`. */
+export function subscriptionStatusLabel(status: number | undefined): string {
+	if (status === undefined) return 'unknown status'
+	const code = statusCode(status)
+	return SUBSCRIPTION_STATUS_NAMES[status] ? `${SUBSCRIPTION_STATUS_NAMES[status]} (${code})` : code
+}
+
+/**
+ * A subscription status as the `_rx_<n>_status` variable holds it: the name alone, so every
+ * connected code reads `connected` and a variable can be compared against it. A code with no name
+ * reads as the code itself (`0x0042`), so nothing the device reports is hidden.
+ */
+export function subscriptionStateValue(status: number | undefined): string {
+	if (status === undefined) return 'unknown status'
+	return SUBSCRIPTION_STATUS_NAMES[status] ?? statusCode(status)
+}
+
+function statusCode(status: number): string {
+	return `0x${status.toString(16).padStart(4, '0')}`
+}
+
+/**
+ * Rx subscription status codes that will not turn into a connection by waiting: the receiver or
+ * transmitter refused the subscription, or the two cannot carry it. Only 0x001c (a refused
+ * self-route on an Ultimo X2) has been observed; the rest are the refusals from the netaudio
+ * catalogue. Transient states (unresolved, connecting, link down, a failed resolve) are left out, so
+ * a source that is still appearing or recovering keeps its full wait.
+ */
+const SUBSCRIPTION_STATUS_REFUSED: ReadonlySet<number> = new Set([
+	0x0010, // channel format mismatch
+	0x0011, // bundle format mismatch
+	0x0012, // no receive resources
+	0x0014, // no transmit resources
+	0x0018, // transmitter rejected the address
+	0x001a, // latency too low
+	0x001b, // different clock domain
+	0x001c, // unsupported
+	0x0020, // invalid channel
+	0x0022, // self-subscription not allowed
+	0x0025, // transmitter flow limit reached
+	0x0026, // transmit channel encrypted
+	0x0060, // transmit access denied
+])
+
+/** True if `status` (rx record offset 14) is a refusal that waiting will not change. */
+export function isSubscriptionRefused(status: number | undefined): boolean {
+	return status !== undefined && SUBSCRIPTION_STATUS_REFUSED.has(status)
+}
+
 /** True if `status` (rx record offset 14) indicates a live subscription. */
 export function isSubscriptionConnected(status: number | undefined): boolean {
 	return status !== undefined && SUBSCRIPTION_STATUS_CONNECTED.includes(status)
@@ -56,6 +155,42 @@ export function isVideoSubscriptionActive(active: number | undefined): boolean {
 	return active !== undefined && VIDEO_SUBSCRIPTION_ACTIVE.includes(active)
 }
 
+/**
+ * A video subscription's state as the `_rx_video_<n>_status` variable holds it, the counterpart of
+ * {@link subscriptionStateValue}.
+ *
+ * Video rx records carry two flags rather than a status code, so this names the combinations:
+ * `connected` when media is flowing; otherwise `unresolved` while the source has not been located,
+ * and `not active` once it has (Dante Controller's "Subscription is not active"). `resolved` lags a
+ * source going away, so an absent source can read `not active` for a while before `unresolved` -
+ * the `active` test, which is the one that matters, does not lag. `unknown status` when the
+ * device has not reported the flags at all.
+ */
+export function videoSubscriptionStatusLabel(resolved: number | undefined, active: number | undefined): string {
+	if (active === undefined) return 'unknown status'
+	if (isVideoSubscriptionActive(active)) return SUBSCRIPTION_STATE_CONNECTED
+	return resolved === 0 ? 'unresolved' : 'not active'
+}
+
+/**
+ * A channel name some devices report in place of a real one: the channel number and `n/a`
+ * (`01 n/a`), or a bare `n/a`. Neutrik NA2-D-LINE units report this as both the channel name and
+ * the friendly name of an unnamed transmit channel.
+ */
+const PLACEHOLDER_CHANNEL_NAME = /^\s*(?:0*\d+\s+)?n\/a\s*$/i
+
+/**
+ * How a channel is shown to a person: its name, or `Ch <n>` when it has none worth showing - empty,
+ * or a placeholder (see {@link PLACEHOLDER_CHANNEL_NAME}).
+ *
+ * Display only. Dante subscribes by the exact name, placeholder or not (`01 n/a@IMAG-IO1`), so
+ * everything that routes, matches or is published as a `_name` keeps the name itself.
+ */
+export function channelDisplayLabel(name: string | undefined, channelNumber: number): string {
+	if (!name?.trim() || PLACEHOLDER_CHANNEL_NAME.test(name)) return `Ch ${channelNumber}`
+	return name
+}
+
 /** Longest name a Dante device accepts, for both device and channel names. */
 export const DANTE_NAME_MAX_LENGTH = 31
 
@@ -68,16 +203,19 @@ export const DANTE_NAME_MAX_LENGTH = 31
  * digits and hyphens only, and no leading or trailing hyphen. Channel names may additionally
  * contain a colon, which separates a channel from its device in subscription strings.
  *
- * `allowSpace` is for `AV_EXTENDED` video channel names specifically: real hardware ships with
- * (and accepted, live) names like "Decoder Video Channel" that this rule would otherwise reject -
- * video channel naming evidently allows spaces even though the netaudio-derived audio rule above
- * does not, and there is no equivalent reference for it to mirror instead.
+ * `allowSpace` is for channel names, audio and video. Real hardware ships with (and accepted, live)
+ * names like "Decoder Video Channel" on video channels, and Neutrik units carry audio channel names
+ * like "01 IMAG-MIX-XLR-L", set in Dante Controller. Rejecting the space made those names impossible
+ * to set again - including renaming a channel back to what it was. Device names stay without spaces.
+ *
+ * `allowSlash` is for channel names too, for the same reason: Neutrik NA2-D-LINE units name an
+ * unnamed channel `01 n/a` from the factory, so renaming one back to that needs the `/`.
  *
  * An empty name is accepted here because the module uses it to mean "reset to default".
  */
 export function validateDanteName(
 	name: string,
-	options: { allowColon?: boolean; allowSpace?: boolean } = {},
+	options: { allowColon?: boolean; allowSpace?: boolean; allowSlash?: boolean } = {},
 ): string | undefined {
 	if (name === '') {
 		return undefined
@@ -86,18 +224,22 @@ export function validateDanteName(
 		return `must be ${DANTE_NAME_MAX_LENGTH} characters or fewer (got ${name.length})`
 	}
 
-	const allowedChars = `A-Za-z0-9-${options.allowColon ? ':' : ''}${options.allowSpace ? ' ' : ''}`
+	const allowedChars = `A-Za-z0-9-${options.allowColon ? ':' : ''}${options.allowSpace ? ' ' : ''}${options.allowSlash ? '/' : ''}`
 	const allowed = new RegExp(`^[${allowedChars}]+$`)
 	if (!allowed.test(name)) {
 		// 'letters, digits and hyphens', optionally extended with 'colons'/'spaces' - built rather
 		// than hardcoded per combination so the phrasing stays natural ('X, Y and Z') either way.
-		const extras = [options.allowColon && 'colons', options.allowSpace && 'spaces'].filter(Boolean) as string[]
+		const extras = [
+			options.allowColon && 'colons',
+			options.allowSpace && 'spaces',
+			options.allowSlash && 'slashes',
+		].filter(Boolean) as string[]
 		const parts = ['letters', 'digits', ...(extras.length > 0 ? ['hyphens', ...extras] : ['hyphens'])]
 		const last = parts.pop()
 		return `may only contain ${parts.join(', ')} and ${last}`
 	}
 
-	const edges = options.allowColon ? ['-', ':'] : ['-']
+	const edges = ['-', ...(options.allowColon ? [':'] : []), ...(options.allowSpace ? [' '] : [])]
 	for (const edge of edges) {
 		if (name.startsWith(edge) || name.endsWith(edge)) {
 			return `may not start or end with '${edge}'`

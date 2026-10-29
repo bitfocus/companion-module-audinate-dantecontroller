@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { object2choices, object2PartialChoices, array2choices } from '../choices.js'
+import { object2choices, object2PartialChoices, array2choices, displayChannelChoices } from '../choices.js'
 import { DANTE_CONST } from '../const.js'
-import { isSubscriptionConnected, validateDanteName } from '../protocol-rules.js'
+import { channelDisplayLabel, isSubscriptionConnected, validateDanteName } from '../protocol-rules.js'
+import { ch } from '../../tests/ids.js'
 
 describe('object2choices', () => {
 	it('converts an id-to-label map into a choices array', () => {
@@ -123,5 +124,55 @@ describe('validateDanteName', () => {
 	it('rejects a leading or trailing colon in channel names', () => {
 		expect(validateDanteName(':CH1', { allowColon: true })).toMatch(/start or end/)
 		expect(validateDanteName('CH1:', { allowColon: true })).toMatch(/start or end/)
+	})
+
+	it('allows a space inside a channel name, as devices report them', () => {
+		// a Neutrik NA2-D-LINE's own name for a channel - which renaming it back has to be able to set
+		const channel = { allowColon: true, allowSpace: true }
+		expect(validateDanteName('01 IMAG-LTC-XLR-LOCALBACKUP', channel)).toBeUndefined()
+		expect(validateDanteName(' CH1', channel)).toMatch(/start or end/)
+		expect(validateDanteName('CH1 ', channel)).toMatch(/start or end/)
+		// device names still may not
+		expect(validateDanteName('IMAG IO2')).toBeDefined()
+	})
+
+	it('allows a slash inside a channel name, as in the factory name 01 n/a', () => {
+		const channel = { allowColon: true, allowSpace: true, allowSlash: true }
+		expect(validateDanteName('01 n/a', channel)).toBeUndefined()
+		expect(validateDanteName('n/a', { allowSpace: true, allowSlash: true })).toBeUndefined()
+		expect(validateDanteName('01 n=a', channel)).toMatch(/hyphens, colons, spaces and slashes/)
+		// device names still may not
+		expect(validateDanteName('IMAG/IO2')).toBeDefined()
+	})
+})
+
+describe('channelDisplayLabel', () => {
+	it('shows Ch <n> for an empty name or a placeholder like 01 n/a', () => {
+		expect(channelDisplayLabel(undefined, 1)).toBe('Ch 1')
+		expect(channelDisplayLabel('', 2)).toBe('Ch 2')
+		expect(channelDisplayLabel('  ', 3)).toBe('Ch 3')
+		expect(channelDisplayLabel('01 n/a', 1)).toBe('Ch 1')
+		expect(channelDisplayLabel('02 N/A', 2)).toBe('Ch 2')
+		expect(channelDisplayLabel('n/a', 7)).toBe('Ch 7')
+	})
+
+	it('keeps any real name, including ones that only mention n/a', () => {
+		expect(channelDisplayLabel('01', 1)).toBe('01')
+		expect(channelDisplayLabel('01 IMAG-LTC-XLR-LOCALBACKUP', 1)).toBe('01 IMAG-LTC-XLR-LOCALBACKUP')
+		expect(channelDisplayLabel('Mic n/a backup', 4)).toBe('Mic n/a backup')
+	})
+})
+
+describe('displayChannelChoices', () => {
+	it('relabels placeholder channels and keeps every id', () => {
+		expect(
+			displayChannelChoices([
+				{ id: ch(1), label: '01 n/a' },
+				{ id: ch(2), label: 'Mic 1' },
+			]),
+		).toEqual([
+			{ id: ch(1), label: 'Ch 1' },
+			{ id: ch(2), label: 'Mic 1' },
+		])
 	})
 })

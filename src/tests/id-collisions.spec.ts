@@ -3,6 +3,7 @@ import { collidingIds, sanitiseVariableId } from '../utils/sanitise.js'
 import { updateData, resetIdCollisionWarnings, type DevicesData } from '../api/index.js'
 import type { LoggingSink } from '@companion-module/base'
 import type DanteInstance from '../main.js'
+import { ip, name as deviceName } from './ids.js'
 
 /**
  * Two device names that sanitise to the same id.
@@ -110,7 +111,7 @@ describe('a rebuild warns about colliding device ids', () => {
 	it('speaks again when a third device joins the same collision', () => {
 		const self = instance(['Rack 1', 'Rack_1'])
 		updateData(self)
-		self.devicesData['10.0.0.3'] = { name: 'Rack:1', ports: { ARC: 4440 } }
+		self.devicesData[ip('10.0.0.3')] = { name: deviceName('Rack:1'), ports: { ARC: 4440 } }
 
 		updateData(self)
 		expect(collisionWarnings()).toHaveLength(2)
