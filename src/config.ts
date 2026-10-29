@@ -244,7 +244,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			label: 'Create Routing Variables',
 			description:
 				'Publish a variable per channel with its name and, for receive channels, what it is ' +
-				'subscribed to and whether it is connected, plus each device name. Router integrations such as ' +
+				'subscribed to and the state of that subscription, plus each device name. Router integrations such as ' +
 				'Bitfocus Buttons need these. Off by default: a large network has a great many of them.',
 			width: 12,
 			default: false,

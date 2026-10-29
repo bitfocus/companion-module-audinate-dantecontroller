@@ -18,7 +18,7 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Create Module Variables** — on by default. Turn it off to skip the per-device property variables and
   read the same values through the Device Property feedback instead.
 - **Create Routing Variables** — off by default; turn it on for a router integration. Publishes each channel's name, each receive channel's
-  subscription and whether it is connected, and each device's name. Router integrations such
+  subscription and its state, and each device's name. Router integrations such
   as Bitfocus Buttons need these to show active routes and subscription health. A large network has
   a great many of them, so they are opted into; only values that change are sent.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
