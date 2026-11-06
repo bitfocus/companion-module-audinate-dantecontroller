@@ -72,7 +72,8 @@ export interface DanteDeviceVariables {
  *   receiver subscribed with, which it keeps after the transmitter is renamed.
  * - `<device>_rx_<n>_status`, `<device>_rx_video_<n>_status` - the state of that subscription:
  *   `connected` only when the receiver reports it working (audio: `isSubscriptionConnected`,
- *   video: `isVideoSubscriptionActive`), `not subscribed` without one, and otherwise why not, as
+ *   video: `isVideoSubscriptionActive`), `not subscribed` without one, `offline` once the receiver
+ *   has left the network (the other variables keep their last values), and otherwise why not, as
  *   the receiver reports it (`subscriptionStateValue` for audio, such as `unresolved` or
  *   `unsupported`; `videoSubscriptionStatusLabel` for video, `not active` or `unresolved`). A
  *   refused or unresolved route therefore never reads as a working one just because `_source`

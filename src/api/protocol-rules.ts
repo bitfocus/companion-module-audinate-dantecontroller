@@ -33,6 +33,9 @@ export const SUBSCRIPTION_STATUS_CONNECTED: readonly number[] = [
 /** The `_status` value of a receive channel with no subscription. */
 export const SUBSCRIPTION_STATE_NOT_SUBSCRIBED = 'not subscribed'
 
+/** The `_status` value of a receive channel on a device that is no longer on the network. */
+export const SUBSCRIPTION_STATE_OFFLINE = 'offline'
+
 /** The `_status` value of a receive channel whose subscription is working. */
 export const SUBSCRIPTION_STATE_CONNECTED = 'connected'
 

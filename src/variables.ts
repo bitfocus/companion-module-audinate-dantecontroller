@@ -6,6 +6,7 @@ import {
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
 	SUBSCRIPTION_STATE_NOT_SUBSCRIBED,
+	SUBSCRIPTION_STATE_OFFLINE,
 	subscriptionStateValue,
 	channelDisplayLabel,
 	videoSubscriptionStatusLabel,
@@ -205,6 +206,8 @@ export function CheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...var
 		routingVariablesEnabled(self.config) &&
 		(variableTypes.length === 0 || variableTypes.some((type) => ROUTING_TYPES.has(type)))
 	) {
+		// first, so a live device sharing a remembered one's id keeps its own values
+		if (ipAddress === undefined) addOfflineStatuses(self, variableValues)
 		for (const [ip, device] of brandedEntries(self.devicesData)) {
 			if (ipAddress === undefined || ip === ipAddress) addRoutingValues(self, ip, device, variableValues)
 		}
@@ -224,6 +227,25 @@ export function CheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...var
 /** A subscription as the routing variables show it: `channel@device`, Dante's own notation. */
 function subscriptionValue(source: { channelName: string; deviceName: string } | undefined): string {
 	return source ? `${source.channelName}@${source.deviceName}` : ''
+}
+
+/**
+ * The status of every channel on a device that is only remembered. Its other routing variables keep
+ * their last values, as a device that blips should, but this one says the route is working now, and
+ * nothing is reporting that.
+ */
+function addOfflineStatuses(self: DanteInstance, variableValues: Partial<DanteVariableValues>): void {
+	for (const { name, ips } of channelFieldDevices(self)) {
+		const id = variableDeviceKey({ name })
+		if (ips.length > 0 || id === undefined) continue
+
+		for (const choice of self.rxChannelsChoices[name] ?? []) {
+			variableValues[`${id}_rx_${choice.id}_status`] = SUBSCRIPTION_STATE_OFFLINE
+		}
+		for (const choice of self.videoRxChannelsChoices?.[name] ?? []) {
+			variableValues[`${id}_rx_video_${choice.id}_status`] = SUBSCRIPTION_STATE_OFFLINE
+		}
+	}
 }
 
 /** One device's routing values. See `DanteRoutingVariables`. */

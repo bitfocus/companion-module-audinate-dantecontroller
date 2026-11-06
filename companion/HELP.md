@@ -119,8 +119,9 @@ Per device, with the same `<device>` prefix:
 - Receive channel source (`_rx_<n>_source`, `_rx_video_<n>_source`) - what the channel is subscribed
   to as `channel@device`, the names it subscribed with; empty when it is not subscribed
 - Receive channel status (`_rx_<n>_status`, `_rx_video_<n>_status`) - whether the subscription in
-  `_source` is working: `connected` when it is, `not subscribed` when there is none, and otherwise
-  why not, as the receiver reports it. A source shows in `_source` as soon as the receiver takes the
+  `_source` is working: `connected` when it is, `not subscribed` when there is none, `offline` when
+  the receiver has left the network (`_source` then keeps its last value), and otherwise why not, as
+  the receiver reports it. A source shows in `_source` as soon as the receiver takes the
   subscription, even one it then refuses or cannot resolve - this says whether it is actually
   working, as Dante Controller's error marker does. Audio shows the status by name, such as
   `unresolved` (source not on the network, as with pre-patching) or `unsupported` (a refused

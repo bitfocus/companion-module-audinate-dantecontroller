@@ -4,6 +4,7 @@ import {
 	cancelUpdateData,
 	DANTE_CONST,
 	parseReply,
+	updateDeviceChoice,
 	type AudioRxChannel,
 	type DevicesData,
 } from '../api/index.js'
@@ -175,6 +176,69 @@ describe('routing variables', () => {
 				`${stage}_tx_2_label`,
 			].sort(),
 		)
+	})
+
+	it("carries a renamed device's channels to its new name, with nothing re-read", () => {
+		const self = keyed()
+		updateDeviceChoice(self, AMP, name('Main Amp'))
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		expect(valueCalls(self)[0][0]).toMatchObject({
+			Main_Amp_rx_1_source: 'Mic 1@Stage Box',
+			Main_Amp_rx_1_status: 'connected',
+			Main_Amp_rx_video_1_status: 'connected',
+		})
+	})
+
+	it("keeps the old name's fields after a rename, so actions stored against it lose nothing", () => {
+		const self = keyed()
+		updateDeviceChoice(self, AMP, name('Main Amp'))
+
+		expect(self.rxChannelsChoices[AMP_NAME]).toHaveLength(2)
+		expect(self.videoRxChannelsChoices[AMP_NAME]).toHaveLength(1)
+	})
+
+	it('reads offline for a remembered device, while its source stays as last reported', () => {
+		const self = keyed()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		delete self.devicesData[AMP]
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+
+		expect(valueCalls(self)[1][0]).toEqual({
+			[`${amp}_rx_1_status`]: 'offline',
+			[`${amp}_rx_2_status`]: 'offline',
+			[`${amp}_rx_video_1_status`]: 'offline',
+		})
+	})
+
+	it("reports a device's own status again once it is back", () => {
+		const self = keyed()
+		const record = self.devicesData[AMP]
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+		delete self.devicesData[AMP]
+		CheckVariables(self)
+
+		self.devicesData[AMP] = record
+		CheckVariables(self)
+
+		expect(valueCalls(self).at(-1)?.[0]).toMatchObject({ [`${amp}_rx_1_status`]: 'connected' })
+	})
+
+	it('leaves a remembered device alone when only another device changed', () => {
+		const self = keyed()
+		UpdateVariableDefinitions(self)
+		CheckVariables(self)
+		delete self.devicesData[AMP]
+		valueCalls(self).length = 0
+
+		CheckVariables(self, STAGE, 'tx')
+
+		expect(valueCalls(self)).toEqual([])
 	})
 
 	it('publishes sources as channel@device and transmit names as their subscription names', () => {

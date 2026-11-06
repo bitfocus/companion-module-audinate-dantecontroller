@@ -655,7 +655,28 @@ export function updateDeviceChoice(self: DanteInstance, deviceIp: DeviceIp, newN
 	}
 
 	if (device) device.name = newName
+	if (previousName && previousName !== newName) carryChannelChoices(self, previousName, newName)
 	refreshDeviceChoices(self)
+}
+
+/**
+ * Gives a renamed device's channel choices to its new name. They are keyed by name and a rename
+ * re-reads nothing, so otherwise the new name has no routing variables or per-device fields until
+ * the device's next channel reply.
+ *
+ * Copied, not moved: the old name's fields hold the channel selection of every action still pointing
+ * at it, and a field that leaves the definition loses its value - see `channelFieldDevices`.
+ */
+function carryChannelChoices(self: DanteInstance, previousName: DeviceName, newName: DeviceName): void {
+	for (const byDevice of [
+		self.rxChannelsChoices,
+		self.txChannelsChoices,
+		self.videoRxChannelsChoices ?? {},
+		self.videoTxChannelsChoices ?? {},
+	]) {
+		const choices = byDevice[previousName]
+		if (choices) byDevice[newName] = choices
+	}
 }
 
 /**
