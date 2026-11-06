@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../../main.js'
 import { parseSettingsReply } from '../protocol.js'
+import { ip, name } from '../../tests/ids.js'
 
 /**
  * What a socket error is allowed to do to the connection's state.
@@ -243,14 +244,14 @@ describe('a malformed packet does not take the connection down', () => {
 		// guards the tests below: if the parser stops throwing, they would pass without the backstop
 		const reply = truncatedSettingsReply(30)
 		const self = connected()
-		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		self.devicesData[ip('169.254.120.183')] = { name: name('DeviceA'), ports: {} }
 
 		expect(() => parseSettingsReply(self, reply, rinfoFor(reply))).toThrow()
 	})
 
 	it('contains the throw instead of letting it reach the socket handler', () => {
 		const self = connected()
-		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		self.devicesData[ip('169.254.120.183')] = { name: name('DeviceA'), ports: {} }
 		const reply = truncatedSettingsReply(30)
 
 		expect(() =>
@@ -260,7 +261,7 @@ describe('a malformed packet does not take the connection down', () => {
 
 	it('reports the discarded packet, naming where it came from', () => {
 		const self = connected()
-		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		self.devicesData[ip('169.254.120.183')] = { name: name('DeviceA'), ports: {} }
 		const reply = truncatedSettingsReply(30)
 
 		const logged: string[] = []
@@ -275,7 +276,7 @@ describe('a malformed packet does not take the connection down', () => {
 
 	it('reports it once, so a device streaming junk cannot flood the log', () => {
 		const self = connected()
-		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		self.devicesData[ip('169.254.120.183')] = { name: name('DeviceA'), ports: {} }
 		const reply = truncatedSettingsReply(30)
 
 		const logged: string[] = []
@@ -295,7 +296,7 @@ describe('a malformed packet does not take the connection down', () => {
 		// at fixed offsets, and a body that survives the size check can still send one out of bounds.
 		// This is the guarantee that actually matters: whatever arrives, the connection lives.
 		const self = connected()
-		self.devicesData['169.254.120.183'] = { name: 'DeviceA', ports: {} }
+		self.devicesData[ip('169.254.120.183')] = { name: name('DeviceA'), ports: {} }
 		const template = truncatedSettingsReply(52)
 
 		expect(() => {

@@ -5,6 +5,7 @@
  * and the connection that owns the sockets. This barrel keeps the rest of the module importing
  * from one place.
  */
+export * from './ids.js'
 export * from './types.js'
 export * from './const.js'
 export * from './protocol-rules.js'
@@ -15,3 +16,4 @@ export * from './queries.js'
 export * from './commands.js'
 export * from './discovery.js'
 export * from './connection.js'
+export * from './requests.js'

@@ -9,6 +9,7 @@ import {
 } from '../index.js'
 import type dgram from 'node:dgram'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * Any reply from a device must count as proof it is online.
@@ -21,7 +22,7 @@ import type DanteInstance from '../../main.js'
  * configured video channel stops resolving until the device is rediscovered *and* re-queried.
  */
 
-const IP = '172.16.3.142'
+const IP = ip('172.16.3.142')
 const NAME = 'DAV-01SR-1001c7'
 
 /** Real captures, so these are the replies a device actually sends. */

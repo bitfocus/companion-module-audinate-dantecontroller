@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { scheduleCheckFeedbacks, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, ip, name } from './ids.js'
 
-const DEST = '10.0.0.5'
-const SOURCE = '10.0.0.6'
+const DEST = ip('10.0.0.5')
+const SOURCE = ip('10.0.0.6')
+const DEVICE_A = name('DeviceA')
+const DEVICE_B = name('DeviceB')
 
 /**
  * DeviceA ch1 is self-routed, ch2 comes from DeviceB, ch3 is unrouted, ch4 names a source that is
@@ -13,24 +16,28 @@ const SOURCE = '10.0.0.6'
 function devicesData(): DevicesData {
 	return {
 		[DEST]: {
-			name: 'DeviceA',
+			name: name('DeviceA'),
 			ports: { ARC: 4440 },
 			audioRx: {
 				count: 4,
 				// a self-route, which the device reports with the '.' shorthand
-				1: { number: 1, name: 'In 1', sourceDevice: '.', sourceChannel: 'Local Out', subscriptionStatus: 4 },
-				2: { number: 2, name: 'In 2', sourceDevice: 'DeviceB', sourceChannel: 'Talkback', subscriptionStatus: 9 },
-				3: { number: 3, name: 'In 3' },
+				1: { number: ch(1), name: 'In 1', sourceDevice: '.', sourceChannel: 'Local Out', subscriptionStatus: 4 },
+				2: { number: ch(2), name: 'In 2', sourceDevice: 'DeviceB', sourceChannel: 'Talkback', subscriptionStatus: 9 },
+				3: { number: ch(3), name: 'In 3' },
 				// configured but not resolving: the source is not on the network
-				4: { number: 4, name: 'In 4', sourceDevice: 'AbsentDevice', sourceChannel: 'Out 1', subscriptionStatus: 1 },
+				4: { number: ch(4), name: 'In 4', sourceDevice: 'AbsentDevice', sourceChannel: 'Out 1', subscriptionStatus: 1 },
 			},
-			audioTx: { count: 1, 1: { number: 1, name: 'Local Out' } },
+			audioTx: { count: 1, 1: { number: ch(1), name: 'Local Out' } },
 		},
 		[SOURCE]: {
-			name: 'DeviceB',
+			name: name('DeviceB'),
 			ports: { ARC: 4440 },
-			audioRx: { count: 1, 1: { number: 1, name: 'In 1' } },
-			audioTx: { count: 2, 1: { number: 1, name: '01' }, 2: { number: 2, name: '02', friendlyName: 'Talkback' } },
+			audioRx: { count: 1, 1: { number: ch(1), name: 'In 1' } },
+			audioTx: {
+				count: 2,
+				1: { number: ch(1), name: '01' },
+				2: { number: ch(2), name: '02', friendlyName: 'Talkback' },
+			},
 		},
 	}
 }
@@ -39,9 +46,9 @@ function instance(data: DevicesData = devicesData()) {
 	return {
 		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
 		devicesData: data,
-		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
-		rxChannelsChoices: { DeviceA: [{ id: 1, label: 'In 1' }], DeviceB: [{ id: 1, label: 'In 1' }] },
-		txChannelsChoices: { DeviceA: [{ id: 1, label: 'Local Out' }], DeviceB: [{ id: 1, label: '01' }] },
+		devicesChoices: Object.values(data).map((device) => ({ id: device.name!, label: device.name! })),
+		rxChannelsChoices: { [DEVICE_A]: [{ id: 1, label: 'In 1' }], [DEVICE_B]: [{ id: 1, label: 'In 1' }] },
+		txChannelsChoices: { [DEVICE_A]: [{ id: 1, label: 'Local Out' }], [DEVICE_B]: [{ id: 1, label: '01' }] },
 		setFeedbackDefinitions: vi.fn(),
 		checkFeedbacksById: vi.fn(),
 		log: vi.fn(),
@@ -53,7 +60,7 @@ function definition(self: DanteInstance) {
 	return (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0].channel_subscription
 }
 
-function read(channel: number, device = 'DeviceA', self: DanteInstance = instance()) {
+function read(channel: number, device: string = DEVICE_A, self: DanteInstance = instance()) {
 	return definition(self).callback(
 		{ id: `cs-${device}-${channel}`, options: { device, [`channel_${device}`]: channel } },
 		{},
@@ -82,7 +89,7 @@ describe('Channel Subscription feedback', () => {
 		const picker = (definition(instance()).options as { id: string; choices?: { id: string }[] }[]).find(
 			(option) => option.id === 'device',
 		)
-		expect(picker?.choices?.map((choice) => choice.id)).toEqual(['DeviceA', 'DeviceB'])
+		expect(picker?.choices?.map((choice) => choice.id)).toEqual([DEVICE_A, DEVICE_B])
 	})
 
 	it('reports the source device and channel of a cross-device subscription', () => {
@@ -112,10 +119,10 @@ describe('Channel Subscription feedback', () => {
 
 	it('returns the same shape when no channel is selected', () => {
 		const self = instance()
-		expect(definition(self).callback({ id: 'cs', options: { device: 'DeviceA' } }, {})).toEqual(EMPTY)
+		expect(definition(self).callback({ id: 'cs', options: { device: DEVICE_A } }, {})).toEqual(EMPTY)
 	})
 
-	it('accepts a device stored by address', () => {
+	it('still reads a feedback saved against the device address', () => {
 		expect(read(2, DEST)).toMatchObject({ device: { name: 'DeviceB' } })
 	})
 
@@ -123,7 +130,7 @@ describe('Channel Subscription feedback', () => {
 		// the subscription still names its source, so the name is reported even without a number
 		const data = devicesData()
 		delete (data as Record<string, unknown>)[SOURCE]
-		expect(read(2, 'DeviceA', instance(data))).toEqual({
+		expect(read(2, DEVICE_A, instance(data))).toEqual({
 			connected: true,
 			device: { name: 'DeviceB', ip: '' },
 			channel: { name: 'Talkback', number: 0 },
@@ -158,13 +165,13 @@ describe('Channel Subscription feedback', () => {
 		// a source renamed after the subscription was made still reports the old name until re-subscribed
 		const data = devicesData()
 		;(data[SOURCE].audioTx as Record<number, { friendlyName?: string }>)[2].friendlyName = 'Renamed'
-		expect(read(2, 'DeviceA', instance(data))).toMatchObject({ channel: { name: 'Talkback' } })
+		expect(read(2, DEVICE_A, instance(data))).toMatchObject({ channel: { name: 'Talkback' } })
 	})
 })
 
 describe('Channel Subscription checking paths', () => {
 	function tracked(channel: number, self: DanteInstance) {
-		definition(self).callback({ id: 'cs-tracked', options: { device: 'DeviceA', [`channel_DeviceA`]: channel } }, {})
+		definition(self).callback({ id: 'cs-tracked', options: { device: DEVICE_A, [`channel_${DEVICE_A}`]: channel } }, {})
 		return () => (self.checkFeedbacksById as ReturnType<typeof vi.fn>).mock.calls.flat()
 	}
 

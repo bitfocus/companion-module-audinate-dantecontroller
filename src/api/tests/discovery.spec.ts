@@ -3,6 +3,7 @@ import { danteDiscovery } from '../discovery.js'
 import { DANTE_CONST } from '../const.js'
 import type DanteInstance from '../../main.js'
 import type { NetworkInterfaceInfo } from '../../config.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * An mDNS SRV response is how a device's ARC port is first (or newly) learned - see
@@ -106,7 +107,7 @@ describe('danteDiscovery', () => {
 
 		danteDiscovery(self, srvResponse('On-Network-Device'), { address: '172.16.0.42' } as never)
 
-		expect(self.devicesData['172.16.0.42']?.name).toBe('On-Network-Device')
+		expect(self.devicesData[ip('172.16.0.42')]?.name).toBe('On-Network-Device')
 	})
 
 	it('accepts every device when the card is chosen automatically', () => {

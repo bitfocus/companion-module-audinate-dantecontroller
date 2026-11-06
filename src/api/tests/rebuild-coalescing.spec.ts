@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { DANTE_CONST } from '../const.js'
 import { parseSettingsReply, UPDATE_DEBOUNCE_MS, type DevicesData } from '../index.js'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * Definition rebuilds are coalesced by `scheduleUpdateData` because each one re-serialises every
@@ -11,7 +12,7 @@ import type DanteInstance from '../../main.js'
  * per setting per device. Rebuilding on each reply bypassed the debounce entirely.
  */
 
-const IP = '10.0.0.5'
+const IP = ip('10.0.0.5')
 
 function instance(): DanteInstance {
 	return {

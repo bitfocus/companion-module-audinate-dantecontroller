@@ -6,6 +6,7 @@ import {
 import {
 	array2choices,
 	audioChannelChoices,
+	displayChannelChoices,
 	audioDeviceChoices,
 	audioRxDeviceChoices,
 	channelOptionPrefix,
@@ -14,8 +15,8 @@ import {
 	CHANNEL_MEDIA_TYPE_LABELS,
 	clearAllAudioCrosspoints,
 	clearAllVideoCrosspoints,
-	clearAudioCrosspoint,
-	clearVideoCrosspoint,
+	clearAudioCrosspointConfirmed,
+	clearVideoCrosspointConfirmed,
 	currentChoiceId,
 	DANTE_CONST,
 	deviceByIdentifier,
@@ -32,8 +33,9 @@ import {
 	getAudioRxChannelSource,
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
-	makeAudioCrosspoint,
-	makeVideoCrosspoint,
+	DanteCommandError,
+	makeAudioCrosspointConfirmed,
+	makeVideoCrosspointConfirmed,
 	object2choices,
 	object2PartialChoices,
 	orPlaceholder,
@@ -41,6 +43,8 @@ import {
 	perDeviceMissingChannelWarnings,
 	refreshArc,
 	refreshSettings,
+	rememberedTxChannelName,
+	requireDeviceIp,
 	resolveDeviceIp,
 	resetAudioRxChannelName,
 	resetAudioTxChannelName,
@@ -253,7 +257,7 @@ export function UpdateActions(self: DanteInstance): void {
 			callback: async (action) => {
 				const opt = action.options
 				if (opt.channelType === 'video') {
-					makeVideoCrosspoint(
+					await makeVideoCrosspointConfirmed(
 						self,
 						opt.destinationDeviceAddress,
 						opt.sourceChannelName,
@@ -262,7 +266,7 @@ export function UpdateActions(self: DanteInstance): void {
 					)
 					return
 				}
-				makeAudioCrosspoint(
+				await makeAudioCrosspointConfirmed(
 					self,
 					opt.destinationDeviceAddress,
 					opt.sourceChannelName,
@@ -339,7 +343,8 @@ export function UpdateActions(self: DanteInstance): void {
 
 				// The device the route names must be one the picker offers, which is keyed by name.
 				const sourceIp = findDeviceIpByName(self, source.deviceName)
-				if (!sourceIp) return undefined
+				const sourceName = sourceIp !== undefined ? self.devicesData[sourceIp]?.name : undefined
+				if (!sourceIp || !sourceName) return undefined
 
 				const sourceChannelNumber = isVideo
 					? findVideoTxChannelByName(self, sourceIp, source.channelName)?.number
@@ -350,11 +355,11 @@ export function UpdateActions(self: DanteInstance): void {
 				// literal to `string`, which no longer matches the per-device option key type. The prefix
 				// is branched explicitly (rather than built via channelOptionPrefix) so the key stays a
 				// literal template TypeScript can check against the option type's per-media-type Records.
-				const learnt: Partial<MakeCrosspointDropDownOptions> = { sourceDevice: source.deviceName }
+				const learnt: Partial<MakeCrosspointDropDownOptions> = { sourceDevice: sourceName }
 				if (isVideo) {
-					learnt[`sourceChannelVideo_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
+					learnt[`sourceChannelVideo_${sanitiseVariableId(sourceName)}`] = sourceChannelNumber
 				} else {
-					learnt[`sourceChannel_${sanitiseVariableId(source.deviceName)}`] = sourceChannelNumber
+					learnt[`sourceChannel_${sanitiseVariableId(sourceName)}`] = sourceChannelNumber
 				}
 				return learnt
 			},
@@ -372,11 +377,10 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (destinationChannel === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
 							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
 					)
-					return
 				}
 
 				const sourceChannelNumber = deviceOptionValue<number | undefined>(
@@ -387,46 +391,43 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (sourceChannelNumber === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} source channel available on '${opt.sourceDevice}' ` +
 							`- it may have no ${opt.channelType} transmit channels`,
 					)
-					return
 				}
 
 				// No source means no route: clear the destination rather than subscribing it to nothing.
 				if (!sourceChannelNumber) {
-					if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
-					else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
+					if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+					else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
 					return
 				}
 
-				if (isVideo) {
-					const sourceChannel =
-						deviceByIdentifier(self, opt.sourceDevice)?.videoTx?.[sourceChannelNumber] ??
-						findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
-					const sourceChannelName = sourceChannel?.name || String(sourceChannelNumber)
-					makeVideoCrosspoint(
-						self,
-						opt.destinationDevice,
-						sourceChannelName,
-						deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
-						destinationChannel,
+				// A route from an offline source is how Dante pre-patching works, so its names come from
+				// the picker and the remembered channel list when there is no live record to read them from.
+				const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
+				const sourceName = sourceDevice?.name ?? opt.sourceDevice
+				const liveChannelName = isVideo
+					? (
+							sourceDevice?.videoTx?.[sourceChannelNumber] ??
+							findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
+						)?.name
+					: getChannelSubscriptionName(
+							sourceDevice?.audioTx?.[sourceChannelNumber] ??
+								findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber)),
+						)
+				const sourceChannelName =
+					liveChannelName || rememberedTxChannelName(self, sourceName, opt.channelType, sourceChannelNumber)
+				if (!sourceChannelName) {
+					throw new DanteCommandError(
+						`No name known for ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} source channel ` +
+							`${sourceChannelNumber} on '${opt.sourceDevice}' - Dante subscribes by name`,
 					)
-					return
 				}
 
-				const sourceChannel =
-					deviceByIdentifier(self, opt.sourceDevice)?.audioTx?.[sourceChannelNumber] ??
-					findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
-				const sourceChannelName = getChannelSubscriptionName(sourceChannel) || String(sourceChannelNumber)
-				makeAudioCrosspoint(
-					self,
-					opt.destinationDevice,
-					sourceChannelName,
-					deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
-					destinationChannel,
-				)
+				const makeCrosspoint = isVideo ? makeVideoCrosspointConfirmed : makeAudioCrosspointConfirmed
+				await makeCrosspoint(self, opt.destinationDevice, sourceChannelName, sourceName, destinationChannel)
 			},
 		},
 
@@ -464,15 +465,15 @@ export function UpdateActions(self: DanteInstance): void {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
-					else clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
+					else await clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
 					return
 				}
 				if (isVideo) {
-					clearVideoCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+					await clearVideoCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 					return
 				}
-				clearAudioCrosspoint(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+				await clearAudioCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
 			},
 		},
 
@@ -524,8 +525,8 @@ export function UpdateActions(self: DanteInstance): void {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDevice)
-					else clearAllAudioCrosspoints(self, opt.destinationDevice)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDevice)
+					else await clearAllAudioCrosspoints(self, opt.destinationDevice)
 					return
 				}
 
@@ -537,15 +538,14 @@ export function UpdateActions(self: DanteInstance): void {
 					undefined,
 				)
 				if (destinationChannel === undefined) {
-					logger.error(
+					throw new DanteCommandError(
 						`No ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} destination channel available on ` +
 							`'${opt.destinationDevice}' - it may have no ${opt.channelType} receive channels`,
 					)
-					return
 				}
 
-				if (isVideo) clearVideoCrosspoint(self, opt.destinationDevice, destinationChannel)
-				else clearAudioCrosspoint(self, opt.destinationDevice, destinationChannel)
+				if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+				else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
 			},
 		},
 
@@ -569,7 +569,7 @@ export function UpdateActions(self: DanteInstance): void {
 			],
 			callback: async (action) => {
 				const opt = action.options
-				setDeviceName(self, opt.device, opt.name)
+				setDeviceName(self, requireDeviceIp(self, opt.device), opt.name)
 			},
 		},
 
@@ -593,7 +593,7 @@ export function UpdateActions(self: DanteInstance): void {
 			],
 			callback: async (action) => {
 				const opt = action.options
-				setDeviceName(self, opt.device, opt.name)
+				setDeviceName(self, requireDeviceIp(self, opt.device), opt.name)
 			},
 		},
 
@@ -610,7 +610,7 @@ export function UpdateActions(self: DanteInstance): void {
 			],
 			callback: async (action) => {
 				const opt = action.options
-				resetDeviceName(self, opt.device)
+				resetDeviceName(self, requireDeviceIp(self, opt.device))
 			},
 		},
 
@@ -673,10 +673,10 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 				if (opt.channelType === 'video') {
-					setVideoRxChannelName(self, opt.device, channelNumber, opt.newName)
+					setVideoRxChannelName(self, requireDeviceIp(self, opt.device), channelNumber, opt.newName)
 					return
 				}
-				setAudioRxChannelName(self, opt.device, channelNumber, opt.newName)
+				setAudioRxChannelName(self, requireDeviceIp(self, opt.device), channelNumber, opt.newName)
 			},
 		},
 
@@ -715,10 +715,10 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 				if (opt.channelType === 'video') {
-					resetVideoRxChannelName(self, opt.device, channelNumber)
+					resetVideoRxChannelName(self, requireDeviceIp(self, opt.device), channelNumber)
 					return
 				}
-				resetAudioRxChannelName(self, opt.device, channelNumber)
+				resetAudioRxChannelName(self, requireDeviceIp(self, opt.device), channelNumber)
 			},
 		},
 
@@ -783,10 +783,10 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 				if (opt.channelType === 'video') {
-					setVideoTxChannelName(self, opt.device, channelNumber, opt.newName)
+					setVideoTxChannelName(self, requireDeviceIp(self, opt.device), channelNumber, opt.newName)
 					return
 				}
-				setAudioTxChannelName(self, opt.device, channelNumber, opt.newName)
+				setAudioTxChannelName(self, requireDeviceIp(self, opt.device), channelNumber, opt.newName)
 			},
 		},
 
@@ -825,10 +825,10 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 				if (opt.channelType === 'video') {
-					resetVideoTxChannelName(self, opt.device, channelNumber)
+					resetVideoTxChannelName(self, requireDeviceIp(self, opt.device), channelNumber)
 					return
 				}
-				resetAudioTxChannelName(self, opt.device, channelNumber)
+				resetAudioTxChannelName(self, requireDeviceIp(self, opt.device), channelNumber)
 			},
 		},
 
@@ -857,7 +857,7 @@ export function UpdateActions(self: DanteInstance): void {
 			},
 			callback: async (action) => {
 				const opt = action.options
-				setLatency(self, opt.destinationDevice, opt.latency)
+				setLatency(self, requireDeviceIp(self, opt.destinationDevice), opt.latency)
 			},
 		},
 
@@ -883,7 +883,7 @@ export function UpdateActions(self: DanteInstance): void {
 			],
 			callback: async (action) => {
 				const opt = action.options
-				setSampleRate(self, opt.device, opt.sr)
+				setSampleRate(self, requireDeviceIp(self, opt.device), opt.sr)
 			},
 		},
 
@@ -938,7 +938,11 @@ export function UpdateActions(self: DanteInstance): void {
 				// address for older actions - it suffixes the option key either way, and sendCommand
 				// resolves it to an address
 				const device = opt.device
-				setSampleRate(self, device, Number(deviceOptionValue<string>(self, opt, 'sr', device, '')))
+				setSampleRate(
+					self,
+					requireDeviceIp(self, device),
+					Number(deviceOptionValue<string>(self, opt, 'sr', device, '')),
+				)
 			},
 		},
 
@@ -992,7 +996,11 @@ export function UpdateActions(self: DanteInstance): void {
 				// address for older actions - it suffixes the option key either way, and sendCommand
 				// resolves it to an address
 				const device = opt.device
-				setPullup(self, device, Number(deviceOptionValue<string>(self, opt, 'pullup', device, '')))
+				setPullup(
+					self,
+					requireDeviceIp(self, device),
+					Number(deviceOptionValue<string>(self, opt, 'pullup', device, '')),
+				)
 			},
 		},
 
@@ -1030,7 +1038,11 @@ export function UpdateActions(self: DanteInstance): void {
 			callback: async (action) => {
 				const opt = action.options
 				const device = opt.device
-				setEncoding(self, device, Number(deviceOptionValue<string>(self, opt, 'encoding', device, '')))
+				setEncoding(
+					self,
+					requireDeviceIp(self, device),
+					Number(deviceOptionValue<string>(self, opt, 'encoding', device, '')),
+				)
 			},
 		},
 
@@ -1056,7 +1068,7 @@ export function UpdateActions(self: DanteInstance): void {
 						type: 'dropdown',
 						label: 'Channel',
 						id: `channel_${sanitiseVariableId(name)}`,
-						choices: audioChannelChoices(self, device, 'rx'),
+						choices: displayChannelChoices(audioChannelChoices(self, device, 'rx')),
 						default: firstChoiceId(audioChannelChoices(self, device, 'rx'), 0),
 						expressionDescription: channelRangeDescription(audioChannelChoices(self, device, 'rx'), name),
 						// a channel dropdown used to offer a "None" entry with id 0, and that was the default -
@@ -1095,7 +1107,7 @@ export function UpdateActions(self: DanteInstance): void {
 				const opt = action.options
 				setLevel(
 					self,
-					opt.device,
+					requireDeviceIp(self, opt.device),
 					'out',
 					deviceOptionValue<number>(self, opt, 'channel', opt.device, 0),
 					Number(opt.level),

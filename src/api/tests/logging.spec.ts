@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type DanteInstance from '../../main.js'
+import { ip, name } from '../../tests/ids.js'
 
 /**
  * The log is the only view into a running module, so these pin the lines an operator relies on:
@@ -43,9 +44,17 @@ function at(level: string): string[] {
 	return captured.filter((entry) => entry.level === level).map((entry) => entry.text)
 }
 
-function instance(devicesData: DevicesData = {}, verbose = false): DanteInstance {
+/**
+ * Device records as plain fixture data. The parsers brand the names and channel numbers they read
+ * off the wire; a fixture literal cannot, so this stands in for them.
+ */
+function devices(records: Record<string, object> = {}): DevicesData {
+	return records
+}
+
+function instance(records: Record<string, object> = {}, verbose = false): DanteInstance {
 	return {
-		devicesData,
+		devicesData: devices(records),
 		devicesChoices: [],
 		txChannelsChoices: {},
 		rxChannelsChoices: {},
@@ -80,33 +89,33 @@ function srvResponse(deviceName: string) {
 
 describe('device rename', () => {
 	it('replaces the old dropdown entry rather than leaving both', () => {
-		// updateDeviceChoice finds the entry to remove by the name still on the device record, so
-		// assigning the new name first orphaned the old choice in every dropdown
+		// updateDeviceChoice reads the outgoing name off the device record for its log line, so
+		// assigning the new name first would misreport the rename
 		const self = instance()
-		const rinfo = { address: '10.0.0.5' } as never
+		const rinfo = { address: ip('10.0.0.5') } as never
 
 		danteDiscovery(self, srvResponse('OldName'), rinfo)
-		expect(self.devicesChoices.map((choice) => choice.id)).toEqual(['OldName'])
+		expect(self.devicesChoices).toEqual([{ id: 'OldName', label: 'OldName' }])
 
 		danteDiscovery(self, srvResponse('NewName'), rinfo)
-		expect(self.devicesChoices.map((choice) => choice.id)).toEqual(['NewName'])
+		expect(self.devicesChoices).toEqual([{ id: 'NewName', label: 'NewName' }])
 	})
 
 	it('logs both names, since actions stored against the old one stop resolving', () => {
-		const self = instance({ '10.0.0.5': { name: 'OldName' } })
+		const self = instance({ [ip('10.0.0.5')]: { name: 'OldName' } })
 
-		updateDeviceChoice(self, '10.0.0.5', 'NewName')
+		updateDeviceChoice(self, ip('10.0.0.5'), name('NewName'))
 
 		const line = at('info').find((text) => text.includes('renamed'))
 		expect(line).toContain('OldName')
 		expect(line).toContain('NewName')
-		expect(line).toContain('10.0.0.5')
+		expect(line).toContain(ip('10.0.0.5'))
 	})
 
 	it('does not claim a rename when the name is merely confirmed', () => {
-		const self = instance({ '10.0.0.5': { name: 'SameName' } })
+		const self = instance({ [ip('10.0.0.5')]: { name: 'SameName' } })
 
-		updateDeviceChoice(self, '10.0.0.5', 'SameName')
+		updateDeviceChoice(self, ip('10.0.0.5'), name('SameName'))
 
 		expect(at('info').filter((text) => text.includes('renamed'))).toEqual([])
 	})
@@ -116,16 +125,16 @@ describe('channel renames', () => {
 	function withChannels(names: string[]) {
 		const rx: Record<string | number, unknown> = { count: names.length }
 		names.forEach((name, index) => (rx[index + 1] = { number: index + 1, name }))
-		return { '10.0.0.5': { name: 'DeviceA', audioRx: rx } } as unknown as DevicesData
+		return { [ip('10.0.0.5')]: { name: 'DeviceA', audioRx: rx } }
 	}
 
 	it('reports a renamed channel at info, naming both labels', () => {
 		const self = instance(withChannels(['In 1', 'In 2']))
-		updateChannelChoices(self, '10.0.0.5', 'rx')
+		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
 
 		captured.length = 0
-		self.devicesData['10.0.0.5'].audioRx![2].name = 'Talkback'
-		updateChannelChoices(self, '10.0.0.5', 'rx')
+		self.devicesData[ip('10.0.0.5')].audioRx![2].name = 'Talkback'
+		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
 
 		const line = at('info').find((text) => text.includes('renamed'))
 		expect(line).toContain('In 2')
@@ -135,7 +144,7 @@ describe('channel renames', () => {
 
 	it('does not log the initial channel list at info, which is not a change', () => {
 		const self = instance(withChannels(['In 1', 'In 2']))
-		updateChannelChoices(self, '10.0.0.5', 'rx')
+		updateChannelChoices(self, ip('10.0.0.5'), 'rx')
 
 		expect(at('info')).toEqual([])
 	})
@@ -143,13 +152,13 @@ describe('channel renames', () => {
 
 describe('device going offline', () => {
 	it('says which device left and how long it was silent, without internal jargon', () => {
-		const self = instance({ '10.0.0.5': { name: 'DeviceA' } })
+		const self = instance({ [ip('10.0.0.5')]: { name: 'DeviceA' } })
 
-		destroyDevice(self, '10.0.0.5')
+		destroyDevice(self, ip('10.0.0.5'))
 
 		const line = at('warn').find((text) => text.includes('offline'))
 		expect(line).toContain('DeviceA')
-		expect(line).toContain('10.0.0.5')
+		expect(line).toContain(ip('10.0.0.5'))
 		expect(line).toContain('3000ms')
 		// the old wording leaked an implementation detail into an operator-facing line
 		expect(line).not.toContain('Destroying references')
@@ -159,21 +168,21 @@ describe('device going offline', () => {
 describe('verbose diagnostics', () => {
 	it('stay silent when verbose logging is off', () => {
 		const self = instance({}, false)
-		danteDiscovery(self, srvResponse('DeviceA'), { address: '10.0.0.5' } as never)
+		danteDiscovery(self, srvResponse('DeviceA'), { address: ip('10.0.0.5') } as never)
 
 		expect(at('debug')).toEqual([])
 	})
 
 	it('keeps service ports out of the default log, being plumbing rather than network news', () => {
 		const self = instance({}, false)
-		danteDiscovery(self, srvResponse('DeviceA'), { address: '10.0.0.5' } as never)
+		danteDiscovery(self, srvResponse('DeviceA'), { address: ip('10.0.0.5') } as never)
 
 		expect(at('info').filter((text) => text.includes('Port for service'))).toEqual([])
 	})
 
 	it('still reports service ports when verbose logging is on', () => {
 		const self = instance({}, true)
-		danteDiscovery(self, srvResponse('DeviceA'), { address: '10.0.0.5' } as never)
+		danteDiscovery(self, srvResponse('DeviceA'), { address: ip('10.0.0.5') } as never)
 
 		expect(at('debug').some((text) => text.includes('Port for service ARC'))).toBe(true)
 	})
@@ -182,7 +191,7 @@ describe('verbose diagnostics', () => {
 		for (const verbose of [false, true]) {
 			captured.length = 0
 			const self = instance({}, verbose)
-			danteDiscovery(self, srvResponse('DeviceA'), { address: '10.0.0.5' } as never)
+			danteDiscovery(self, srvResponse('DeviceA'), { address: ip('10.0.0.5') } as never)
 
 			expect(
 				at('info').some((text) => text.startsWith('Discovered DeviceA')),
@@ -193,7 +202,7 @@ describe('verbose diagnostics', () => {
 
 	it('report discovery detail when verbose logging is on', () => {
 		const self = instance({}, true)
-		danteDiscovery(self, srvResponse('DeviceA'), { address: '10.0.0.5' } as never)
+		danteDiscovery(self, srvResponse('DeviceA'), { address: ip('10.0.0.5') } as never)
 
 		expect(at('debug').some((text) => text.includes('DeviceA'))).toBe(true)
 	})
@@ -241,7 +250,7 @@ function rxReply(channels: { number: number; name: string; source?: string; chan
 }
 
 describe('route changes', () => {
-	const IP = '10.0.0.5'
+	const IP = ip('10.0.0.5')
 	const rinfo = (reply: Buffer) => ({ address: IP, size: reply.length }) as never
 
 	function deliver(self: DanteInstance, channels: Parameters<typeof rxReply>[0]) {
@@ -328,7 +337,7 @@ describe('route changes', () => {
  * nobody had touched had changed from nothing into itself.
  */
 describe('channel names while a device is being discovered', () => {
-	const IP = '10.0.0.5'
+	const IP = ip('10.0.0.5')
 	const rinfo = (reply: Buffer) => ({ address: IP, size: reply.length }) as never
 
 	/** A device whose channel count is known, so its channel list is the full width from the start. */

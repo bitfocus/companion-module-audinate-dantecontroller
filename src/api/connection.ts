@@ -22,11 +22,12 @@ import {
 	clearDeviceTimeouts,
 	resetIdCollisionWarnings,
 	deviceLabel,
-	resolveDeviceIp,
 } from './devices.js'
 import { parseAvReply, parseCmcReply, parseHeartbeatReply, parseReply, parseSettingsReply } from './protocol.js'
+import { cancelPendingCommands, handleCommandReply, handleSendFailure } from './requests.js'
 import { danteDiscovery, getMdnsServices } from './discovery.js'
-import { retryMissingVideoDirectories } from './queries.js'
+import { retryMissingAudioDirectories, retryMissingVideoDirectories } from './queries.js'
+import { type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:connection')
 
@@ -233,8 +234,8 @@ export class DanteConnection {
 	}
 
 	/** Sends a prepared command to a device, over the socket and port for the given service. */
-	send(command: Buffer, host: string, service: ServiceName = 'ARC', forcePort?: number): void {
-		sendCommand(this.self, command, host, service, forcePort)
+	send(command: Buffer, ipaddress: DeviceIp, service: ServiceName = 'ARC', forcePort?: number): void {
+		sendCommand(this.self, command, ipaddress, service, forcePort)
 	}
 
 	/** Re-evaluates whether every socket and discovery are up, and updates the instance status. */
@@ -250,7 +251,8 @@ export class DanteConnection {
 		if (period > 0) {
 			this.interval = setInterval(() => {
 				getMdnsServices(this.self)
-				// rides the same tick rather than owning a timer - see retryMissingVideoDirectories
+				// ride the same tick rather than owning a timer - see retryMissingVideoDirectories
+				retryMissingAudioDirectories(this.self)
 				retryMissingVideoDirectories(this.self)
 			}, period)
 			// module plumbing rather than network news - the same call as the port announcements
@@ -384,6 +386,8 @@ export function initConnection(self: DanteInstance): void {
 
 	// create data object
 	self.devicesData = {}
+	// commands sent over the outgoing sockets can no longer be answered
+	cancelPendingCommands(self)
 
 	// create actions and feedback dropdown choices
 	self.devicesChoices = []
@@ -447,6 +451,7 @@ export function initConnection(self: DanteInstance): void {
 	arcSocket.on('message', (reply, rinfo) => {
 		self.connection.noteTraffic('ARC')
 		handlePacket(self, 'ARC', rinfo.address, () => {
+			handleCommandReply(self, reply, rinfo)
 			parseReply(self, reply, rinfo)
 			parseAvReply(self, reply, rinfo)
 		})
@@ -805,7 +810,7 @@ function handlePacket(self: DanteInstance, service: ConnectionName, source: stri
 const reportedSendFailures = new WeakMap<DanteInstance, Map<string, string>>()
 
 /** Identifies one send target for {@link reportedSendFailures}. */
-function sendFailureKey(service: ServiceName, ipaddress: string): string {
+function sendFailureKey(service: ServiceName, ipaddress: DeviceIp): string {
 	return `${service}:${ipaddress}`
 }
 
@@ -816,7 +821,7 @@ function sendFailureKey(service: ServiceName, ipaddress: string): string {
  * up to sixteen datagrams - so reporting each one would bury the first, which is the informative
  * one. Keyed on the error code as well as the target, so a failure that changes kind is still news.
  */
-function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress: string, error: Error): void {
+function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress: DeviceIp, error: Error): void {
 	let reported = reportedSendFailures.get(self)
 	if (!reported) {
 		reported = new Map()
@@ -833,24 +838,26 @@ function reportSendFailure(self: DanteInstance, service: ServiceName, ipaddress:
 
 /**
  * Sends a pre-built Dante command buffer to a device over the correct socket/port for the given service.
+ *
+ * Returns false when there is nothing to send it with - no known port for the service, or no
+ * socket. A send that fails later, in the socket's callback, is reported to whoever is waiting on
+ * the command's reply instead (see `awaitCommandAck`).
  */
 export function sendCommand(
 	self: DanteInstance,
 	command: Buffer,
-	host: string,
+	ipaddress: DeviceIp,
 	service: ServiceName = 'ARC',
 	forcePort?: number,
-): void {
+): boolean {
 	if (self.debug) {
 		// Log sent bytes when in debug mode
 		logger.debug(`${service} : Tx (${command.length}): ${command.toString('hex')}`)
 	}
 
-	// `host` may be a device name or an address: dropdowns store the name, older saved actions and
-	// internal callers pass the address. Resolving here covers every command path at once.
-	const ipaddress = resolveDeviceIp(self, host) ?? host
 	const port = forcePort ?? self.devicesData[ipaddress]?.ports?.[service]
-	if (port) {
+	const socket = self.sockets[service]
+	if (port && socket) {
 		// The callback is the point: `dgram.send` emits its error on the *socket* when called without
 		// one, and this module's socket 'error' handlers mark the whole service down - a state nothing
 		// clears, since only a fresh bind sets it back. A datagram that could not be delivered to one
@@ -858,9 +865,10 @@ export function sendCommand(
 		// connection into Disconnected. On Linux these are routine: EHOSTUNREACH/ENETUNREACH for a
 		// device that has gone away, EPERM for a firewall reject, ENOBUFS for a full transmit queue.
 		try {
-			self.sockets[service]?.send(command, 0, command.length, port, ipaddress, (error) => {
+			socket.send(command, 0, command.length, port, ipaddress, (error) => {
 				if (error) {
 					reportSendFailure(self, service, ipaddress, error)
+					handleSendFailure(self, ipaddress, command, error)
 				} else {
 					// so the next failure to this device is reported afresh rather than deduplicated
 					// against one it has since recovered from
@@ -872,12 +880,18 @@ export function sendCommand(
 			// between the lookup above and the call, which a queued action firing during teardown
 			// reaches. Uncaught, that would take the module process down.
 			reportSendFailure(self, service, ipaddress, error instanceof Error ? error : new Error(String(error)))
+			return false
 		}
-	} else {
-		const deviceId = self.devicesData[ipaddress]?.name ?? host
-		logger.error(`Undefined port for service ${service} for device ${deviceId}`)
-		return
+		return true
 	}
+
+	const deviceId = self.devicesData[ipaddress]?.name ?? ipaddress
+	logger.error(
+		port
+			? `No ${service} socket to reach ${deviceId} with`
+			: `Undefined port for service ${service} for device ${deviceId}`,
+	)
+	return false
 }
 
 /**

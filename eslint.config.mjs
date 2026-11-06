@@ -8,7 +8,8 @@ const baseConfig = await generateEslintConfig({
 export default [
 	...baseConfig,
 	{
-		files: ['src/**/*.spec.ts'],
+		// spec files, and the helpers under src/tests that only they import
+		files: ['src/**/*.spec.ts', 'src/tests/**/*.ts'],
 		rules: {
 			'n/no-unpublished-import': 'off',
 			// Referencing a mocked method (e.g. `expect(self.updateStatus).toHaveBeenCalledWith(...)`)

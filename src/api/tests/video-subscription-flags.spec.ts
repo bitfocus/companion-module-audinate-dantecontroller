@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseAvReply, isVideoSubscriptionActive, type DevicesData } from '../index.js'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * The video subscription flags, against real captures.
@@ -58,7 +59,7 @@ const ACTIVE_HEX =
 	'00850000000001010104161c00030000000400010000000000060000000000e8010400000000000100fe000100000000011400000000' +
 	'0606000000c000d7000a0101'
 
-const DEVICE_IP = '169.254.2.58'
+const DEVICE_IP = ip('169.254.2.58')
 
 function instance(): DanteInstance {
 	return {
