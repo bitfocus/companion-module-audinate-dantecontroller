@@ -117,10 +117,11 @@ export interface DeviceData {
 	ports?: Partial<Record<ServiceName, number>>
 	audioTx?: AudioTxChannels
 	/**
-	 * True from sending a tx friendly-names query until a reply to it arrives. A device answers even
-	 * when it has no friendly names, so a query still pending at the next sweep was dropped.
+	 * How many pages of the last tx friendly-names query are unanswered. A device answers even when it
+	 * has no friendly names, so a page still pending at the next sweep was dropped. A count, because a
+	 * reply with no names in it cannot say which page it answers.
 	 */
-	txFriendlyNamesPending?: boolean
+	txFriendlyNamePagesPending?: number
 	audioRx?: AudioRxChannels
 	videoTx?: VideoTxChannels
 	videoRx?: VideoRxChannels

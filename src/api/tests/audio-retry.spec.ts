@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DANTE_CONST, parseReply, retryMissingAudioDirectories, type DevicesData } from '../index.js'
+import {
+	DANTE_CONST,
+	getTxChannelFriendlyNames,
+	parseReply,
+	refreshArc,
+	retryMissingAudioDirectories,
+	type DevicesData,
+} from '../index.js'
 import type DanteInstance from '../../main.js'
 import { ip } from '../../tests/ids.js'
 
@@ -13,8 +20,12 @@ import { ip } from '../../tests/ids.js'
  */
 
 const IP = ip('192.168.1.237')
-const { MESSAGE_TYPE_TX_CHANNEL_QUERY, MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY, MESSAGE_TYPE_RX_CHANNEL_QUERY } =
-	DANTE_CONST.COMMANDS
+const {
+	MESSAGE_TYPE_CHANNEL_COUNTS_QUERY,
+	MESSAGE_TYPE_TX_CHANNEL_QUERY,
+	MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
+	MESSAGE_TYPE_RX_CHANNEL_QUERY,
+} = DANTE_CONST.COMMANDS
 
 /** Longer than the window every channel query opens, during which a device is not re-asked. */
 const PAST_SETTLING_MS = 3001
@@ -95,15 +106,31 @@ describe('retryMissingAudioDirectories', () => {
 	})
 
 	it('re-asks a device whose friendly-names query went unanswered', () => {
-		const { self, sent } = instance(complete({ txFriendlyNamesPending: true }))
+		const { self, sent } = instance(complete({ txFriendlyNamePagesPending: 1 }))
 		expect(sweep(self, sent)).toEqual([MESSAGE_TYPE_TX_CHANNEL_QUERY, MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY])
 	})
 
 	it('stops once the friendly-names query is answered', () => {
-		const { self, sent } = instance(complete({ txFriendlyNamesPending: true }))
+		const { self, sent } = instance(complete({ txFriendlyNamePagesPending: 1 }))
 		parseReply(self, friendlyNamesReply(), { address: IP, size: 42 } as never)
-		expect(self.devicesData[IP]?.txFriendlyNamesPending).toBe(false)
+		expect(self.devicesData[IP]?.txFriendlyNamePagesPending).toBe(0)
 		expect(sweep(self, sent, 10)).toEqual([])
+	})
+
+	it("re-asks when one page of a device's friendly names is lost", () => {
+		// 40 channels is two pages of 32: the first is answered, the second dropped
+		const channels = Object.fromEntries(
+			Array.from({ length: 40 }, (_, index) => [index + 1, { number: index + 1, name: `${index + 1}` }]),
+		)
+		const { self, sent } = instance(complete({ audioTx: { count: 40, ...channels } }))
+		getTxChannelFriendlyNames(self, IP)
+		expect(self.devicesData[IP]?.txFriendlyNamePagesPending).toBe(2)
+		vi.advanceTimersByTime(PAST_SETTLING_MS)
+
+		parseReply(self, friendlyNamesReply(), { address: IP, size: 42 } as never)
+		vi.advanceTimersByTime(PAST_SETTLING_MS)
+
+		expect(sweep(self, sent)).toContain(MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY)
 	})
 
 	it('leaves a complete device alone', () => {
@@ -111,10 +138,26 @@ describe('retryMissingAudioDirectories', () => {
 		expect(sweep(self, sent, 10)).toEqual([])
 	})
 
-	it('leaves alone a device that has not reported its channel counts yet', () => {
-		// the counts reply is what sends the first channel queries; there is nothing to chase before it
+	it('re-asks a device whose channel counts never arrived', () => {
+		// the counts reply is what sends the first channel queries, so nothing else can be chased yet
 		const { self, sent } = instance({ name: 'IMAG-IO1', ports: { ARC: 4440 } })
+		expect(sweep(self, sent)).toEqual([MESSAGE_TYPE_CHANNEL_COUNTS_QUERY])
+	})
+
+	it('gives up on channel counts after a bounded number of attempts', () => {
+		const { self, sent } = instance({ name: 'IMAG-IO1', ports: { ARC: 4440 } })
+		expect(sweep(self, sent, 50)).toHaveLength(5)
+	})
+
+	it('leaves alone a device that reported having no channels', () => {
+		const { self, sent } = instance(complete({ audioTx: { count: 0 }, audioRx: { count: 0 } }))
 		expect(sweep(self, sent, 10)).toEqual([])
+	})
+
+	it('asks for channel counts on a manual refresh', () => {
+		const { self, sent } = instance({ name: 'IMAG-IO1', ports: { ARC: 4440 } })
+		refreshArc(self, IP)
+		expect(sent.map((packet) => packet.readUInt16BE(6))).toContain(MESSAGE_TYPE_CHANNEL_COUNTS_QUERY)
 	})
 
 	it('does not add to a burst whose replies may still be on their way', () => {
@@ -145,7 +188,7 @@ describe('retryMissingAudioDirectories', () => {
 
 		// the names arrive late, which releases the spent budget
 		device.audioTx = { count: 2, ...named }
-		device.txFriendlyNamesPending = false
+		device.txFriendlyNamePagesPending = 0
 		expect(sweep(self, sent)).toEqual([])
 
 		// and a later reconnect that loses them again is retried in full

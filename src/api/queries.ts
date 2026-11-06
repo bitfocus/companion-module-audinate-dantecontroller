@@ -51,9 +51,8 @@ export function getTxChannelFriendlyNames(self: DanteInstance, ipaddress: Device
 			delete channel.friendlyName
 		}
 	}
-	// cleared by the reply, so a query the device dropped can be told from one it answered with none
-	device.txFriendlyNamesPending = true
-	sendChannelQuery(
+	// counted down by the replies, so a page the device dropped can be told from one it answered with none
+	device.txFriendlyNamePagesPending = sendChannelQuery(
 		self,
 		ipaddress,
 		DANTE_CONST.COMMANDS.MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
@@ -79,6 +78,8 @@ export function getTxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
  *
  * Always sends at least one page: before a device has reported its channel counts that first query
  * is how they get discovered.
+ *
+ * @returns How many pages were sent.
  */
 function sendChannelQuery(
 	self: DanteInstance,
@@ -86,7 +87,7 @@ function sendChannelQuery(
 	commandType: number,
 	channelCount: number,
 	channelsPerPage: number,
-): void {
+): number {
 	// the replies to these pages are the channel list filling in, not changing - see the rename logging
 	markChannelsSettling(self, ipaddress)
 
@@ -107,9 +108,10 @@ function sendChannelQuery(
 		commandArguments.writeUInt16BE(page * channelsPerPage + 1, 2)
 		sendCommand(self, makeCommand(self, commandType, commandArguments), ipaddress)
 	}
+	return pages
 }
 
-/** Attempts spent per `<ip>:<direction>`, weakly held so a discarded instance is still collectable. */
+/** Attempts spent per `<ip>:<directory>`, weakly held so a discarded instance is still collectable. */
 type DirectoryAttempts = WeakMap<DanteInstance, Map<string, number>>
 
 /**
@@ -200,8 +202,10 @@ function missingChannelNames(channels: AudioTxChannels | AudioRxChannels | undef
  * keep its channel counts with no names behind them. Its transmit names are re-read only on a
  * rename, so they stayed empty, and every receiver subscribed to it read as having no source.
  *
- * A directory is re-asked while a counted channel has no name, or while a friendly-names query is
- * unanswered. Its budget is released once it is complete, so a later loss is retried too.
+ * A directory is re-asked while a counted channel has no name, or while a page of a friendly-names
+ * query is unanswered, and the counts themselves while they are unknown: they are asked for once,
+ * when the ARC port is learned, and their reply is what sends the first channel queries. A budget is
+ * released once its directory is complete, so a later loss is retried too.
  */
 export function retryMissingAudioDirectories(self: DanteInstance): void {
 	const attempts = directoryAttempts(audioDirectoryAttempts, self)
@@ -213,12 +217,13 @@ export function retryMissingAudioDirectories(self: DanteInstance): void {
 		if (channelsAreSettling(self, ipaddress)) continue
 
 		const incomplete = {
-			tx: missingChannelNames(device.audioTx) || device.txFriendlyNamesPending === true,
+			counts: device.audioRx?.count === undefined || device.audioTx?.count === undefined,
+			tx: missingChannelNames(device.audioTx) || (device.txFriendlyNamePagesPending ?? 0) > 0,
 			rx: missingChannelNames(device.audioRx),
 		}
-		for (const direction of ['rx', 'tx'] as const) {
-			const key = `${ipaddress}:${direction}`
-			if (!incomplete[direction]) {
+		for (const directory of ['counts', 'rx', 'tx'] as const) {
+			const key = `${ipaddress}:${directory}`
+			if (!incomplete[directory]) {
 				attempts.delete(key)
 				continue
 			}
@@ -228,10 +233,12 @@ export function retryMissingAudioDirectories(self: DanteInstance): void {
 			attempts.set(key, spent + 1)
 
 			if (self.debug) {
-				logger.debug(`Re-asking ${deviceLabel(self, ipaddress)} for its audio ${direction} directory`)
+				logger.debug(`Re-asking ${deviceLabel(self, ipaddress)} for its audio ${directory} directory`)
 			}
 
-			if (direction === 'rx') {
+			if (directory === 'counts') {
+				getChannelCount(self, ipaddress)
+			} else if (directory === 'rx') {
 				getRxChannels(self, ipaddress)
 			} else {
 				getTxChannels(self, ipaddress)
@@ -405,7 +412,7 @@ export function refreshSettings(self: DanteInstance, deviceIp?: DeviceIp): void 
 }
 
 /**
- * Re-queries ARC-service parameters (device name, settings, rx/tx channels) for one device,
+ * Re-queries ARC-service parameters (device name, settings, channel counts, rx/tx channels) for one device,
  * or all known devices if none is given.
  */
 export function refreshArc(self: DanteInstance, deviceIp?: DeviceIp): void {
@@ -416,6 +423,7 @@ export function refreshArc(self: DanteInstance, deviceIp?: DeviceIp): void {
 	for (const ip of ipArray) {
 		getDeviceName(self, ip)
 		getSettings(self, ip)
+		getChannelCount(self, ip)
 		getRxChannels(self, ip)
 		getTxChannels(self, ip)
 		getTxChannelFriendlyNames(self, ip)
