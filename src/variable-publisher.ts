@@ -72,13 +72,6 @@ export class VariablePublisher {
 		}
 		return count
 	}
-
-	/** Forgets everything sent, for when the host's state is being replaced wholesale. */
-	reset(): void {
-		this.#definitionsKey = undefined
-		this.#definedIds = new Set()
-		this.#values.clear()
-	}
 }
 
 /** Values are scalars or small arrays (channel names, output levels), so arrays compare by content. */

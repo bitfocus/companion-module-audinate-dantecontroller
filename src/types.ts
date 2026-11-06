@@ -86,7 +86,6 @@ export interface DanteDeviceVariables {
 export interface DanteRoutingVariables {
 	device_name: string
 	source: string
-	connected: boolean
 	status: string
 	name: string
 	label: string

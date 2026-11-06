@@ -98,14 +98,7 @@ export interface MdnsSrvAnswer {
 	data: { port: number }
 }
 
-/** `dns-packet` decodes TXT data as one buffer per `key=value` string. */
-export interface MdnsTxtAnswer {
-	type: 'TXT'
-	name: string
-	data: Buffer | string | (Buffer | string)[]
-}
-
-export type MdnsAnswer = MdnsPtrAnswer | MdnsSrvAnswer | MdnsTxtAnswer
+export type MdnsAnswer = MdnsPtrAnswer | MdnsSrvAnswer
 
 export interface MdnsResponsePacket {
 	answers: MdnsAnswer[]

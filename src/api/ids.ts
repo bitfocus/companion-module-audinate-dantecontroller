@@ -33,12 +33,6 @@ export const deviceIpOf = (rinfo: { address: string }): DeviceIp => asDeviceIp(r
 /** A device name as a device or mDNS reported it. */
 export const asDeviceName = (name: string): DeviceName => name as DeviceName
 
-/** A channel number from untrusted input: a positive integer, given as a number or numeric text. */
-export function parseChannelNumber(value: unknown): ChannelNumber | undefined {
-	const number = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
-	return typeof number === 'number' && Number.isInteger(number) && number >= 1 ? (number as ChannelNumber) : undefined
-}
-
 /** A channel number the module itself produced, counting `1..count`. */
 export const asChannelNumber = (number: number): ChannelNumber => number as ChannelNumber
 
