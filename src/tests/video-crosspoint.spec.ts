@@ -356,6 +356,71 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(sentBuffer.readUInt16BE(0)).toBe(DANTE_CONST.PROTOCOL.CONTROL)
 	})
 
+	describe('makeCrosspointDropDown with a source that is offline', () => {
+		const offlineSource = () => {
+			const data = devicesData()
+			delete data[SOURCE]
+			return data
+		}
+		const audioRoute = {
+			channelType: 'audio',
+			destinationDevice: A_NAME,
+			[`destinationChannel_${A_NAME}`]: 1,
+			sourceDevice: B_NAME,
+			[`sourceChannel_${B_NAME}`]: 1,
+		}
+		const videoRoute = {
+			channelType: 'video',
+			destinationDevice: A_NAME,
+			[`destinationChannelVideo_${A_NAME}`]: 2,
+			sourceDevice: B_NAME,
+			[`sourceChannelVideo_${B_NAME}`]: 1,
+		}
+
+		it('subscribes an audio channel by the names it remembers, as pre-patching needs', async () => {
+			const self = instance(offlineSource())
+			const sendFn = answering(self, () => {
+				self.devicesData[DEST].audioRx![1] = {
+					number: ch(1),
+					name: 'Audio In 1',
+					sourceDevice: 'DeviceB',
+					sourceChannel: '01',
+					subscriptionStatus: 0x0001,
+				}
+			})
+
+			await actionDefinition(self, 'makeCrosspointDropDown').callback({ options: audioRoute })
+
+			expect((sendFn.mock.calls[0][0] as Buffer).includes('01\0DeviceB')).toBe(true)
+		})
+
+		it('subscribes a video channel by the names it remembers', async () => {
+			const self = instance(offlineSource())
+			const sendFn = answering(self, () => {
+				self.devicesData[DEST].videoRx![2] = {
+					number: ch(2),
+					name: 'Video In 2',
+					sourceDevice: 'DeviceB',
+					sourceChannel: 'Cam 1',
+				}
+			})
+
+			await actionDefinition(self, 'makeCrosspointDropDown').callback({ options: videoRoute })
+
+			expect(writes(sendFn)[0].includes('Cam 1\0DeviceB')).toBe(true)
+		})
+
+		it('fails rather than subscribing to a channel it has no name for', async () => {
+			const self = instance(offlineSource(), { txChannelsChoices: {} })
+			const sendFn = answering(self)
+
+			await expect(actionDefinition(self, 'makeCrosspointDropDown').callback({ options: audioRoute })).rejects.toThrow(
+				"No name known for Audio source channel 1 on 'DeviceB'",
+			)
+			expect(sendFn).not.toHaveBeenCalled()
+		})
+	})
+
 	it('clearCrosspointDropDown sends a video clear command when channelType is video', async () => {
 		const self = instance()
 		const sendFn = answering(self, () => {

@@ -43,6 +43,7 @@ import {
 	perDeviceMissingChannelWarnings,
 	refreshArc,
 	refreshSettings,
+	rememberedTxChannelName,
 	requireDeviceIp,
 	resolveDeviceIp,
 	resetAudioRxChannelName,
@@ -403,32 +404,30 @@ export function UpdateActions(self: DanteInstance): void {
 					return
 				}
 
-				if (isVideo) {
-					const sourceChannel =
-						deviceByIdentifier(self, opt.sourceDevice)?.videoTx?.[sourceChannelNumber] ??
-						findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
-					const sourceChannelName = sourceChannel?.name || String(sourceChannelNumber)
-					await makeVideoCrosspointConfirmed(
-						self,
-						opt.destinationDevice,
-						sourceChannelName,
-						deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
-						destinationChannel,
+				// A route from an offline source is how Dante pre-patching works, so its names come from
+				// the picker and the remembered channel list when there is no live record to read them from.
+				const sourceDevice = deviceByIdentifier(self, opt.sourceDevice)
+				const sourceName = sourceDevice?.name ?? opt.sourceDevice
+				const liveChannelName = isVideo
+					? (
+							sourceDevice?.videoTx?.[sourceChannelNumber] ??
+							findVideoTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
+						)?.name
+					: getChannelSubscriptionName(
+							sourceDevice?.audioTx?.[sourceChannelNumber] ??
+								findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber)),
+						)
+				const sourceChannelName =
+					liveChannelName || rememberedTxChannelName(self, sourceName, opt.channelType, sourceChannelNumber)
+				if (!sourceChannelName) {
+					throw new DanteCommandError(
+						`No name known for ${CHANNEL_MEDIA_TYPE_LABELS[opt.channelType]} source channel ` +
+							`${sourceChannelNumber} on '${opt.sourceDevice}' - Dante subscribes by name`,
 					)
-					return
 				}
 
-				const sourceChannel =
-					deviceByIdentifier(self, opt.sourceDevice)?.audioTx?.[sourceChannelNumber] ??
-					findAudioTxChannelByName(self, opt.sourceDevice, String(sourceChannelNumber))
-				const sourceChannelName = getChannelSubscriptionName(sourceChannel) || String(sourceChannelNumber)
-				await makeAudioCrosspointConfirmed(
-					self,
-					opt.destinationDevice,
-					sourceChannelName,
-					deviceByIdentifier(self, opt.sourceDevice)?.name ?? '',
-					destinationChannel,
-				)
+				const makeCrosspoint = isVideo ? makeVideoCrosspointConfirmed : makeAudioCrosspointConfirmed
+				await makeCrosspoint(self, opt.destinationDevice, sourceChannelName, sourceName, destinationChannel)
 			},
 		},
 
