@@ -109,6 +109,26 @@ function sendChannelQuery(
 	}
 }
 
+/** Attempts spent per `<ip>:<direction>`, weakly held so a discarded instance is still collectable. */
+type DirectoryAttempts = WeakMap<DanteInstance, Map<string, number>>
+
+/**
+ * This instance's attempts, with the budget of anything no longer on the network released, so a
+ * device that returns starts over.
+ */
+function directoryAttempts(store: DirectoryAttempts, self: DanteInstance): Map<string, number> {
+	let attempts = store.get(self)
+	if (!attempts) {
+		attempts = new Map()
+		store.set(self, attempts)
+	}
+
+	for (const key of [...attempts.keys()]) {
+		if (!self.devicesData[asDeviceIp(key.slice(0, key.lastIndexOf(':')))]) attempts.delete(key)
+	}
+	return attempts
+}
+
 /**
  * How many times a device is re-asked for a video directory it has never answered.
  *
@@ -117,8 +137,7 @@ function sendChannelQuery(
  */
 const VIDEO_DIRECTORY_ATTEMPTS = 5
 
-/** Attempts spent per `<ip>:<direction>`, weakly held so a discarded instance is still collectable. */
-const videoDirectoryAttempts = new WeakMap<DanteInstance, Map<string, number>>()
+const videoDirectoryAttempts: DirectoryAttempts = new WeakMap()
 
 /**
  * Re-asks for video directories that never arrived, once per discovery sweep.
@@ -137,16 +156,7 @@ const videoDirectoryAttempts = new WeakMap<DanteInstance, Map<string, number>>()
  * genuinely told us it has none.
  */
 export function retryMissingVideoDirectories(self: DanteInstance): void {
-	let attempts = videoDirectoryAttempts.get(self)
-	if (!attempts) {
-		attempts = new Map()
-		videoDirectoryAttempts.set(self, attempts)
-	}
-
-	// release the budget of anything no longer on the network, so a device that returns starts over
-	for (const key of [...attempts.keys()]) {
-		if (!self.devicesData[asDeviceIp(key.slice(0, key.lastIndexOf(':')))]) attempts.delete(key)
-	}
+	const attempts = directoryAttempts(videoDirectoryAttempts, self)
 
 	for (const [ipaddress, device] of brandedEntries(self.devicesData)) {
 		// nothing to ask over until discovery has learned where to send it
@@ -173,8 +183,7 @@ export function retryMissingVideoDirectories(self: DanteInstance): void {
 /** How many times a device is re-asked for an audio directory it has not fully answered. */
 const AUDIO_DIRECTORY_ATTEMPTS = 5
 
-/** Attempts spent per `<ip>:<directory>`, weakly held so a discarded instance is still collectable. */
-const audioDirectoryAttempts = new WeakMap<DanteInstance, Map<string, number>>()
+const audioDirectoryAttempts: DirectoryAttempts = new WeakMap()
 
 /** True when the device has reported channels but not the name of every one of them. */
 function missingChannelNames(channels: AudioTxChannels | AudioRxChannels | undefined): boolean {
@@ -195,16 +204,7 @@ function missingChannelNames(channels: AudioTxChannels | AudioRxChannels | undef
  * unanswered. Its budget is released once it is complete, so a later loss is retried too.
  */
 export function retryMissingAudioDirectories(self: DanteInstance): void {
-	let attempts = audioDirectoryAttempts.get(self)
-	if (!attempts) {
-		attempts = new Map()
-		audioDirectoryAttempts.set(self, attempts)
-	}
-
-	// release the budget of anything no longer on the network, so a device that returns starts over
-	for (const key of [...attempts.keys()]) {
-		if (!self.devicesData[asDeviceIp(key.slice(0, key.lastIndexOf(':')))]) attempts.delete(key)
-	}
+	const attempts = directoryAttempts(audioDirectoryAttempts, self)
 
 	for (const [ipaddress, device] of brandedEntries(self.devicesData)) {
 		if (!device?.ports?.ARC) continue
