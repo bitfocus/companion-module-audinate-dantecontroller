@@ -9,7 +9,6 @@ import type DanteInstance from '../main.js'
 import { intToBuffer, makeAvCommand, makeCommand, makeSettingCommand } from './protocol.js'
 import { sendCommand } from './connection.js'
 import {
-	deviceByIdentifier,
 	deviceLabel,
 	findAudioRxChannelByName,
 	findAudioTxChannelByName,
@@ -20,10 +19,18 @@ import {
 	getChannelSubscriptionName,
 	getVideoRxChannelSource,
 } from './devices.js'
-import { getRxChannels, getVideoRxChannels, getVideoTxChannels } from './queries.js'
-import { awaitCommandAck, awaitRxState, DanteCommandError, type AckOptions, type ConfirmOptions } from './requests.js'
+import { getRxChannelPage, getVideoRxChannels, getVideoTxChannels, rxPageStart } from './queries.js'
+import {
+	awaitCommandAck,
+	awaitRxState,
+	DanteCommandError,
+	type AckOptions,
+	type CommandAck,
+	type ConfirmOptions,
+	type RxQuery,
+} from './requests.js'
 import type { ChannelMediaType } from './types.js'
-import { type DeviceIp } from './ids.js'
+import { channelNumbers, type DeviceIp } from './ids.js'
 
 const logger = createModuleLogger('api:commands')
 
@@ -220,28 +227,78 @@ const MAX_UNSUBSCRIBE_PER_COMMAND = 16
  * Note the framing: the payload is `[count u32][channel u32]...` with no leading pad, and
  * `makeCommand`'s two zero request-flag bytes supply the high half of that first u32. Passing the
  * count as a u16 here is what makes the bytes line up; widening it would shift the whole payload.
+ *
+ * Confirmed as {@link confirmCrosspoint} confirms one channel, a packet at a time, so one packet's
+ * channels are read back with one query. Every packet is tried, and any failures reported at the end.
  */
-export function clearAllAudioCrosspoints(self: DanteInstance, destinationDevice: string): void {
-	const ipaddress = requireDeviceIp(self, destinationDevice)
+export async function clearAllAudioCrosspoints(
+	self: DanteInstance,
+	destinationDevice: string,
+	options: ConfirmCrosspointOptions = {},
+): Promise<void> {
+	const ipaddress = crosspointDestination(self, destinationDevice)
 
 	const rxCount = self.devicesData[ipaddress]?.audioRx?.count ?? 0
 	if (rxCount < 1) {
-		logger.warn(`${destinationDevice} has no known receive channels to clear`)
-		return
+		throw new DanteCommandError(`${deviceLabel(self, ipaddress)} has no known receive channels to clear`)
 	}
 
-	const channels = Array.from({ length: rxCount }, (_, index) => index + 1)
+	const channels = channelNumbers(rxCount)
+	const batches: number[][] = []
 	for (let offset = 0; offset < channels.length; offset += MAX_UNSUBSCRIBE_PER_COMMAND) {
-		const batch = channels.slice(offset, offset + MAX_UNSUBSCRIBE_PER_COMMAND)
-		const commandArguments = Buffer.concat([
-			intToBuffer(batch.length),
-			...batch.map((channel) => intToBuffer(channel, 4)),
-		])
-		const commandBuffer = makeCommand(self, DANTE_CONST.COMMANDS.subscriptionRemove, commandArguments)
-		sendCommand(self, commandBuffer, ipaddress)
+		batches.push(channels.slice(offset, offset + MAX_UNSUBSCRIBE_PER_COMMAND))
 	}
+	await forEachThenReport(batches, async (batch) => clearAudioBatch(self, ipaddress, batch, options))
 
 	logger.info(`Cleared all ${rxCount} receive channels on ${destinationDevice}`)
+}
+
+/** Clears one packet's worth of channels, resolving once the device shows them all cleared. */
+async function clearAudioBatch(
+	self: DanteInstance,
+	ipaddress: DeviceIp,
+	channels: number[],
+	options: ConfirmCrosspointOptions,
+): Promise<void> {
+	const destination = deviceLabel(self, ipaddress)
+	const commandArguments = Buffer.concat([
+		intToBuffer(channels.length),
+		...channels.map((channel) => intToBuffer(channel, 4)),
+	])
+	const command = makeCommand(self, DANTE_CONST.COMMANDS.subscriptionRemove, commandArguments)
+	if (!sendCommand(self, command, ipaddress)) throw new DanteCommandError(`Could not send to ${destination}`)
+
+	const ack = await awaitCommandAck(self, ipaddress, command, options.ack)
+	if (ack.kind === 'rejected') {
+		throw new DanteCommandError(
+			`${destination} rejected clearing audio channels ${channels[0]}-${channels.at(-1)} ${resultLabel(ack.code)}`,
+		)
+	}
+
+	await Promise.all(
+		channels.map(async (channel) =>
+			confirmChannelState(
+				self,
+				{ ip: ipaddress, destination, mediaType: 'audio', channel, command, expected: undefined },
+				ack,
+				options.confirm,
+			),
+		),
+	)
+}
+
+/** Runs `step` for every item, whatever became of the ones before it, then reports all that failed. */
+async function forEachThenReport<Item>(items: readonly Item[], step: (item: Item) => Promise<void>): Promise<void> {
+	const failures: string[] = []
+	for (const item of items) {
+		try {
+			await step(item)
+		} catch (error) {
+			if (!(error instanceof DanteCommandError)) throw error
+			failures.push(error.message)
+		}
+	}
+	if (failures.length > 0) throw new DanteCommandError(failures.join('; '))
 }
 
 /**
@@ -252,17 +309,24 @@ export function clearAllAudioCrosspoints(self: DanteInstance, destinationDevice:
  * command (confirmed in a real capture), but video-capable devices seen so far have very few
  * channels, so the simplicity of reusing the already-verified single-entry path outweighs adding
  * and testing an unneeded batched one.
+ *
+ * Every channel is tried, and any failures reported at the end.
  */
-export function clearAllVideoCrosspoints(self: DanteInstance, destinationDevice: string): void {
-	const videoRxCount = deviceByIdentifier(self, destinationDevice)?.videoRx?.count ?? 0
+export async function clearAllVideoCrosspoints(
+	self: DanteInstance,
+	destinationDevice: string,
+	options: ConfirmCrosspointOptions = {},
+): Promise<void> {
+	const ipaddress = crosspointDestination(self, destinationDevice)
+
+	const videoRxCount = self.devicesData[ipaddress]?.videoRx?.count ?? 0
 	if (videoRxCount < 1) {
-		logger.warn(`${destinationDevice} has no known video receive channels to clear`)
-		return
+		throw new DanteCommandError(`${deviceLabel(self, ipaddress)} has no known video receive channels to clear`)
 	}
 
-	for (let channel = 1; channel <= videoRxCount; channel++) {
-		clearVideoCrosspoint(self, destinationDevice, channel)
-	}
+	await forEachThenReport(channelNumbers(videoRxCount), async (channel) =>
+		clearVideoCrosspointConfirmed(self, destinationDevice, channel, options),
+	)
 
 	logger.info(`Cleared all ${videoRxCount} video receive channels on ${destinationDevice}`)
 }
@@ -392,8 +456,14 @@ export function clearAudioCrosspoint(
 /** Dante names are case-insensitive, and devices do not always echo the case they were given. */
 const sameName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0
 
-/** Whether the destination channel now reports what the command asked for. */
+/**
+ * Whether the destination channel now reports what the command asked for. A channel with no record
+ * reports nothing, so that is never a clear: the record may have gone with the device.
+ */
 export function crosspointApplied(self: DanteInstance, sent: SentCrosspoint): boolean {
+	const device = self.devicesData[sent.ip]
+	if (!(sent.mediaType === 'video' ? device?.videoRx : device?.audioRx)?.[sent.channel]) return false
+
 	const source =
 		sent.mediaType === 'video'
 			? getVideoRxChannelSource(self, sent.ip, sent.channel)
@@ -418,7 +488,8 @@ export interface ConfirmCrosspointOptions {
  *
  * The state is what decides. A rejection fails at once, but a missing acknowledgement does not -
  * the command may have arrived and the reply been lost - so the channel gets its chance to show the
- * change either way.
+ * change either way. With no acknowledgement it has to show it in a reply made during the wait,
+ * since the device may be gone and what it last reported proves nothing.
  *
  * Must be called straight after the command was sent, before anything is awaited.
  */
@@ -427,33 +498,57 @@ export async function confirmCrosspoint(
 	sent: SentCrosspoint,
 	options: ConfirmCrosspointOptions = {},
 ): Promise<void> {
-	const what = `${sent.mediaType} channel ${sent.channel} on ${sent.destination}`
 	const ack = await awaitCommandAck(self, sent.ip, sent.command, options.ack)
 	if (ack.kind === 'rejected') {
 		throw new DanteCommandError(
-			`${sent.destination} rejected the change to ${sent.mediaType} channel ${sent.channel} ` +
-				`(result 0x${ack.code.toString(16).padStart(4, '0')})`,
+			`${sent.destination} rejected the change to ${sent.mediaType} channel ${sent.channel} ` + resultLabel(ack.code),
 		)
 	}
 
+	await confirmChannelState(self, sent, ack, options.confirm)
+}
+
+/** A device's result code, as messages show it. */
+const resultLabel = (code: number) => `(result 0x${code.toString(16).padStart(4, '0')})`
+
+/** The query that shows a crosspoint's channel: only its page, as a salvo waits on many at once. */
+function channelStateQuery(self: DanteInstance, sent: SentCrosspoint): RxQuery {
+	if (sent.mediaType === 'video') return { key: 'video', send: () => getVideoRxChannels(self, sent.ip) }
+
+	const firstChannel = rxPageStart(sent.channel)
+	return { key: `audio:${firstChannel}`, send: () => getRxChannelPage(self, sent.ip, firstChannel) }
+}
+
+/** The part of {@link confirmCrosspoint} after the acknowledgement: the channel showing the change. */
+async function confirmChannelState(
+	self: DanteInstance,
+	sent: SentCrosspoint,
+	ack: Exclude<CommandAck, { kind: 'rejected' }>,
+	options: ConfirmOptions | undefined,
+): Promise<void> {
+	const what = `${sent.mediaType} channel ${sent.channel} on ${sent.destination}`
 	const applied = await awaitRxState(
 		self,
-		sent.ip,
-		() => crosspointApplied(self, sent),
-		() => (sent.mediaType === 'video' ? getVideoRxChannels(self, sent.ip) : getRxChannels(self, sent.ip)),
-		options.confirm,
+		{
+			ip: sent.ip,
+			mediaType: sent.mediaType,
+			channel: sent.channel,
+			matches: (reported) => (reported || ack.kind === 'accepted') && crosspointApplied(self, sent),
+			query: channelStateQuery(self, sent),
+		},
+		options,
 	)
 	const wanted = sent.expected ? `${sent.expected.channelName}@${sent.expected.deviceName}` : 'no source'
 	if (applied) {
-		await confirmAudioConnected(self, sent, wanted, options.confirm)
+		await confirmAudioConnected(self, sent, wanted, options)
 		return
 	}
 
-	throw new DanteCommandError(
-		ack.kind === 'unanswered'
-			? `${sent.destination} did not answer, and ${what} does not show ${wanted}`
-			: `${sent.destination} accepted the change, but ${what} does not show ${wanted}`,
-	)
+	if (ack.kind === 'accepted') {
+		throw new DanteCommandError(`${sent.destination} accepted the change, but ${what} does not show ${wanted}`)
+	}
+	const sendError = ack.sendError ? ` (could not send to ${sent.ip}: ${ack.sendError.message})` : ''
+	throw new DanteCommandError(`${sent.destination} did not answer, and ${what} does not show ${wanted}${sendError}`)
 }
 
 /**
@@ -478,15 +573,20 @@ async function confirmAudioConnected(
 
 	const isConnected = () => getAudioRxChannelSource(self, sent.ip, sent.channel)?.connected === true
 	const statusNow = () => self.devicesData[sent.ip]?.audioRx?.[sent.channel]?.subscriptionStatus
-	// A refusal (0x001c for a self-route, say) ends the wait at once instead of after the timeout.
-	// Only a reply that arrives during the wait can refuse: the first check sees what the device
-	// reported before, which for a repeated route can be the refusal of an earlier attempt.
-	let checks = 0
-	const settled = () => {
-		checks += 1
-		return isConnected() || (checks > 1 && isSubscriptionRefused(statusNow()))
-	}
-	await awaitRxState(self, sent.ip, settled, () => getRxChannels(self, sent.ip), options)
+	await awaitRxState(
+		self,
+		{
+			ip: sent.ip,
+			mediaType: 'audio',
+			channel: sent.channel,
+			// A refusal (0x001c for a self-route, say) ends the wait at once instead of after the
+			// timeout. Only a reply carrying this channel can refuse: until one arrives the status is
+			// what the device reported before, which for a repeated route can be an earlier refusal.
+			matches: (reported) => isConnected() || (reported && isSubscriptionRefused(statusNow())),
+			query: channelStateQuery(self, sent),
+		},
+		options,
+	)
 	if (isConnected()) return
 
 	const status = statusNow()

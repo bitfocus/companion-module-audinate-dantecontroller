@@ -56,6 +56,7 @@ import {
 } from '../index.js'
 import { UpdateVariableDefinitions } from '../../variables.js'
 import { DANTE_CONST } from '../const.js'
+import { answeringSend, type FakeAnswer } from '../../tests/fake-device.js'
 import type DanteInstance from '../../main.js'
 import { ch, ip, name } from '../../tests/ids.js'
 
@@ -1524,34 +1525,55 @@ describe('makeAudioCrosspoint / clearAudioCrosspoint', () => {
 })
 
 describe('clearAllAudioCrosspoints', () => {
-	function withRx(count: number) {
-		const send = vi.fn()
+	const DEV = ip('10.0.0.5')
+	const FAST = { ack: { attemptTimeoutMs: 5, attempts: 2 }, confirm: { timeoutMs: 30, requeryMs: 10 } }
+	const isRemove = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscriptionRemove
+
+	/** A device that takes every clear, unless `respond` says otherwise. */
+	function withRx(
+		count: number,
+		respond: (command: Buffer) => FakeAnswer | undefined = (command) => (isRemove(command) ? {} : undefined),
+	) {
+		const channels = Object.fromEntries(
+			Array.from({ length: count }, (_, index) => [index + 1, { number: index + 1, name: `In ${index + 1}` }]),
+		)
 		const self = createMockInstance({
-			devicesData: { [ip('10.0.0.5')]: { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count } } },
-			sockets: { ARC: { send } as unknown as dgram.Socket },
+			devicesData: { [DEV]: { name: 'Dev', ports: { ARC: 4440 }, audioRx: { count, ...channels } } },
 			counter: Buffer.from('4242', 'hex'),
 		})
+		const send = answeringSend(self, respond)
+		self.sockets = { ARC: { send } as unknown as dgram.Socket }
 		return { self, send }
 	}
+	const removes = (send: ReturnType<typeof vi.fn>) =>
+		send.mock.calls.map((call) => call[0] as Buffer).filter((command) => isRemove(command))
+	/** Leaves a channel subscribed, as a device that accepted the clear and did not apply it. */
+	const stuck = (self: DanteInstance, channel: number) => {
+		Object.assign(self.devicesData[DEV].audioRx![channel], {
+			sourceDevice: 'Stage',
+			sourceChannel: 'Mic',
+			subscriptionStatus: 0x0009,
+		})
+	}
 
-	it('clears a whole device in a single packet', () => {
+	it('clears a whole device in a single packet', async () => {
 		const { self, send } = withRx(8)
-		clearAllAudioCrosspoints(self, ip('10.0.0.5'))
+		await clearAllAudioCrosspoints(self, ip('10.0.0.5'))
 		expect(send).toHaveBeenCalledTimes(1)
 	})
 
-	it('emits the byte layout the device accepts', () => {
+	it('emits the byte layout the device accepts', async () => {
 		const { self, send } = withRx(2)
-		clearAllAudioCrosspoints(self, ip('10.0.0.5'))
+		await clearAllAudioCrosspoints(self, ip('10.0.0.5'))
 
 		// protocol, length, counter, opcode 0x3014, then [count u32][channel u32...] and a trailing 0.
 		// The count's high half comes from makeCommand's two zero request-flag bytes.
 		expect((send.mock.calls[0][0] as Buffer).toString('hex')).toBe('272900154242301400000002000000010000000200')
 	})
 
-	it('splits a high channel count across packets rather than one huge datagram', () => {
+	it('splits a high channel count across packets rather than one huge datagram', async () => {
 		const { self, send } = withRx(40)
-		clearAllAudioCrosspoints(self, ip('10.0.0.5'))
+		await clearAllAudioCrosspoints(self, ip('10.0.0.5'))
 		expect(send).toHaveBeenCalledTimes(3) // 16 + 16 + 8
 
 		const channelsIn = (call: number) => {
@@ -1562,9 +1584,9 @@ describe('clearAllAudioCrosspoints', () => {
 		expect([channelsIn(0), channelsIn(1), channelsIn(2)]).toEqual([16, 16, 8])
 	})
 
-	it('covers every channel exactly once across the batches', () => {
+	it('covers every channel exactly once across the batches', async () => {
 		const { self, send } = withRx(40)
-		clearAllAudioCrosspoints(self, ip('10.0.0.5'))
+		await clearAllAudioCrosspoints(self, ip('10.0.0.5'))
 
 		const seen: number[] = []
 		for (const [packet] of send.mock.calls as [Buffer][]) {
@@ -1574,22 +1596,75 @@ describe('clearAllAudioCrosspoints', () => {
 		expect(seen).toEqual(Array.from({ length: 40 }, (_, i) => i + 1))
 	})
 
-	it('sends nothing when the device has no known receive channels', () => {
+	it('fails and sends nothing when the device has no known receive channels', async () => {
 		const { self, send } = withRx(0)
-		clearAllAudioCrosspoints(self, ip('10.0.0.5'))
+		await expect(clearAllAudioCrosspoints(self, ip('10.0.0.5'))).rejects.toThrow(
+			'Dev (10.0.0.5) has no known receive channels to clear',
+		)
 		expect(send).not.toHaveBeenCalled()
 	})
 
-	it('resolves a device name as well as an IP', () => {
+	it('resolves a device name as well as an IP', async () => {
 		const { self, send } = withRx(4)
-		clearAllAudioCrosspoints(self, 'Dev')
+		await clearAllAudioCrosspoints(self, 'Dev')
 		expect(send).toHaveBeenCalledTimes(1)
 	})
 
-	it('throws for an unknown device', () => {
+	it('fails for an unknown device', async () => {
 		const { self, send } = withRx(4)
-		expect(() => clearAllAudioCrosspoints(self, 'NoSuchDevice')).toThrow("Can't find NoSuchDevice - it may be offline")
+		await expect(clearAllAudioCrosspoints(self, 'NoSuchDevice')).rejects.toThrow(
+			"Can't find NoSuchDevice - it may be offline",
+		)
 		expect(send).not.toHaveBeenCalled()
+	})
+
+	it('fails and sends nothing to a locked device', async () => {
+		const { self, send } = withRx(4)
+		self.devicesData[DEV].locked = true
+
+		await expect(clearAllAudioCrosspoints(self, 'Dev')).rejects.toThrow('Dev (10.0.0.5) is locked')
+		expect(send).not.toHaveBeenCalled()
+	})
+
+	it('fails with the result code when the device rejects the clear', async () => {
+		const { self } = withRx(4, (command) => (isRemove(command) ? { result: 0x0022 } : undefined))
+
+		await expect(clearAllAudioCrosspoints(self, 'Dev', FAST)).rejects.toThrow(
+			'Dev (10.0.0.5) rejected clearing audio channels 1-4 (result 0x0022)',
+		)
+	})
+
+	it('fails when a channel still shows a source after the device accepted', async () => {
+		const { self } = withRx(4)
+		stuck(self, 3)
+
+		await expect(clearAllAudioCrosspoints(self, 'Dev', FAST)).rejects.toThrow(
+			'accepted the change, but audio channel 3 on Dev (10.0.0.5) does not show no source',
+		)
+	})
+
+	it('waits for a channel to report cleared', async () => {
+		const { self } = withRx(2, (command) => {
+			if (isRemove(command)) return {}
+			return { apply: () => delete self.devicesData[DEV].audioRx![1].sourceDevice }
+		})
+		stuck(self, 1)
+
+		await clearAllAudioCrosspoints(self, 'Dev', FAST)
+	})
+
+	it('fails when the device answers nothing and reports nothing', async () => {
+		const { self } = withRx(2, () => undefined)
+
+		await expect(clearAllAudioCrosspoints(self, 'Dev', FAST)).rejects.toThrow('did not answer')
+	})
+
+	it('still clears the later batches after an earlier one fails', async () => {
+		const { self, send } = withRx(40)
+		stuck(self, 3)
+
+		await expect(clearAllAudioCrosspoints(self, 'Dev', FAST)).rejects.toThrow('audio channel 3')
+		expect(removes(send)).toHaveLength(3)
 	})
 })
 

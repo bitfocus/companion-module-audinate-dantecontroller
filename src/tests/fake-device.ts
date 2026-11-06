@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { asDeviceIp, handleCommandReply, notifyRxStateChanged } from '../api/index.js'
+import { asDeviceIp, DANTE_CONST, handleCommandReply, notifyRxStateChanged } from '../api/index.js'
 import type DanteInstance from '../main.js'
 
 /**
@@ -48,4 +48,41 @@ export function answeringSend(
 			})
 		},
 	)
+}
+
+/**
+ * An rx channel-query reply, as the device sends it in answer to a query - including the one the
+ * module makes on each rx change notification, which is how a subscription's status reaches it.
+ */
+export function rxReply(
+	channels: { number: number; name: string; source?: string; channel?: string; status: number }[],
+): Buffer {
+	const RECORD = 20
+	const head = Buffer.alloc(12)
+	const records = Buffer.alloc(RECORD * channels.length)
+	const strings: Buffer[] = []
+	let stringOffset = 12 + records.length
+	const intern = (value: string | undefined): number => {
+		if (!value) return 0
+		const at = stringOffset
+		const buffer = Buffer.from(`${value}\0`, 'ascii')
+		strings.push(buffer)
+		stringOffset += buffer.length
+		return at
+	}
+	channels.forEach((channel, index) => {
+		const base = index * RECORD
+		records.writeUInt16BE(channel.number, base + 0)
+		records.writeUInt16BE(1, base + 4)
+		records.writeUInt16BE(intern(channel.channel), base + 6)
+		records.writeUInt16BE(intern(channel.source), base + 8)
+		records.writeUInt16BE(intern(channel.name), base + 10)
+		records.writeUInt16BE(channel.status, base + 14)
+	})
+	const body = Buffer.concat([records, ...strings])
+	head.writeUInt16BE(DANTE_CONST.PROTOCOL.CONTROL, 0)
+	head.writeUInt16BE(12 + body.length, 2)
+	head.writeUInt16BE(DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, 6)
+	head.writeUInt8(channels.length, 11)
+	return Buffer.concat([head, body])
 }

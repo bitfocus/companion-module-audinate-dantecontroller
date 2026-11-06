@@ -465,8 +465,8 @@ export function UpdateActions(self: DanteInstance): void {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
-					else clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
+					else await clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
 					return
 				}
 				if (isVideo) {
@@ -525,8 +525,8 @@ export function UpdateActions(self: DanteInstance): void {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
 				if (opt.clearAll) {
-					if (isVideo) clearAllVideoCrosspoints(self, opt.destinationDevice)
-					else clearAllAudioCrosspoints(self, opt.destinationDevice)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDevice)
+					else await clearAllAudioCrosspoints(self, opt.destinationDevice)
 					return
 				}
 

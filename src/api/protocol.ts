@@ -314,6 +314,13 @@ function parseRxChannels(reply: Buffer): Partial<DeviceData> {
 	return { audioRx: rx }
 }
 
+/** The channels an rx reply carried routing for. One cut short by {@link parseRxChannels} has only a name. */
+function reportedRxChannels(rx: AudioRxChannels | undefined): number[] {
+	return Object.keys(rx ?? {})
+		.map(Number)
+		.filter((channel) => rx?.[channel]?.subscriptionStatus !== undefined)
+}
+
 /** Parses a device-name-query reply. */
 function parseDeviceName(reply: Buffer): Partial<DeviceData> {
 	const name = parseString(reply, 10)
@@ -687,7 +694,10 @@ export function parseReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Remo
 					scheduleCheckFeedbacks(self, deviceIp)
 					break
 				case 'rx':
-					notifyRxStateChanged(self, deviceIp)
+					notifyRxStateChanged(self, deviceIp, {
+						mediaType: 'audio',
+						channels: reportedRxChannels(deviceData[deviceIp]?.audioRx),
+					})
 					scheduleCheckVariables(self, deviceIp, 'rx', 'rx_names')
 					updateChannelChoices(self, deviceIp, 'rx')
 					// routes into this device changed - only feedbacks reading it can have flipped
@@ -776,7 +786,7 @@ export function parseAvReply(self: DanteInstance, reply: Buffer, rinfo: dgram.Re
 	if (channelDirection) updateVideoChannelChoices(self, deviceIp, channelDirection)
 
 	if (channelDirection === 'rx') {
-		notifyRxStateChanged(self, deviceIp)
+		notifyRxStateChanged(self, deviceIp, { mediaType: 'video' })
 		scheduleCheckVariables(self, deviceIp, 'rx_video', 'rx_names_video')
 	} else if (channelDirection === 'tx') {
 		scheduleCheckVariables(self, deviceIp, 'tx_video', 'tx_names_video')

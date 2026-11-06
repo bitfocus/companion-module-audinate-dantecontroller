@@ -48,7 +48,9 @@ _unsupported_ for a self-route a device does not allow. A route to a device that
 succeeds once the receiver reports it, as Dante pre-patching does: it connects when the device appears.
 
 _Crosspoint - Clear_'s "clear every channel" option follows the Channel Type as well: it clears every
-channel of the selected type, not both. Use two actions to clear audio and video together.
+channel of the selected type, not both. Use two actions to clear audio and video together. It finishes
+the same way, once the device shows every channel cleared, and fails if the device is locked or has no
+known channels of that type. A channel that fails does not stop the rest from being cleared.
 
 - Crosspoint - Clear
 - Crosspoint - Clear (custom)

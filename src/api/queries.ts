@@ -100,15 +100,20 @@ function sendChannelQuery(
 	}
 
 	for (let page = 0; page < pages; page++) {
-		const commandArguments = Buffer.from('0001000100', 'hex')
-		// The starting channel is a big-endian u16 spanning argument bytes 2-3. Writing a single byte
-		// at byte 3 produced identical packets for channels 1-255 but threw ERR_OUT_OF_RANGE beyond
-		// that, so a device with more than 255 channels in one direction could not be paged past the
-		// first 255. Writing the full u16 is the same bytes below 256 and correct above it.
-		commandArguments.writeUInt16BE(page * channelsPerPage + 1, 2)
-		sendCommand(self, makeCommand(self, commandType, commandArguments), ipaddress)
+		sendChannelPage(self, ipaddress, commandType, page * channelsPerPage + 1)
 	}
 	return pages
+}
+
+/** Sends one page of a channel query. */
+function sendChannelPage(self: DanteInstance, ipaddress: DeviceIp, commandType: number, firstChannel: number): void {
+	const commandArguments = Buffer.from('0001000100', 'hex')
+	// The starting channel is a big-endian u16 spanning argument bytes 2-3. Writing a single byte
+	// at byte 3 produced identical packets for channels 1-255 but threw ERR_OUT_OF_RANGE beyond
+	// that, so a device with more than 255 channels in one direction could not be paged past the
+	// first 255. Writing the full u16 is the same bytes below 256 and correct above it.
+	commandArguments.writeUInt16BE(firstChannel, 2)
+	sendCommand(self, makeCommand(self, commandType, commandArguments), ipaddress)
 }
 
 /** Attempts spent per `<ip>:<directory>`, weakly held so a discarded instance is still collectable. */
@@ -297,6 +302,19 @@ export function getRxChannels(self: DanteInstance, ipaddress: DeviceIp): void {
 		self.devicesData[ipaddress]?.audioRx?.count ?? 0,
 		DANTE_CONST.CHANNELS_PER_PAGE.RX,
 	)
+}
+
+/** The first channel of the rx channel page holding `channel`. */
+export function rxPageStart(channel: number): number {
+	const perPage = DANTE_CONST.CHANNELS_PER_PAGE.RX
+	return Math.floor((channel - 1) / perPage) * perPage + 1
+}
+
+/** Queries the one page of a device's rx channels starting at `firstChannel`. See {@link rxPageStart}. */
+export function getRxChannelPage(self: DanteInstance, ipaddress: DeviceIp, firstChannel: number): void {
+	logQuery(self, ipaddress, `rx channels from ${firstChannel}`)
+	markChannelsSettling(self, ipaddress)
+	sendChannelPage(self, ipaddress, DANTE_CONST.COMMANDS.MESSAGE_TYPE_RX_CHANNEL_QUERY, firstChannel)
 }
 
 /** Queries a device's name. */

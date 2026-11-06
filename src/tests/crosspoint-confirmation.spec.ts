@@ -7,13 +7,16 @@ import {
 	handleCommandReply,
 	makeAudioCrosspointConfirmed,
 	clearAudioCrosspointConfirmed,
+	cancelCheckFeedbacks,
+	cancelCheckVariables,
 	makeCommand,
 	notifyRxStateChanged,
+	parseReply,
 	sendCommand,
 	type DevicesData,
 } from '../api/index.js'
 import type DanteInstance from '../main.js'
-import { ackFor, answeringSend, type FakeAnswer } from './fake-device.js'
+import { ackFor, answeringSend, rxReply, type FakeAnswer } from './fake-device.js'
 import { ch, ip, name } from './ids.js'
 
 const DEST = ip('10.0.0.5')
@@ -72,6 +75,8 @@ function instance(respond: (command: Buffer, ip: string) => FakeAnswer | undefin
 		debug: false,
 		setVariableDefinitions: vi.fn(),
 		setVariableValues: vi.fn(),
+		checkAllFeedbacks: vi.fn(),
+		checkFeedbacks: vi.fn(),
 		log: vi.fn(),
 	} as unknown as DanteInstance
 	const send = answeringSend(self, respond)
@@ -151,10 +156,71 @@ describe('confirmed crosspoints', () => {
 	it('still succeeds when the reply is lost but the channel shows the route', async () => {
 		const { self } = instance((command) => {
 			if (isSubscribe(command)) subscribe(self, 'Mic 1', 0x0009)()
-			return undefined
+			return isRxQuery(command) ? {} : undefined
 		})
 
 		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)
+	})
+
+	it('does not take what a silent device last reported for a confirmation', async () => {
+		const { self } = instance()
+		subscribe(self, 'Mic 1', 0x0009)()
+
+		await expect(makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
+			'Amp (10.0.0.5) did not answer, and audio channel 1 on Amp (10.0.0.5) does not show Mic 1@Stage Box',
+		)
+	})
+
+	it('takes a parsed reply as a report on exactly the channels it carried', async () => {
+		const { self } = instance()
+		subscribe(self, 'Mic 1', 0x0009)()
+		const deliver = (channel: { number: number; name: string }) => {
+			const reply = rxReply([{ ...channel, source: 'Stage Box', channel: 'Mic 1', status: 0x0009 }])
+			parseReply(self, reply, { address: DEST, family: 'IPv4', port: 4440, size: reply.length })
+		}
+
+		let confirmed = false
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW).then(() => {
+			confirmed = true
+		})
+		// past the three unanswered attempts, so only a reply carrying channel 1 can confirm it
+		await new Promise((resolve) => setTimeout(resolve, 40))
+		deliver({ number: 2, name: 'Right' })
+		await new Promise((resolve) => setTimeout(resolve, 20))
+		expect(confirmed).toBe(false)
+
+		deliver({ number: 1, name: 'Left' })
+		await route
+		cancelCheckVariables(self)
+		cancelCheckFeedbacks(self)
+	})
+
+	it('does not take a silent device clearing from what it last reported either', async () => {
+		const { self } = instance()
+
+		await expect(clearAudioCrosspointConfirmed(self, 'Amp', 1, FAST)).rejects.toThrow('did not answer')
+	})
+
+	it('does not confirm a clear by the device record having gone', async () => {
+		const { self } = instance((command) => {
+			if (!isSubscribe(command)) return undefined
+			delete self.devicesData[DEST]
+			return {}
+		})
+		subscribe(self, 'Mic 1', 0x0009)()
+
+		await expect(clearAudioCrosspointConfirmed(self, 'Amp', 1, FAST)).rejects.toThrow('does not show no source')
+	})
+
+	it('fails a route still waiting on the channel when the connection closes', async () => {
+		const { self } = instance((command) => (isSubscribe(command) ? {} : undefined))
+
+		const started = Date.now()
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+		setTimeout(() => cancelPendingCommands(self), 20)
+
+		await expect(route).rejects.toThrow('Connection closed before the device answered')
+		expect(Date.now() - started).toBeLessThan(SLOW.confirm.timeoutMs / 4)
 	})
 
 	it('fails when the device accepts but the channel never shows the route', async () => {
@@ -200,6 +266,31 @@ describe('confirmed crosspoints', () => {
 		subscribe(self, 'Mic 1', 0x001c)()
 
 		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+	})
+
+	it('does not fail on an old refusal when a reply carries only other channels', async () => {
+		const { self } = instance((command) => (isSubscribe(command) ? {} : undefined))
+		subscribe(self, 'Mic 1', 0x001c)()
+
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+		setTimeout(() => notifyRxStateChanged(self, DEST, { mediaType: 'audio', channels: [2] }), 10)
+		setTimeout(() => notifyRxStateChanged(self, DEST, { mediaType: 'video' }), 20)
+		setTimeout(() => {
+			subscribe(self, 'Mic 1', 0x0009)()
+			notifyRxStateChanged(self, DEST, { mediaType: 'audio', channels: [1] })
+		}, 40)
+
+		await route
+	})
+
+	it('fails on a refusal in a reply that does carry the channel', async () => {
+		const { self } = instance((command) => (isSubscribe(command) ? {} : undefined))
+		subscribe(self, 'Mic 1', 0x001c)()
+
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, SLOW)
+		setTimeout(() => notifyRxStateChanged(self, DEST, { mediaType: 'audio', channels: [1, 2] }), 10)
+
+		await expect(route).rejects.toThrow('not connected: unsupported (0x001c)')
 	})
 
 	it('keeps waiting while an online source is still unresolved', async () => {
@@ -277,6 +368,58 @@ describe('confirmed crosspoints', () => {
 	})
 })
 
+describe('a salvo of routes to one receiver', () => {
+	const channels = Object.fromEntries(
+		Array.from({ length: 64 }, (_, index) => [index + 1, { number: ch(index + 1), name: `In ${index + 1}` }]),
+	)
+	/** Accepts every subscribe, and never shows one, so the routes re-query for the whole timeout. */
+	function receiver() {
+		const device = instance((command) => (isSubscribe(command) ? {} : undefined))
+		device.self.devicesData[DEST].audioRx = { count: 64, ...channels }
+		return device
+	}
+	const rxQueries = (send: ReturnType<typeof vi.fn>) =>
+		send.mock.calls.map((call) => call[0] as Buffer).filter((command) => isRxQuery(command))
+	/** The first channel of the page a query asks for. */
+	const firstChannel = (command: Buffer) => command.readUInt16BE(12)
+
+	it('re-queries a page once per tick, however many routes are waiting on it', async () => {
+		const { self, send } = receiver()
+
+		await Promise.allSettled(
+			Array.from({ length: 16 }, async (_, index) =>
+				makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', index + 1, FAST),
+			),
+		)
+
+		const queries = rxQueries(send)
+		expect(new Set(queries.map(firstChannel))).toEqual(new Set([1]))
+		// the first one, then one per tick of the timeout
+		expect(queries.length).toBeLessThanOrEqual(1 + FAST.confirm.timeoutMs / FAST.confirm.requeryMs + 1)
+	})
+
+	it('asks only for the pages holding the channels', async () => {
+		const { self, send } = receiver()
+
+		await Promise.allSettled([
+			makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 20, FAST),
+			makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 50, FAST),
+		])
+
+		expect(new Set(rxQueries(send).map(firstChannel))).toEqual(new Set([17, 49]))
+	})
+
+	it('stops querying once nothing is waiting', async () => {
+		const { self, send } = receiver()
+		await Promise.allSettled([makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)])
+
+		const queries = rxQueries(send).length
+		await new Promise((resolve) => setTimeout(resolve, FAST.confirm.requeryMs * 3))
+
+		expect(rxQueries(send)).toHaveLength(queries)
+	})
+})
+
 describe('awaitCommandAck', () => {
 	function sent(self: DanteInstance) {
 		const command = makeCommand(self, DANTE_CONST.COMMANDS.subscription, Buffer.from('0401', 'hex'))
@@ -302,15 +445,29 @@ describe('awaitCommandAck', () => {
 		await expect(ack).resolves.toEqual({ kind: 'accepted', code: 0x0001 })
 	})
 
-	it('fails a command that could not be sent', async () => {
+	it('resends after a send error, as after a lost reply', async () => {
+		const { self, send } = instance((command) =>
+			isSubscribe(command) ? { apply: subscribe(self, 'Mic 1', 0x0009) } : undefined,
+		)
+		// as dgram does: the callback runs after send returns
+		send.mockImplementationOnce((...args: unknown[]) =>
+			queueMicrotask(() => (args[5] as (error: Error) => void)(new Error('ENOBUFS'))),
+		)
+
+		await makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)
+
+		expect(subscribes(send)).toHaveLength(2)
+	})
+
+	it('names the send error when nothing else confirms the route', async () => {
 		const { self } = instance()
-		;(self.sockets.ARC as unknown as { send: ReturnType<typeof vi.fn> }).send = vi.fn(
-			// as dgram does: the callback runs after send returns
-			(...args: unknown[]) => queueMicrotask(() => (args[5] as (error: Error) => void)(new Error('EHOSTUNREACH'))),
+		;(self.sockets.ARC as unknown as { send: ReturnType<typeof vi.fn> }).send = vi.fn((...args: unknown[]) =>
+			queueMicrotask(() => (args[5] as (error: Error) => void)(new Error('EHOSTUNREACH'))),
 		)
 
 		await expect(makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, FAST)).rejects.toThrow(
-			'Could not send to 10.0.0.5: EHOSTUNREACH',
+			'did not answer, and audio channel 1 on Amp (10.0.0.5) does not show Mic 1@Stage Box ' +
+				'(could not send to 10.0.0.5: EHOSTUNREACH)',
 		)
 	})
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type dgram from 'node:dgram'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateActions } from '../actions.js'
-import { DANTE_CONST, type DevicesData } from '../api/index.js'
+import { clearAllVideoCrosspoints, DANTE_CONST, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
 import { ch, ip, name } from './ids.js'
 import { answeringSend } from './fake-device.js'
@@ -453,9 +453,14 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(sendFn).not.toHaveBeenCalled()
 	})
 
+	/** Takes the source off a video receive channel, as a device applying a clear does. */
+	const cleared = (self: DanteInstance, channel: number) => {
+		self.devicesData[DEST].videoRx![channel] = { number: ch(channel), name: `Video In ${channel}` }
+	}
+
 	it('still supports clearing every video channel on a device', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => [1, 2, 3].forEach((channel) => cleared(self, channel)))
 		await actionDefinition(self, 'clearCrosspointDropDown').callback({
 			options: { channelType: 'video', destinationDevice: 'DeviceA', clearAll: true },
 		})
@@ -464,6 +469,40 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(writes(sendFn)).toHaveLength(3)
 		expect(refreshes(sendFn)).toHaveLength(3)
 		expect(send(self)).toBe(sendFn)
+	})
+
+	it('fails clearing every video channel on a device with none known', async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		self.devicesData[SOURCE].videoRx = { count: 0 }
+
+		await expect(clearAllVideoCrosspoints(self, 'DeviceB')).rejects.toThrow(
+			'DeviceB (10.0.0.6) has no known video receive channels to clear',
+		)
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it('fails clearing every video channel on a locked device, sending nothing', async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		self.devicesData[DEST].locked = true
+
+		await expect(clearAllVideoCrosspoints(self, 'DeviceA')).rejects.toThrow('DeviceA (10.0.0.5) is locked')
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it('clears the remaining video channels after one fails, then reports it', async () => {
+		const self = instance()
+		// channel 1 keeps its source however often it is told to clear
+		const sendFn = answering(self, () => cleared(self, 3))
+
+		await expect(
+			clearAllVideoCrosspoints(self, 'DeviceA', {
+				ack: { attemptTimeoutMs: 5, attempts: 2 },
+				confirm: { timeoutMs: 30, requeryMs: 10 },
+			}),
+		).rejects.toThrow('video channel 1')
+		expect(writes(sendFn)).toHaveLength(3)
 	})
 })
 
