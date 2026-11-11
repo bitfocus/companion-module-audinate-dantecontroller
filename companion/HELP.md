@@ -15,9 +15,24 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Timeout Interval** — how long a device may go unheard before it is dropped (1 s – 5 min, default
   3 s). Dante hardware sends heartbeats several times a second and is unaffected; software endpoints
   are kept alive only by the sweep, so anything below twice the Update Interval is raised to it.
-- **Create Module Variables** — on by default. Turn it off to skip the per-device variables and read
-  the same values through the Device Property feedback instead.
+- **Create Variables** — which variables to publish. It replaces the Create Module Variables and
+  Create Routing Variables checkboxes, and a connection from an earlier version keeps what they
+  had. Pick any of:
+  - **Device properties** — chosen by default. Leave it out to skip the per-device property
+    variables and read the same values through the Device Property feedback instead.
+  - **Routing** — not chosen by default; add it for a router integration. Publishes each channel's
+    name, each receive channel's subscription and its state, and each device's name. Router
+    integrations need these to show active routes and subscription health. A large network has a
+    great many of them, so they are opted into; only values that change are sent.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
+
+## Devices
+
+Devices are identified by their Dante name, as Dante itself routes by name. Actions and feedbacks
+store it, so a device that gets a new address keeps working, but renaming a device means pointing
+its actions, feedbacks and variables at the new name. Actions saved by early versions hold an address
+instead; those keep working while a device has that address. A replacement unit given the old name
+takes over both the Dante subscriptions and the actions.
 
 ## Actions
 
@@ -28,8 +43,17 @@ expression.
 The crosspoint and channel-name actions carry a **Channel Type** option, _Audio_ or _Video_, and act
 on that kind of channel only. Video is supported on Dante AV devices.
 
+The crosspoint actions finish only once the device has taken the change: it acknowledges the command,
+the receive channel reports the new subscription, and, for an audio source that is on the network,
+the subscription connects. Otherwise the action fails with the reason - the device is offline or
+locked, it rejected the command (with its result code), or it reports a subscription status such as
+_unsupported_ for a self-route a device does not allow. A route to a device that is not on the network
+succeeds once the receiver reports it, as Dante pre-patching does: it connects when the device appears.
+
 _Crosspoint - Clear_'s "clear every channel" option follows the Channel Type as well: it clears every
-channel of the selected type, not both. Use two actions to clear audio and video together.
+channel of the selected type, not both. Use two actions to clear audio and video together. It finishes
+the same way, once the device shows every channel cleared, and fails if the device is locked or has no
+known channels of that type. A channel that fails does not stop the rest from being cleared.
 
 - Crosspoint - Clear
 - Crosspoint - Clear (custom)
@@ -60,8 +84,9 @@ channel of the selected type, not both. Use two actions to clear audio and video
 
 ### Per device
 
-Named `<device name>_<suffix>`, so a device called `Amp-1` has `$(dante:Amp-1_sr)`.
-The same values are available through the Device Property feedback.
+Named `<device>_<suffix>`, where `<device>` is the device name with characters Companion cannot use
+replaced by `_`, so a device called `Amp-1` has `$(dante:Amp-1_sr)` and one called `Stage Box` has
+`$(dante:Stage_Box_sr)`. The same values are available through the Device Property feedback.
 
 - Dante model (`_dante_model`)
 - Dante software build (`_dante_software_build`)
@@ -89,6 +114,32 @@ The same values are available through the Device Property feedback.
 - Video receive channel names (`_rx_names_video`)
 - Video transmit channel count (`_tx_video`)
 - Video transmit channel names (`_tx_names_video`)
+
+### Routing
+
+Per device, with the same `<device>` prefix:
+
+- Device name (`_device_name`) - the name as it is, which `<device>` cannot be turned back into
+- Receive channel name (`_rx_<n>_name`, `_rx_video_<n>_name`)
+- Receive channel source (`_rx_<n>_source`, `_rx_video_<n>_source`) - what the channel is subscribed
+  to as `channel@device`, the names it subscribed with; empty when it is not subscribed
+- Receive channel status (`_rx_<n>_status`, `_rx_video_<n>_status`) - whether the subscription in
+  `_source` is working: `connected` when it is, `not subscribed` when there is none, `offline` when
+  the receiver has left the network (`_source` then keeps its last value), and otherwise why not, as
+  the receiver reports it. A source shows in `_source` as soon as the receiver takes the
+  subscription, even one it then refuses or cannot resolve - this says whether it is actually
+  working, as Dante Controller's error marker does. Audio shows the status by name, such as
+  `unresolved` (source not on the network, as with pre-patching) or `unsupported` (a refused
+  self-route), or the code itself (`0x0042`) for one with no name. Video shows `unresolved`. Neither
+  depends on signal: a transmitter that loses its input stays `connected`, as a crosspoint on a
+  baseband router does. Compare with `connected` to test for a working route,
+  for example `$(dante:Amp_rx_1_status) == 'connected'`. It updates whenever the device reports a
+  change, not only after an action
+- Transmit channel name (`_tx_<n>_name`, `_tx_video_<n>_name`) - the name subscriptions use
+- Channel label (`_rx_<n>_label`, `_tx_<n>_label` and the `_video_` forms) - how to show the channel:
+  its name, or `Ch <n>` when it has none or only a placeholder such as `01 n/a` (which some devices,
+  such as Neutrik NA2-D-LINE, report for an unnamed channel). The channel dropdowns use the same
+  label. Display only: the `_name` variables keep the exact name, because Dante subscribes by it
 
 ## Feedbacks
 

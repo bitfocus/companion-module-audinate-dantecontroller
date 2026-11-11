@@ -71,7 +71,7 @@ const { DANTE_CONST } = await import('../const.js')
 
 function instance(mac: string): DanteInstance {
 	const self: Record<string, unknown> = {
-		config: { mac, interval: 0, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac, interval: 0, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		devicesData: {},
 		devicesChoices: [],
 		activeConnections: {},

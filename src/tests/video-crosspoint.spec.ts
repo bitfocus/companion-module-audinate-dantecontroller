@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type dgram from 'node:dgram'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { UpdateActions } from '../actions.js'
-import { DANTE_CONST, type DevicesData } from '../api/index.js'
+import { clearAllVideoCrosspoints, DANTE_CONST, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, ip, name } from './ids.js'
+import { answeringSend } from './fake-device.js'
 
 /**
  * Combined-scope tests for the video/audio channelType toggle across the crosspoint actions and
@@ -13,35 +15,37 @@ import type DanteInstance from '../main.js'
  * `videoRx`/`videoTx` instead of `rx`/`tx`, alongside the pre-existing audio behaviour.
  */
 
-const DEST = '10.0.0.5'
-const SOURCE = '10.0.0.6'
+const DEST = ip('10.0.0.5')
+const SOURCE = ip('10.0.0.6')
+const A_NAME = name('DeviceA')
+const B_NAME = name('DeviceB')
 
 function devicesData(): DevicesData {
 	return {
 		[DEST]: {
-			name: 'DeviceA',
+			name: name('DeviceA'),
 			ports: { ARC: 4440 },
 			audioRx: {
 				count: 1,
-				1: { number: 1, name: 'Audio In 1', sourceDevice: 'DeviceB', sourceChannel: '01', subscriptionStatus: 9 },
+				1: { number: ch(1), name: 'Audio In 1', sourceDevice: 'DeviceB', sourceChannel: '01', subscriptionStatus: 9 },
 			},
-			audioTx: { count: 1, 1: { number: 1, name: 'Audio Out 1' } },
+			audioTx: { count: 1, 1: { number: ch(1), name: 'Audio Out 1' } },
 			videoRx: {
 				count: 3,
-				// subscriptionActive 1 = media actually flowing, which is what "connected" means for
-				// video - a channel naming a source but carrying nothing reads "Subscription is not
-				// active" in Dante Controller, and false here. Channel 3 below is exactly that case.
+				// subscriptionResolved 1 = the source located, which is what "connected" means for
+				// video, as for audio, whatever the source is sending. Channel 3 below is located but
+				// carrying nothing, which Dante Controller shows as "Subscription is not active".
 				1: {
-					number: 1,
+					number: ch(1),
 					name: 'Video In 1',
 					sourceDevice: 'DeviceB',
 					sourceChannel: 'Cam 1',
 					subscriptionResolved: 1,
 					subscriptionActive: 1,
 				},
-				2: { number: 2, name: 'Video In 2' },
+				2: { number: ch(2), name: 'Video In 2' },
 				3: {
-					number: 3,
+					number: ch(3),
 					name: 'Video In 3',
 					sourceDevice: 'DeviceB',
 					sourceChannel: 'Cam 1',
@@ -49,34 +53,40 @@ function devicesData(): DevicesData {
 					subscriptionActive: 0,
 				},
 			},
-			videoTx: { count: 1, 1: { number: 1, name: 'Video Out 1' } },
+			videoTx: { count: 1, 1: { number: ch(1), name: 'Video Out 1' } },
 		},
 		[SOURCE]: {
-			name: 'DeviceB',
+			name: name('DeviceB'),
 			ports: { ARC: 4440 },
-			audioRx: { count: 1, 1: { number: 1, name: 'Audio In 1' } },
-			audioTx: { count: 1, 1: { number: 1, name: '01' } },
-			videoRx: { count: 1, 1: { number: 1, name: 'Video In 1' } },
-			videoTx: { count: 1, 1: { number: 1, name: 'Cam 1' } },
+			audioRx: { count: 1, 1: { number: ch(1), name: 'Audio In 1' } },
+			audioTx: { count: 1, 1: { number: ch(1), name: '01' } },
+			videoRx: { count: 1, 1: { number: ch(1), name: 'Video In 1' } },
+			videoTx: { count: 1, 1: { number: ch(1), name: 'Cam 1' } },
 		},
 	}
 }
 
 function instance(data: DevicesData = devicesData(), overrides: Partial<DanteInstance> = {}) {
 	return {
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
-		rxChannelsChoices: { DeviceA: [{ id: 1, label: 'Audio In 1' }], DeviceB: [{ id: 1, label: 'Audio In 1' }] },
-		txChannelsChoices: { DeviceA: [{ id: 1, label: 'Audio Out 1' }], DeviceB: [{ id: 1, label: '01' }] },
-		videoRxChannelsChoices: {
-			DeviceA: [
-				{ id: 1, label: 'Video In 1' },
-				{ id: 2, label: 'Video In 2' },
-			],
-			DeviceB: [{ id: 1, label: 'Video In 1' }],
+		rxChannelsChoices: {
+			[A_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+			[B_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
 		},
-		videoTxChannelsChoices: { DeviceA: [{ id: 1, label: 'Video Out 1' }], DeviceB: [{ id: 1, label: 'Cam 1' }] },
+		txChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }], [B_NAME]: [{ id: ch(1), label: '01' }] },
+		videoRxChannelsChoices: {
+			[A_NAME]: [
+				{ id: ch(1), label: 'Video In 1' },
+				{ id: ch(2), label: 'Video In 2' },
+			],
+			[B_NAME]: [{ id: ch(1), label: 'Video In 1' }],
+		},
+		videoTxChannelsChoices: {
+			[A_NAME]: [{ id: ch(1), label: 'Video Out 1' }],
+			[B_NAME]: [{ id: ch(1), label: 'Cam 1' }],
+		},
 		sockets: {},
 		counter: Buffer.from('0000', 'hex'),
 		setActionDefinitions: vi.fn(),
@@ -92,9 +102,14 @@ function feedbackDefinition(self: DanteInstance, feedbackId: string) {
 	return (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][feedbackId]
 }
 
+/** An action's definition, its callback run as Companion runs it: with a context holding an abort signal. */
 function actionDefinition(self: DanteInstance, actionId: string) {
 	UpdateActions(self)
-	return (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][actionId]
+	const definition = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][actionId]
+	return {
+		...definition,
+		callback: async (action: unknown, signal = new AbortController().signal) => definition.callback(action, { signal }),
+	}
 }
 
 /**
@@ -134,23 +149,37 @@ describe('Channel Subscription feedback, video', () => {
 
 	it('offers a distinctly-labeled video channel field alongside the audio one', () => {
 		const options = feedbackDefinition(instance(), 'channel_subscription').options as { id: string; label: string }[]
-		expect(options.find((option) => option.id === 'channel_DeviceA')?.label).toBe('Channel')
-		expect(options.find((option) => option.id === 'channelVideo_DeviceA')?.label).toBe('Video channel')
+		expect(options.find((option) => option.id === `channel_${A_NAME}`)?.label).toBe('Channel')
+		expect(options.find((option) => option.id === `channelVideo_${A_NAME}`)?.label).toBe('Video channel')
 	})
 
 	it('reports the video source device and channel of a cross-device subscription', () => {
 		expect(read(instance(), 1)).toEqual({
 			connected: true,
 			device: { name: 'DeviceB', ip: SOURCE },
-			channel: { name: 'Cam 1', number: 1 },
+			channel: { name: 'Cam 1', number: ch(1) },
 		})
+	})
+
+	it('reports a located source sending nothing as connected, as a baseband router would', () => {
+		expect(read(instance(), 3)).toEqual({
+			connected: true,
+			device: { name: 'DeviceB', ip: SOURCE },
+			channel: { name: 'Cam 1', number: ch(1) },
+		})
+	})
+
+	it('reports a source the destination has not located as not connected', () => {
+		const self = instance()
+		Object.assign(self.devicesData[DEST].videoRx![1], { subscriptionResolved: 0, subscriptionActive: 0 })
+		expect(read(self, 1)).toMatchObject({ connected: false, device: { name: 'DeviceB' } })
 	})
 
 	it('returns the empty shape for an unrouted video channel', () => {
 		expect(read(instance(), 2)).toEqual({
 			connected: false,
 			device: { name: '', ip: '' },
-			channel: { name: '', number: 0 },
+			channel: { name: '', number: ch(0) },
 		})
 	})
 
@@ -166,7 +195,7 @@ describe('Channel Subscription feedback, video', () => {
 			{ id: 'cs-none', options: { channelType: 'video', device: 'DeviceA' } },
 			{},
 		)
-		expect(noVideo).toEqual({ connected: false, device: { name: '', ip: '' }, channel: { name: '', number: 0 } })
+		expect(noVideo).toEqual({ connected: false, device: { name: '', ip: '' }, channel: { name: '', number: ch(0) } })
 		expect(self.log).not.toHaveBeenCalled() // this feedback logs through its own module logger, not self.log
 	})
 })
@@ -229,7 +258,7 @@ describe('Crosspoint - Connected feedback learn, video', () => {
 				destinationDevice: 'DeviceA',
 				destinationChannelVideo_DeviceA: 1,
 			}),
-		).toEqual({ sourceDevice: 'DeviceB', sourceChannelVideo_DeviceB: 1 })
+		).toEqual({ sourceDevice: B_NAME, [`sourceChannelVideo_${B_NAME}`]: 1 })
 	})
 
 	it('reads the audio route instead when channelType is audio', () => {
@@ -240,7 +269,7 @@ describe('Crosspoint - Connected feedback learn, video', () => {
 				destinationDevice: 'DeviceA',
 				destinationChannel_DeviceA: 1,
 			}),
-		).toEqual({ sourceDevice: 'DeviceB', sourceChannel_DeviceB: 1 })
+		).toEqual({ sourceDevice: B_NAME, [`sourceChannel_${B_NAME}`]: 1 })
 	})
 
 	it('declines for a video channel that is not routed', () => {
@@ -285,16 +314,36 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		return (self.sockets.ARC as unknown as { send: ReturnType<typeof vi.fn> }).send
 	}
 
+	/** A destination that applies each crosspoint it acknowledges, so the action can confirm it. */
+	function answering(self: DanteInstance, apply?: () => void) {
+		const sendFn = answeringSend(self, (command) =>
+			command.readUInt16BE(6) === DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL ||
+			command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscription
+				? { apply }
+				: undefined,
+		)
+		self.sockets = { ARC: { send: sendFn } as unknown as dgram.Socket }
+		return sendFn
+	}
+
 	it('makeCrosspointDropDown sends a video crosspoint command when channelType is video', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => {
+			self.devicesData[DEST].videoRx![2] = {
+				number: ch(2),
+				name: 'Video In 2',
+				sourceDevice: 'DeviceB',
+				sourceChannel: 'Cam 1',
+			}
+		})
+		// as the dropdowns save it: devices and channel pickers keyed by device name
 		await actionDefinition(self, 'makeCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
-				destinationDevice: 'DeviceA',
-				destinationChannelVideo_DeviceA: 2,
-				sourceDevice: 'DeviceB',
-				sourceChannelVideo_DeviceB: 1,
+				destinationDevice: A_NAME,
+				[`destinationChannelVideo_${A_NAME}`]: 2,
+				sourceDevice: B_NAME,
+				[`sourceChannelVideo_${B_NAME}`]: 1,
 			},
 		})
 
@@ -307,9 +356,33 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(refreshes(sendFn)).toEqual([DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY])
 	})
 
-	it('makeCrosspointDropDown still sends a plain audio command when channelType is audio', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+	it("hands the action's abort signal to the crosspoint", async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(
+			actionDefinition(self, 'makeCrosspointDropDown').callback(
+				{
+					options: {
+						channelType: 'video',
+						destinationDevice: A_NAME,
+						[`destinationChannelVideo_${A_NAME}`]: 2,
+						sourceDevice: B_NAME,
+						[`sourceChannelVideo_${B_NAME}`]: 1,
+					},
+				},
+				controller.signal,
+			),
+		).rejects.toThrow('aborted')
+		expect(writes(sendFn)).toHaveLength(0)
+	})
+
+	it('makeCrosspointDropDown sends a plain audio command for options keyed by device name', async () => {
+		// DeviceA rx 1 already reports 01@DeviceB as connected, so the acknowledgement is all it waits for
+		const self = instance()
+		const sendFn = answering(self)
 		await actionDefinition(self, 'makeCrosspointDropDown').callback({
 			options: {
 				channelType: 'audio',
@@ -325,14 +398,81 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(sentBuffer.readUInt16BE(0)).toBe(DANTE_CONST.PROTOCOL.CONTROL)
 	})
 
+	describe('makeCrosspointDropDown with a source that is offline', () => {
+		const offlineSource = () => {
+			const data = devicesData()
+			delete data[SOURCE]
+			return data
+		}
+		const audioRoute = {
+			channelType: 'audio',
+			destinationDevice: A_NAME,
+			[`destinationChannel_${A_NAME}`]: 1,
+			sourceDevice: B_NAME,
+			[`sourceChannel_${B_NAME}`]: 1,
+		}
+		const videoRoute = {
+			channelType: 'video',
+			destinationDevice: A_NAME,
+			[`destinationChannelVideo_${A_NAME}`]: 2,
+			sourceDevice: B_NAME,
+			[`sourceChannelVideo_${B_NAME}`]: 1,
+		}
+
+		it('subscribes an audio channel by the names it remembers, as pre-patching needs', async () => {
+			const self = instance(offlineSource())
+			const sendFn = answering(self, () => {
+				self.devicesData[DEST].audioRx![1] = {
+					number: ch(1),
+					name: 'Audio In 1',
+					sourceDevice: 'DeviceB',
+					sourceChannel: '01',
+					subscriptionStatus: 0x0001,
+				}
+			})
+
+			await actionDefinition(self, 'makeCrosspointDropDown').callback({ options: audioRoute })
+
+			expect((sendFn.mock.calls[0][0] as Buffer).includes('01\0DeviceB')).toBe(true)
+		})
+
+		it('subscribes a video channel by the names it remembers', async () => {
+			const self = instance(offlineSource())
+			const sendFn = answering(self, () => {
+				self.devicesData[DEST].videoRx![2] = {
+					number: ch(2),
+					name: 'Video In 2',
+					sourceDevice: 'DeviceB',
+					sourceChannel: 'Cam 1',
+				}
+			})
+
+			await actionDefinition(self, 'makeCrosspointDropDown').callback({ options: videoRoute })
+
+			expect(writes(sendFn)[0].includes('Cam 1\0DeviceB')).toBe(true)
+		})
+
+		it('fails rather than subscribing to a channel it has no name for', async () => {
+			const self = instance(offlineSource(), { txChannelsChoices: {} })
+			const sendFn = answering(self)
+
+			await expect(actionDefinition(self, 'makeCrosspointDropDown').callback({ options: audioRoute })).rejects.toThrow(
+				"No name known for Audio source channel 1 on 'DeviceB'",
+			)
+			expect(sendFn).not.toHaveBeenCalled()
+		})
+	})
+
 	it('clearCrosspointDropDown sends a video clear command when channelType is video', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => {
+			self.devicesData[DEST].videoRx![1] = { number: ch(1), name: 'Video In 1' }
+		})
 		await actionDefinition(self, 'clearCrosspointDropDown').callback({
 			options: {
 				channelType: 'video',
-				destinationDevice: 'DeviceA',
-				destinationChannelVideo_DeviceA: 1,
+				destinationDevice: A_NAME,
+				[`destinationChannelVideo_${A_NAME}`]: 1,
 				clearAll: false,
 			},
 		})
@@ -342,20 +482,27 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(refreshes(sendFn)).toEqual([DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY])
 	})
 
-	it('logs a clear message and sends nothing when the destination channel option is missing', async () => {
+	it('fails with a clear message and sends nothing when the destination channel option is missing', async () => {
 		const sendFn = vi.fn()
 		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
 		// DeviceB has no video rx channels, so destinationChannelVideo_DeviceB was never rendered
-		await actionDefinition(self, 'clearCrosspointDropDown').callback({
-			options: { channelType: 'video', destinationDevice: 'DeviceB', clearAll: false },
-		})
+		await expect(
+			actionDefinition(self, 'clearCrosspointDropDown').callback({
+				options: { channelType: 'video', destinationDevice: 'DeviceB', clearAll: false },
+			}),
+		).rejects.toThrow("No Video destination channel available on 'DeviceB'")
 
 		expect(sendFn).not.toHaveBeenCalled()
 	})
 
+	/** Takes the source off a video receive channel, as a device applying a clear does. */
+	const cleared = (self: DanteInstance, channel: number) => {
+		self.devicesData[DEST].videoRx![channel] = { number: ch(channel), name: `Video In ${channel}` }
+	}
+
 	it('still supports clearing every video channel on a device', async () => {
-		const sendFn = vi.fn()
-		const self = instance(devicesData(), { sockets: { ARC: { send: sendFn } as unknown as dgram.Socket } })
+		const self = instance()
+		const sendFn = answering(self, () => [1, 2, 3].forEach((channel) => cleared(self, channel)))
 		await actionDefinition(self, 'clearCrosspointDropDown').callback({
 			options: { channelType: 'video', destinationDevice: 'DeviceA', clearAll: true },
 		})
@@ -364,6 +511,40 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		expect(writes(sendFn)).toHaveLength(3)
 		expect(refreshes(sendFn)).toHaveLength(3)
 		expect(send(self)).toBe(sendFn)
+	})
+
+	it('fails clearing every video channel on a device with none known', async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		self.devicesData[SOURCE].videoRx = { count: 0 }
+
+		await expect(clearAllVideoCrosspoints(self, 'DeviceB')).rejects.toThrow(
+			'DeviceB (10.0.0.6) has no known video receive channels to clear',
+		)
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it('fails clearing every video channel on a locked device, sending nothing', async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		self.devicesData[DEST].locked = true
+
+		await expect(clearAllVideoCrosspoints(self, 'DeviceA')).rejects.toThrow('DeviceA (10.0.0.5) is locked')
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it('clears the remaining video channels after one fails, then reports it', async () => {
+		const self = instance()
+		// channel 1 keeps its source however often it is told to clear
+		const sendFn = answering(self, () => cleared(self, 3))
+
+		await expect(
+			clearAllVideoCrosspoints(self, 'DeviceA', {
+				ack: { attemptTimeoutMs: 5, attempts: 2 },
+				confirm: { timeoutMs: 30, requeryMs: 10 },
+			}),
+		).rejects.toThrow('video channel 1')
+		expect(writes(sendFn)).toHaveLength(3)
 	})
 })
 
@@ -455,24 +636,26 @@ describe('Channel Name - Set/Reset actions, video', () => {
 })
 
 describe('missing-channel warnings', () => {
-	const AUDIO_ONLY = '10.0.0.7'
-	const VIDEO_ONLY = '10.0.0.8'
+	const AUDIO_ONLY = ip('10.0.0.7')
+	const VIDEO_ONLY = ip('10.0.0.8')
+	const AUDIO_ONLY_NAME = name('AudioOnly')
+	const VIDEO_ONLY_NAME = name('VideoOnly')
 
 	/** The realistic mixed network: most devices are audio-only, a couple carry video. */
 	function mixedDevices(): DevicesData {
 		return {
 			...devicesData(),
 			[AUDIO_ONLY]: {
-				name: 'AudioOnly',
+				name: name('AudioOnly'),
 				ports: { ARC: 4440 },
-				audioRx: { count: 1, 1: { number: 1, name: 'In 1' } },
-				audioTx: { count: 1, 1: { number: 1, name: 'Out 1' } },
+				audioRx: { count: 1, 1: { number: ch(1), name: 'In 1' } },
+				audioTx: { count: 1, 1: { number: ch(1), name: 'Out 1' } },
 			},
 			[VIDEO_ONLY]: {
-				name: 'VideoOnly',
+				name: name('VideoOnly'),
 				ports: { ARC: 4440 },
-				videoRx: { count: 1, 1: { number: 1, name: 'V In 1' } },
-				videoTx: { count: 1, 1: { number: 1, name: 'V Out 1' } },
+				videoRx: { count: 1, 1: { number: ch(1), name: 'V In 1' } },
+				videoTx: { count: 1, 1: { number: ch(1), name: 'V Out 1' } },
 			},
 		}
 	}
@@ -482,27 +665,27 @@ describe('missing-channel warnings', () => {
 		return instance(data, {
 			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 			rxChannelsChoices: {
-				DeviceA: [{ id: 1, label: 'Audio In 1' }],
-				DeviceB: [{ id: 1, label: 'Audio In 1' }],
-				AudioOnly: [{ id: 1, label: 'In 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Audio In 1' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'In 1' }],
 			},
 			txChannelsChoices: {
-				DeviceA: [{ id: 1, label: 'Audio Out 1' }],
-				DeviceB: [{ id: 1, label: '01' }],
-				AudioOnly: [{ id: 1, label: 'Out 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }],
+				[B_NAME]: [{ id: ch(1), label: '01' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'Out 1' }],
 			},
 			videoRxChannelsChoices: {
-				DeviceA: [
-					{ id: 1, label: 'Video In 1' },
-					{ id: 2, label: 'Video In 2' },
+				[A_NAME]: [
+					{ id: ch(1), label: 'Video In 1' },
+					{ id: ch(2), label: 'Video In 2' },
 				],
-				DeviceB: [{ id: 1, label: 'Video In 1' }],
-				VideoOnly: [{ id: 1, label: 'V In 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Video In 1' }],
+				[VIDEO_ONLY_NAME]: [{ id: ch(1), label: 'V In 1' }],
 			},
 			videoTxChannelsChoices: {
-				DeviceA: [{ id: 1, label: 'Video Out 1' }],
-				DeviceB: [{ id: 1, label: 'Cam 1' }],
-				VideoOnly: [{ id: 1, label: 'V Out 1' }],
+				[A_NAME]: [{ id: ch(1), label: 'Video Out 1' }],
+				[B_NAME]: [{ id: ch(1), label: 'Cam 1' }],
+				[VIDEO_ONLY_NAME]: [{ id: ch(1), label: 'V Out 1' }],
 			},
 		})
 	}
@@ -518,7 +701,7 @@ describe('missing-channel warnings', () => {
 
 	it('warns that an audio-only device has no video channels, shown only in video mode', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === 'destinationDeviceNoVideoRXChannels_AudioOnly',
+			(option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`,
 		)
 		expect(warning?.type).toBe('static-text')
 		expect(warning?.value).toContain('AudioOnly has no video receive channels')
@@ -528,7 +711,7 @@ describe('missing-channel warnings', () => {
 
 	it('warns symmetrically for a video-only device selected in audio mode', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === 'destinationDeviceNoAudioRXChannels_VideoOnly',
+			(option) => option.id === `destinationDeviceNoAudioRXChannels_${VIDEO_ONLY_NAME}`,
 		)
 		expect(warning?.value).toContain('VideoOnly has no audio receive channels')
 		expect(warning?.isVisibleExpression).toContain("$(options:channelType) == 'audio'")
@@ -536,15 +719,15 @@ describe('missing-channel warnings', () => {
 
 	it('says transmit, not receive, for a source picker', () => {
 		const warning = options(mixedInstance(), 'makeCrosspointDropDown').find(
-			(option) => option.id === 'sourceDeviceNoVideoTXChannels_AudioOnly',
+			(option) => option.id === `sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`,
 		)
 		expect(warning?.value).toContain('AudioOnly has no video transmit channels')
 	})
 
 	it('emits no warning for a device that has channels of both kinds', () => {
 		const ids = options(mixedInstance(), 'makeCrosspointDropDown').map((option) => option.id)
-		expect(ids).not.toContain('destinationDeviceNoVideoRXChannels_DeviceA')
-		expect(ids).not.toContain('destinationDeviceNoAudioRXChannels_DeviceA')
+		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${A_NAME}`)
+		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${A_NAME}`)
 	})
 
 	it('emits no warning for a device the picker never offers in that direction', () => {
@@ -555,29 +738,32 @@ describe('missing-channel warnings', () => {
 		const data = mixedDevices()
 		const self = instance(data, {
 			devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
-			rxChannelsChoices: { DeviceA: [{ id: 1, label: 'Audio In 1' }] },
-			txChannelsChoices: { DeviceA: [{ id: 1, label: 'Audio Out 1' }], AudioOnly: [{ id: 1, label: 'Out 1' }] },
-			videoRxChannelsChoices: { DeviceA: [{ id: 1, label: 'Video In 1' }] },
-			videoTxChannelsChoices: { DeviceA: [{ id: 1, label: 'Video Out 1' }] },
+			rxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Audio In 1' }] },
+			txChannelsChoices: {
+				[A_NAME]: [{ id: ch(1), label: 'Audio Out 1' }],
+				[AUDIO_ONLY_NAME]: [{ id: ch(1), label: 'Out 1' }],
+			},
+			videoRxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Video In 1' }] },
+			videoTxChannelsChoices: { [A_NAME]: [{ id: ch(1), label: 'Video Out 1' }] },
 		})
 
 		const ids = options(self, 'makeCrosspointDropDown').map((option) => option.id)
 		// AudioOnly has no receive channels of either kind here, so neither warning applies...
-		expect(ids).not.toContain('destinationDeviceNoVideoRXChannels_AudioOnly')
-		expect(ids).not.toContain('destinationDeviceNoAudioRXChannels_AudioOnly')
+		expect(ids).not.toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
+		expect(ids).not.toContain(`destinationDeviceNoAudioRXChannels_${AUDIO_ONLY_NAME}`)
 		// ...but it does still transmit audio, so the source picker warns about its missing video.
-		expect(ids).toContain('sourceDeviceNoVideoTXChannels_AudioOnly')
+		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`)
 	})
 
 	it('keeps showing the warning while Clear All is on, unlike the channel picker', () => {
 		// Hiding it alongside the picker implied that "clear every channel" escapes the Channel Type.
 		// It does not - a device with no video channels has no video channels to clear either way.
 		const fields = options(mixedInstance(), 'clearCrosspointDropDown')
-		const warning = fields.find((option) => option.id === 'destinationDeviceNoVideoRXChannels_AudioOnly')
+		const warning = fields.find((option) => option.id === `destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
 		expect(warning?.isVisibleExpression).not.toContain('clearAll')
 
 		// the picker itself is still hidden by it, which is what the checkbox genuinely replaces
-		const picker = fields.find((option) => option.id === 'destinationChannelVideo_DeviceA')
+		const picker = fields.find((option) => option.id === `destinationChannelVideo_${A_NAME}`)
 		expect(picker?.isVisibleExpression).toContain('!$(options:clearAll)')
 	})
 
@@ -593,7 +779,7 @@ describe('missing-channel warnings', () => {
 		UpdateFeedbacks(self)
 		const definitions = (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 		const ids = (definitions.routing_bg.options as { id: string }[]).map((option) => option.id)
-		expect(ids).toContain('destinationDeviceNoVideoRXChannels_AudioOnly')
-		expect(ids).toContain('sourceDeviceNoVideoTXChannels_AudioOnly')
+		expect(ids).toContain(`destinationDeviceNoVideoRXChannels_${AUDIO_ONLY_NAME}`)
+		expect(ids).toContain(`sourceDeviceNoVideoTXChannels_${AUDIO_ONLY_NAME}`)
 	})
 })

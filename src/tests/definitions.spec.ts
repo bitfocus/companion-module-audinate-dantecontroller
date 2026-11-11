@@ -3,6 +3,7 @@ import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
 import { destroyDevice, type DevicesData } from '../api/index.js'
 import type DanteInstance from '../main.js'
+import { ch, ip, name as deviceName } from './ids.js'
 
 /**
  * Companion requires that any option referenced from another option's `isVisibleExpression` has
@@ -161,8 +162,8 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 	/** A controller-style device: discovered and nameable, but with no audio channels at all. */
 	function withController() {
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
-		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		self.devicesData[ip('10.0.0.1')] = { name: deviceName('AController'), ports: { ARC: 4440 } }
+		self.devicesChoices = [{ id: deviceName('10.0.0.1'), label: 'AController' }, ...self.devicesChoices]
 		return self
 	}
 
@@ -205,12 +206,12 @@ describe('device dropdowns exclude devices that cannot perform the action', () =
 	/** A decoder: video receive channels and no audio at all, as an AV-X board reports. */
 	function withVideoOnlyDecoder() {
 		const self = mockInstance()
-		self.devicesData['10.0.0.9'] = {
-			name: 'Decoder',
+		self.devicesData[ip('10.0.0.9')] = {
+			name: deviceName('Decoder'),
 			ports: { ARC: 4440 },
-			videoRx: { count: 2, 1: { number: 1, name: 'V In 1' }, 2: { number: 2, name: 'V In 2' } },
+			videoRx: { count: 2, 1: { number: ch(1), name: 'V In 1' }, 2: { number: ch(2), name: 'V In 2' } },
 		}
-		self.devicesChoices = [...self.devicesChoices, { id: '10.0.0.9', label: 'Decoder' }]
+		self.devicesChoices = [...self.devicesChoices, { id: deviceName('10.0.0.9'), label: 'Decoder' }]
 		return self
 	}
 
@@ -252,12 +253,12 @@ describe('settings actions offer only devices that support the setting', () => {
 	function withRealisticOptions() {
 		const self = mockInstance()
 		// as the real devices report: differing sample rates, and neither supporting pullup
-		Object.assign(self.devicesData['10.0.0.5'], {
+		Object.assign(self.devicesData[ip('10.0.0.5')], {
 			srOptions: ['44100', '48000', '88200', '96000'],
 			encodingOptions: ['16', '24', '32'],
 			pullupOptions: undefined,
 		})
-		Object.assign(self.devicesData['10.0.0.6'], {
+		Object.assign(self.devicesData[ip('10.0.0.6')], {
 			srOptions: ['48000'],
 			encodingOptions: ['32', '16', '24'],
 			pullupOptions: undefined,
@@ -297,7 +298,7 @@ describe('settings actions offer only devices that support the setting', () => {
 
 	it('offers only the device that does support pullup', () => {
 		const self = withRealisticOptions()
-		Object.assign(self.devicesData['10.0.0.6'], { pullupOptions: ['0', '1'] })
+		Object.assign(self.devicesData[ip('10.0.0.6')], { pullupOptions: ['0', '1'] })
 		const definitions = build(self)
 		expect(deviceIds(definitions, 'setPullup')).toEqual(['10.0.0.6'])
 	})
@@ -353,8 +354,8 @@ describe('no dropdown is emitted without choices', () => {
 		// the case that broke setSampleRate: a device with no channels and no settings options still
 		// had per-device dropdowns generated for it, each with an empty choice list
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: {} }
-		self.devicesChoices = [{ id: '10.0.0.1', label: 'AController' }, ...self.devicesChoices]
+		self.devicesData[ip('10.0.0.1')] = { name: deviceName('AController'), ports: {} }
+		self.devicesChoices = [{ id: deviceName('10.0.0.1'), label: 'AController' }, ...self.devicesChoices]
 		UpdateActions(self)
 		expect(emptyDropdowns((self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0])).toEqual([])
 	})
@@ -490,7 +491,7 @@ describe('dropdown defaults', () => {
 	it('holds when a filter excludes the first device overall', () => {
 		// DeviceA has no tx channels, so any tx-filtered dropdown must not default to it
 		const self = mockInstance()
-		;(self.devicesData['10.0.0.5'] as { audioTx?: unknown }).audioTx = undefined
+		;(self.devicesData[ip('10.0.0.5')] as { audioTx?: unknown }).audioTx = undefined
 		UpdateActions(self)
 		const definitions = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0]
 
@@ -743,7 +744,7 @@ describe('option ids are unique within a definition', () => {
 	/** DeviceA announcing itself from a second address, as a re-registration or a second network does. */
 	function withSecondAddress(overrides: Record<string, unknown> = {}) {
 		const self = mockInstance()
-		self.devicesData['10.0.0.7'] = { ...self.devicesData['10.0.0.5'], ...overrides }
+		self.devicesData[ip('10.0.0.7')] = { ...self.devicesData[ip('10.0.0.5')], ...overrides }
 		return self
 	}
 
@@ -782,7 +783,7 @@ describe('option ids are unique within a definition', () => {
 		// record represent the name would drop a field the device demonstrably supports.
 		const self = mockInstance()
 		// first in iteration order, so a builder taking the first record it meets picks this one
-		self.devicesData = { '10.0.0.4': { name: 'DeviceA', ports: { ARC: 4440 } }, ...self.devicesData }
+		self.devicesData = { [ip('10.0.0.4')]: { name: deviceName('DeviceA'), ports: { ARC: 4440 } }, ...self.devicesData }
 		const definitions = allDefinitions(self)
 		const field = (definitions.setSampleRate?.options ?? []).find((option) => option.id === 'sr_DeviceA')
 
@@ -792,7 +793,7 @@ describe('option ids are unique within a definition', () => {
 
 	it('leaves out a name no address has the data for', () => {
 		const self = mockInstance()
-		self.devicesData['10.0.0.1'] = { name: 'AController', ports: { ARC: 4440 } }
+		self.devicesData[ip('10.0.0.1')] = { name: deviceName('AController'), ports: { ARC: 4440 } }
 		const definitions = allDefinitions(self)
 		const ids = (definitions.setSampleRate?.options ?? []).map((option) => option.id)
 
@@ -810,15 +811,20 @@ describe('device pickers say what each device carries', () => {
 	/** Every media shape a picker can meet: audio only, video only, both, and one of each direction. */
 	function withEveryShape() {
 		const self = mockInstance()
-		const io = (count: number) => ({ count, 1: { number: 1, name: 'Ch 1' } })
-		Object.assign(self.devicesData['10.0.0.6'], { videoRx: io(1), videoTx: io(1) })
-		self.devicesData['10.0.0.8'] = { name: 'Decoder', ports: { ARC: 4440 }, videoRx: io(1) }
+		const io = (count: number) => ({ count, 1: { number: ch(1), name: 'Ch 1' } })
+		Object.assign(self.devicesData[ip('10.0.0.6')], { videoRx: io(1), videoTx: io(1) })
+		self.devicesData[ip('10.0.0.8')] = { name: deviceName('Decoder'), ports: { ARC: 4440 }, videoRx: io(1) }
 		// audio one way, video the other - the case a single per-device tag would get wrong
-		self.devicesData['10.0.0.9'] = { name: 'Mixed', ports: { ARC: 4440 }, audioTx: io(1), videoRx: io(1) }
+		self.devicesData[ip('10.0.0.9')] = {
+			name: deviceName('Mixed'),
+			ports: { ARC: 4440 },
+			audioTx: io(1),
+			videoRx: io(1),
+		}
 		self.devicesChoices = [
 			...self.devicesChoices,
-			{ id: '10.0.0.8', label: 'Decoder' },
-			{ id: '10.0.0.9', label: 'Mixed' },
+			{ id: deviceName('10.0.0.8'), label: 'Decoder' },
+			{ id: deviceName('10.0.0.9'), label: 'Mixed' },
 		]
 		return self
 	}
@@ -896,7 +902,7 @@ describe('option ids are sanitised', () => {
 	/** The same two devices, with the first renamed to something Companion cannot use verbatim. */
 	function messyData(): DevicesData {
 		const data = devicesData()
-		;(data['10.0.0.5'] as { name: string }).name = MESSY
+		;(data[ip('10.0.0.5')] as { name: string }).name = MESSY
 		return data
 	}
 
@@ -991,7 +997,7 @@ describe('option ids are sanitised', () => {
  */
 describe('per-device channel fields survive a device going offline', () => {
 	const NAME = 'DAV-02HR-Stage1'
-	const IP = '172.16.3.143'
+	const IP = ip('172.16.3.143')
 
 	/** The device online, with the 8 audio and 1 video receive channels the real one reports. */
 	function online(): DanteInstance {
@@ -1082,7 +1088,7 @@ describe('per-device channel fields survive a device going offline', () => {
 		const self = online()
 		destroyDevice(self, IP)
 		// rediscovered at a new address, as a device whose lease changed would be
-		self.devicesData['172.16.3.99'] = self.devicesData[IP] ?? {}
+		self.devicesData[ip('172.16.3.99')] = self.devicesData[IP] ?? {}
 
 		const ids = optionIds(self, 'makeCrosspointDropDown')
 		expect(ids.filter((id) => id === `destinationChannelVideo_${NAME}`)).toHaveLength(1)
