@@ -207,10 +207,15 @@ function missingChannelNames(channels: AudioTxChannels | AudioRxChannels | undef
  * keep its channel counts with no names behind them. Its transmit names are re-read only on a
  * rename, so they stayed empty, and every receiver subscribed to it read as having no source.
  *
- * A directory is re-asked while a counted channel has no name, or while a page of a friendly-names
- * query is unanswered, and the counts themselves while they are unknown: they are asked for once,
- * when the ARC port is learned, and their reply is what sends the first channel queries. A budget is
- * released once its directory is complete, so a later loss is retried too.
+ * A directory is re-asked while a counted channel has no name, the friendly names while a page of
+ * their query is unanswered, and the counts themselves while they are unknown: they are asked for
+ * once, when the ARC port is learned, and their reply is what sends the first channel queries. A
+ * budget is released once its directory is complete, so a later loss is retried too.
+ *
+ * Transmit names and friendly names are separate queries, and each is re-asked only when its own
+ * part is missing. Asking for friendly names deletes the ones already held until the reply arrives,
+ * so re-asking them for a missing plain name could wipe good friendly names - and leave them gone,
+ * and routing falling back to the plain names, if the device dropped that query too.
  */
 export function retryMissingAudioDirectories(self: DanteInstance): void {
 	const attempts = directoryAttempts(audioDirectoryAttempts, self)
@@ -223,10 +228,11 @@ export function retryMissingAudioDirectories(self: DanteInstance): void {
 
 		const incomplete = {
 			counts: device.audioRx?.count === undefined || device.audioTx?.count === undefined,
-			tx: missingChannelNames(device.audioTx) || (device.txFriendlyNamePagesPending ?? 0) > 0,
 			rx: missingChannelNames(device.audioRx),
+			tx: missingChannelNames(device.audioTx),
+			txFriendlyNames: (device.txFriendlyNamePagesPending ?? 0) > 0,
 		}
-		for (const directory of ['counts', 'rx', 'tx'] as const) {
+		for (const directory of ['counts', 'rx', 'tx', 'txFriendlyNames'] as const) {
 			const key = `${ipaddress}:${directory}`
 			if (!incomplete[directory]) {
 				attempts.delete(key)
@@ -241,14 +247,10 @@ export function retryMissingAudioDirectories(self: DanteInstance): void {
 				logger.debug(`Re-asking ${deviceLabel(self, ipaddress)} for its audio ${directory} directory`)
 			}
 
-			if (directory === 'counts') {
-				getChannelCount(self, ipaddress)
-			} else if (directory === 'rx') {
-				getRxChannels(self, ipaddress)
-			} else {
-				getTxChannels(self, ipaddress)
-				getTxChannelFriendlyNames(self, ipaddress)
-			}
+			if (directory === 'counts') getChannelCount(self, ipaddress)
+			else if (directory === 'rx') getRxChannels(self, ipaddress)
+			else if (directory === 'tx') getTxChannels(self, ipaddress)
+			else getTxChannelFriendlyNames(self, ipaddress)
 		}
 	}
 }
