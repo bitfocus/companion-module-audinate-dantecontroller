@@ -68,7 +68,7 @@ function devicesData(): DevicesData {
 
 function instance(data: DevicesData = devicesData(), overrides: Partial<DanteInstance> = {}) {
 	return {
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 		rxChannelsChoices: {

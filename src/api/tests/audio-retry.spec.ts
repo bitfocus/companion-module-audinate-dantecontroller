@@ -40,7 +40,7 @@ function instance(device: Record<string, unknown>): { self: DanteInstance; sent:
 		sockets: { ARC: { send: vi.fn((buffer: Buffer) => sent.push(Buffer.from(buffer))) } },
 		log: vi.fn(),
 		// what parsing a reply reaches: the variable and feedback pushes it schedules
-		config: { variables: false, routingVariables: false },
+		config: { createVariables: [] },
 		devicesChoices: [],
 		txChannelsChoices: {},
 		rxChannelsChoices: {},

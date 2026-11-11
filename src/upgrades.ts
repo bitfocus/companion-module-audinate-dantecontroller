@@ -7,7 +7,14 @@ import {
 	type CompanionUpgradeContext,
 	type CompanionStaticUpgradeProps,
 } from '@companion-module/base'
-import { TIMEOUT_MAXIMUM, TIMEOUT_MINIMUM, UPDATE_MAXIMUM, UPDATE_MINIMUM, type ModuleConfig } from './config.js'
+import {
+	TIMEOUT_MAXIMUM,
+	TIMEOUT_MINIMUM,
+	UPDATE_MAXIMUM,
+	UPDATE_MINIMUM,
+	type ModuleConfig,
+	type VariableGroup,
+} from './config.js'
 import { REFRESH_ALL } from './actions.js'
 
 /**
@@ -21,6 +28,13 @@ const numericOptionsByActionId: Record<string, string[]> = {
 
 /** The config shape before the network card setting was renamed from `ip` to `mac`. */
 type LegacyIpConfig = Omit<ModuleConfig, 'mac'> & { ip?: string; mac?: string }
+
+/** The config shape before the two variable checkboxes became the `createVariables` multi-select. */
+type LegacyVariablesConfig = Omit<ModuleConfig, 'createVariables'> & {
+	variables?: boolean
+	routingVariables?: boolean
+	createVariables?: VariableGroup[]
+}
 
 /**
  * Option ids whose stored value must be a string to match their dropdown's choice ids.
@@ -166,13 +180,14 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 		// Variables became optional. Existing connections were created when they were unconditional,
 		// so default them to on: turning it off is a deliberate choice, never something an upgrade
 		// should decide on a user's behalf.
-		const config = props.config
+		const config: LegacyVariablesConfig | null = props.config
 		if (!config || config.variables !== undefined) {
 			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
 		}
 
 		return {
-			updatedConfig: { ...config, variables: true },
+			// a config of its time: a later script moves `variables` into `createVariables`
+			updatedConfig: { ...config, variables: true } as ModuleConfig,
 			updatedActions: [],
 			updatedFeedbacks: [],
 		}
@@ -252,6 +267,30 @@ export const UpgradeScripts: CompanionStaticUpgradeScript<ModuleConfig>[] = [
 			updatedConfig: null,
 			updatedActions: changedActions,
 			updatedFeedbacks: changedFeedbacks,
+		}
+	},
+	function (
+		_context: CompanionUpgradeContext<ModuleConfig>,
+		props: CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+	): CompanionStaticUpgradeResult<ModuleConfig, undefined> {
+		// The Create Module Variables and Create Routing Variables checkboxes became one multi-select,
+		// `createVariables`, so a finer split later is one more choice rather than one more checkbox.
+		// Each ticked box becomes its choice. `variables` is set by now - the script that made it
+		// optional defaulted it on - but a missing one still reads as on, as it did there.
+		const config: LegacyVariablesConfig | null = props.config
+		if (!config || config.createVariables !== undefined) {
+			return { updatedConfig: null, updatedActions: [], updatedFeedbacks: [] }
+		}
+
+		const { variables, routingVariables, ...rest } = config
+		const createVariables: VariableGroup[] = []
+		if (variables !== false) createVariables.push('device')
+		if (routingVariables === true) createVariables.push('routing')
+
+		return {
+			updatedConfig: { ...rest, createVariables },
+			updatedActions: [],
+			updatedFeedbacks: [],
 		}
 	},
 ]

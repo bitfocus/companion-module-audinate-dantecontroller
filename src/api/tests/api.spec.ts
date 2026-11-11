@@ -118,7 +118,7 @@ function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 		CONNECTED: false,
 		INTERVAL: null,
 		mdns: { query: vi.fn(), on: vi.fn(), removeAllListeners: vi.fn(), destroy: vi.fn() },
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		log: vi.fn(),
 		updateStatus: vi.fn(),
 		checkFeedbacks: vi.fn(),
@@ -691,8 +691,7 @@ describe('scheduleCheckVariables', () => {
 				mac: '',
 				interval: 1000,
 				timeoutInterval: 3000,
-				variables: true,
-				routingVariables: true,
+				createVariables: ['device', 'routing'],
 				verbose: false,
 			},
 		})

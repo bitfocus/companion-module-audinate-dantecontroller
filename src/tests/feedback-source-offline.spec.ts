@@ -66,7 +66,7 @@ function instance(channel: Channel, { sourceOnline, audio = false }: { sourceOnl
 		txChannelsChoices: { [S]: [{ id: 1, label: CH }] },
 		videoRxChannelsChoices: { [D]: [{ id: 1, label: 'Rear' }] },
 		videoTxChannelsChoices: { [S]: [{ id: 1, label: CH }] },
-		config: { variables: true },
+		config: { createVariables: ['device'] },
 		setFeedbackDefinitions: (d: typeof definitions) => (definitions = d),
 		setActionDefinitions: vi.fn(),
 		log: vi.fn(),

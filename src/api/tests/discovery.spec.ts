@@ -27,7 +27,7 @@ function instance(boundInterface?: NetworkInterfaceInfo): DanteInstance {
 		mdns: { query: vi.fn() },
 		debug: false,
 		timeout: 3000,
-		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		boundInterface,
 		ignoredSources: new Set<string>(),
 		log: vi.fn(),

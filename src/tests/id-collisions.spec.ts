@@ -45,7 +45,7 @@ function instance(names: string[], remembered: string[] = []): DanteInstance {
 		txChannelsChoices: {},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		config: { variables: true, interval: 1000, timeoutInterval: 3000, verbose: false },
+		config: { createVariables: ['device'], interval: 1000, timeoutInterval: 3000, verbose: false },
 		debug: false,
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),

@@ -18,6 +18,19 @@ export const TIMEOUT_MINIMUM = 1000
  */
 export const TIMEOUT_MAXIMUM = 300000
 
+/**
+ * The groups of variables a connection can publish, with how the config field names them - see
+ * {@link ModuleConfig.createVariables}.
+ */
+export const VARIABLE_GROUPS = {
+	/** A variable per device property, plus the `devices` list. */
+	device: 'Device properties',
+	/** The per-channel routing variables - see `DanteRoutingVariables`. */
+	routing: 'Routing',
+} as const
+
+export type VariableGroup = keyof typeof VARIABLE_GROUPS
+
 export type ModuleConfig = {
 	/**
 	 * The chosen network card, as `mac|address`.
@@ -31,25 +44,33 @@ export type ModuleConfig = {
 	interval: number
 	timeoutInterval: number
 	/**
-	 * Whether to publish a Companion variable per device property.
+	 * Which groups of variables to publish ({@link VARIABLE_GROUPS}), chosen in one multi-select so
+	 * that a finer split later is one more choice rather than one more checkbox. Read it through
+	 * {@link variablesEnabled}.
 	 *
-	 * When false the module still tracks every device property - the Device Property feedback reads
-	 * the same values - it simply does not create variables for them.
+	 * - `device`: a variable per device property. Without it the module still tracks every property,
+	 *   since the Device Property feedback reads the same values; it simply does not create variables
+	 *   for them.
+	 * - `routing`: the per-channel routing variables. A router integration needs these and not the
+	 *   device properties. Not chosen by default: on a large network they are a great many variables,
+	 *   so they are opted into.
+	 *
+	 * Replaced the `variables` and `routingVariables` checkboxes - see the upgrade scripts.
 	 */
-	variables: boolean
-	/**
-	 * Whether to publish the per-channel routing variables (see `DanteRoutingVariables`). Separate
-	 * from {@link variables} because a router integration needs these and not the device
-	 * properties. Off unless turned on: on a large network they are a great many variables, so they
-	 * are opted into. Unset counts as off - read it through `routingVariablesEnabled`.
-	 */
-	routingVariables?: boolean
+	createVariables: VariableGroup[]
 	verbose: boolean
 }
 
-/** See {@link ModuleConfig.routingVariables}. */
-export function routingVariablesEnabled(config: Pick<ModuleConfig, 'routingVariables'> | undefined): boolean {
-	return config?.routingVariables === true
+/**
+ * Whether a connection publishes the variables in `group`. A saved config isn't checked against its
+ * field, so anything but a list reads as no groups at all.
+ */
+export function variablesEnabled(
+	config: Pick<ModuleConfig, 'createVariables'> | undefined,
+	group: VariableGroup,
+): boolean {
+	const groups: unknown = config?.createVariables
+	return Array.isArray(groups) && groups.includes(group)
 }
 
 /** One IPv4 address on one network card. */
@@ -228,26 +249,19 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		},
 
 		{
-			type: 'checkbox',
-			id: 'variables',
-			label: 'Create Module Variables',
+			type: 'multidropdown',
+			id: 'createVariables',
+			label: 'Create Variables',
 			description:
-				'Publish a variable for every device property. Turn this off to keep the connection light ' +
-				'and read device properties through the Device Property feedback instead.',
+				'Device properties: a variable for every device property. Leave it out to keep the ' +
+				'connection light and read device properties through the Device Property feedback instead. ' +
+				'Routing: a variable per channel with its name and, for receive channels, what it is ' +
+				'subscribed to and the state of that subscription, plus each device name. Router ' +
+				'integrations need these. Not chosen by default: a large network has a great many of them.',
 			width: 12,
-			default: true,
-		},
-
-		{
-			type: 'checkbox',
-			id: 'routingVariables',
-			label: 'Create Routing Variables',
-			description:
-				'Publish a variable per channel with its name and, for receive channels, what it is ' +
-				'subscribed to and the state of that subscription, plus each device name. Router integrations ' +
-				'need these. Off by default: a large network has a great many of them.',
-			width: 12,
-			default: false,
+			choices: Object.entries(VARIABLE_GROUPS).map(([id, label]) => ({ id, label })),
+			default: ['device'] satisfies VariableGroup[],
+			sortSelection: true,
 		},
 
 		{

@@ -44,7 +44,7 @@ function devicesData(): DevicesData {
 
 function instance(data: DevicesData = devicesData()) {
 	return {
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		devicesData: data,
 		devicesChoices: Object.values(data).map((device) => ({ id: device.name!, label: device.name! })),
 		rxChannelsChoices: { [DEVICE_A]: [{ id: 1, label: 'In 1' }], [DEVICE_B]: [{ id: 1, label: 'In 1' }] },

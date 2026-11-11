@@ -12,7 +12,7 @@ import {
 	videoSubscriptionStatusLabel,
 	type DeviceData,
 } from './api/index.js'
-import { routingVariablesEnabled } from './config.js'
+import { variablesEnabled } from './config.js'
 import type { DanteVariableValues } from './types.js'
 import type DanteInstance from './main.js'
 import { sanitiseVariableId } from './utils/sanitise.js'
@@ -40,17 +40,16 @@ export function variablePublisher(self: DanteInstance): VariablePublisher {
  * Builds the set of variable definitions for all known devices and publishes it, if it changed.
  *
  * The schema makes `devices` a required key, which is why a set without it needs the cast. An
- * empty set is still published, so turning both options off removes the variables a previous run
- * created.
+ * empty set is still published, so choosing no variables removes the ones a previous run created.
  */
 export function UpdateVariableDefinitions(self: DanteInstance): void {
 	const variables = {} as CompanionVariableDefinitions<DanteVariableValues>
 
-	if (self.config.variables) {
+	if (variablesEnabled(self.config, 'device')) {
 		variables.devices = { name: 'Dante Devices' }
 		addDevicePropertyDefinitions(self, variables)
 	}
-	if (routingVariablesEnabled(self.config)) {
+	if (variablesEnabled(self.config, 'routing')) {
 		addRoutingDefinitions(self, variables)
 	}
 
@@ -203,7 +202,7 @@ export function CheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...var
 	const variableValues: Partial<DanteVariableValues> = {}
 
 	if (
-		routingVariablesEnabled(self.config) &&
+		variablesEnabled(self.config, 'routing') &&
 		(variableTypes.length === 0 || variableTypes.some((type) => ROUTING_TYPES.has(type)))
 	) {
 		// first, so a live device sharing a remembered one's id keeps its own values
@@ -215,7 +214,7 @@ export function CheckVariables(self: DanteInstance, ipAddress?: DeviceIp, ...var
 
 	// Device properties are still tracked when their variables are off; the Device Property
 	// feedback reads them through the same accessor either way.
-	if (self.config.variables) addDevicePropertyValues(self, variableValues, ipAddress, variableTypes)
+	if (variablesEnabled(self.config, 'device')) addDevicePropertyValues(self, variableValues, ipAddress, variableTypes)
 
 	try {
 		variablePublisher(self).setValues(variableValues)

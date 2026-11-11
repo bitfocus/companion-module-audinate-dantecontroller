@@ -60,7 +60,7 @@ function devicesData(): DevicesData {
 function instance(data: DevicesData = devicesData()) {
 	const self = {
 		// a normal connection: variables enabled, as every existing one is after the upgrade
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		devicesData: data,
 		devicesChoices: Object.entries(data).map(([, device]) => ({ id: device.name!, label: device.name! })),
 		rxChannelsChoices: {},
@@ -303,10 +303,10 @@ describe('property changes schedule a feedback check', () => {
 	})
 })
 
-describe('the Create Module Variables option', () => {
+describe('the Create Variables option', () => {
 	function withVariables(enabled: boolean) {
 		const self = instance()
-		self.config = { ...self.config, variables: enabled, routingVariables: enabled }
+		self.config = { ...self.config, createVariables: enabled ? ['device', 'routing'] : [] }
 		self.setVariableDefinitions = vi.fn()
 		self.setVariableValues = vi.fn()
 		return self
@@ -328,7 +328,7 @@ describe('the Create Module Variables option', () => {
 		expect(self.setVariableValues).not.toHaveBeenCalled()
 	})
 
-	it('clears the definitions when both options are off, so variables from a previous run do not linger', () => {
+	it('clears the definitions when nothing is chosen, so variables from a previous run do not linger', () => {
 		const self = withVariables(false)
 		UpdateVariableDefinitions(self)
 

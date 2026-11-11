@@ -72,7 +72,7 @@ function instance(): DanteInstance {
 		debug: false,
 		timeout: 3000,
 		// automatic card: one settings socket rather than two, and no address to resolve
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		log: vi.fn(),
 		updateStatus: vi.fn(),
 		saveConfig: vi.fn(),

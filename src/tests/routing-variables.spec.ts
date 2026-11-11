@@ -59,8 +59,7 @@ function instance(config: Record<string, unknown> = {}) {
 			mac: '',
 			interval: 1000,
 			timeoutInterval: 3000,
-			variables: false,
-			routingVariables: true,
+			createVariables: ['routing'],
 			verbose: false,
 			...config,
 		},
@@ -327,8 +326,8 @@ describe('routing variables', () => {
 		expect(valueCalls(self)).toHaveLength(1)
 	})
 
-	it('is off unless turned on', () => {
-		const self = instance({ routingVariables: undefined })
+	it('is off unless chosen, and an unset option chooses nothing', () => {
+		const self = instance({ createVariables: undefined })
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
 

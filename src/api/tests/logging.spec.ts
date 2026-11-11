@@ -67,7 +67,7 @@ function instance(records: Record<string, object> = {}, verbose = false): DanteI
 		mdns: { query: vi.fn() },
 		debug: verbose,
 		timeout: 3000,
-		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, variables: true, verbose },
+		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose },
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),
 		setVariableDefinitions: vi.fn(),

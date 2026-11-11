@@ -15,12 +15,15 @@ It's based on Chris Ritsen's [Network audio controller](https://github.com/chris
 - **Timeout Interval** — how long a device may go unheard before it is dropped (1 s – 5 min, default
   3 s). Dante hardware sends heartbeats several times a second and is unaffected; software endpoints
   are kept alive only by the sweep, so anything below twice the Update Interval is raised to it.
-- **Create Module Variables** — on by default. Turn it off to skip the per-device property variables and
-  read the same values through the Device Property feedback instead.
-- **Create Routing Variables** — off by default; turn it on for a router integration. Publishes each channel's name, each receive channel's
-  subscription and its state, and each device's name. Router integrations need these to show
-  active routes and subscription health. A large network has
-  a great many of them, so they are opted into; only values that change are sent.
+- **Create Variables** — which variables to publish. It replaces the Create Module Variables and
+  Create Routing Variables checkboxes, and a connection from an earlier version keeps what they
+  had. Pick any of:
+  - **Device properties** — chosen by default. Leave it out to skip the per-device property
+    variables and read the same values through the Device Property feedback instead.
+  - **Routing** — not chosen by default; add it for a router integration. Publishes each channel's
+    name, each receive channel's subscription and its state, and each device's name. Router
+    integrations need these to show active routes and subscription health. A large network has a
+    great many of them, so they are opted into; only values that change are sent.
 - **Verbose Logging** — extra detail in the log, for troubleshooting.
 
 ## Devices

@@ -60,7 +60,7 @@ export interface DanteDeviceVariables {
 }
 
 /**
- * The routing variables, published when the `routingVariables` config option is on. Built for a
+ * The routing variables, published when `routing` is among the `createVariables` config option's choices. Built for a
  * router integration, so each one is a single value that changes on its own:
  *
  * `<device>` is the device name with characters Companion cannot use replaced by `_`.

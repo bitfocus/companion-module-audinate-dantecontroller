@@ -26,7 +26,7 @@ function instance(): DanteInstance {
 		sockets: {},
 		debug: false,
 		timeout: 0,
-		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: 'x', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		setActionDefinitions: vi.fn(),
 		setFeedbackDefinitions: vi.fn(),
 		setVariableDefinitions: vi.fn(),

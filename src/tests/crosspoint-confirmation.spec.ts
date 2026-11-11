@@ -52,7 +52,7 @@ function devicesData(): DevicesData {
 /** An instance whose ARC socket is a fake device answering with `respond`. */
 function instance(respond: (command: Buffer, ip: string) => FakeAnswer | undefined = () => undefined) {
 	const self = {
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: false, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: [], verbose: false },
 		devicesData: devicesData(),
 		devicesChoices: [
 			{ id: AMP, label: 'Amp' },

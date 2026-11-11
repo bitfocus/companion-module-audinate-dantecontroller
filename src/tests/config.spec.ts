@@ -8,6 +8,9 @@ import {
 	GetConfigFields,
 	TIMEOUT_MINIMUM,
 	UPDATE_MINIMUM,
+	VARIABLE_GROUPS,
+	variablesEnabled,
+	type ModuleConfig,
 	type NetworkInterfaceInfo,
 } from '../config.js'
 
@@ -264,5 +267,44 @@ describe('addressOnInterface', () => {
 		expect(addressOnInterface(lan, 'not-an-address')).toBe(false)
 		expect(addressOnInterface({ ...lan, netmask: '' }, '10.1.1.211')).toBe(false)
 		expect(addressOnInterface({ ...lan, netmask: '0.0.0.0' }, '10.1.1.211')).toBe(false)
+	})
+})
+
+describe('the Create Variables config field', () => {
+	const field = GetConfigFields().find((candidate) => candidate.id === 'createVariables')
+
+	it('offers every variable group in one multi-select', () => {
+		expect(field?.type).toBe('multidropdown')
+		expect((field as { choices: { id: string }[] }).choices.map((choice) => choice.id)).toEqual(
+			Object.keys(VARIABLE_GROUPS),
+		)
+	})
+
+	it('creates device property variables by default, and routing ones only when chosen', () => {
+		expect((field as { default: unknown }).default).toEqual(['device'])
+	})
+
+	it('replaces the two checkboxes it combines', () => {
+		const ids = GetConfigFields().map((candidate) => candidate.id)
+		expect(ids).not.toContain('variables')
+		expect(ids).not.toContain('routingVariables')
+	})
+})
+
+describe('variablesEnabled', () => {
+	const config = (createVariables: unknown) => ({ createVariables }) as Pick<ModuleConfig, 'createVariables'>
+
+	it('reads each chosen group', () => {
+		expect(variablesEnabled(config(['routing']), 'routing')).toBe(true)
+		expect(variablesEnabled(config(['routing']), 'device')).toBe(false)
+	})
+
+	it.each([undefined, null, true, 'routing', {}])('reads a saved value that is not a list (%o) as none', (value) => {
+		expect(variablesEnabled(config(value), 'device')).toBe(false)
+		expect(variablesEnabled(config(value), 'routing')).toBe(false)
+	})
+
+	it('reads no config as none', () => {
+		expect(variablesEnabled(undefined, 'device')).toBe(false)
 	})
 })

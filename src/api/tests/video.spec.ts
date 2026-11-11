@@ -174,7 +174,7 @@ function createMockInstance(overrides: MockOverrides = {}): DanteInstance {
 		counter: Buffer.from('0000', 'hex'),
 		debug: false,
 		log: vi.fn(),
-		config: { mac: '', interval: 1000, timeoutInterval: 3000, variables: true, verbose: false },
+		config: { mac: '', interval: 1000, timeoutInterval: 3000, createVariables: ['device'], verbose: false },
 		rxChannelsChoices: {},
 		txChannelsChoices: {},
 		videoRxChannelsChoices: {},

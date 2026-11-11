@@ -69,7 +69,7 @@ function instance(): DanteInstance {
 		txChannelsChoices: {},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		config: { variables: true, interval: 1000, timeoutInterval: 3000, verbose: false },
+		config: { createVariables: ['device'], interval: 1000, timeoutInterval: 3000, verbose: false },
 		debug: false,
 		timeout: 3000,
 		counter: Buffer.alloc(2),
