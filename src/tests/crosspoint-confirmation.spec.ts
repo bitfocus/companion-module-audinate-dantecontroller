@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
 	awaitCommandAck,
 	cancelPendingCommands,
+	cancelUpdateData,
 	clearAllAudioCrosspoints,
 	DANTE_CONST,
+	DanteCommandError,
+	destroyDevice,
 	handleCommandReply,
 	makeAudioCrosspointConfirmed,
 	clearAudioCrosspointConfirmed,
@@ -511,6 +514,97 @@ describe('an aborted action', () => {
 
 		// the reason itself, not a report of four failed batches
 		await expect(clear).rejects.toBe(reason)
+		await later(50)
+		expect(send.mock.calls.filter((call) => isRemove(call[0] as Buffer))).toHaveLength(1)
+	})
+})
+
+describe('a device that goes offline', () => {
+	/** Waits long enough that only the device going can have ended them early. */
+	const PATIENT = { ack: { attemptTimeoutMs: 1000, attempts: 3 }, confirm: { timeoutMs: 2000, requeryMs: 10 } }
+	const later = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+	/** Times a device out, as its offline timer does. */
+	function goOffline(self: DanteInstance, deviceIp: typeof DEST) {
+		destroyDevice(self, deviceIp)
+		// the definitions rebuild it schedules has nothing to run against here
+		cancelUpdateData(self)
+	}
+
+	it('fails a route waiting on the channel at once, naming the device', async () => {
+		// accepted, and never shown, so the wait would run its whole timeout
+		const { self } = instance((command) => (isSubscribe(command) ? {} : undefined))
+
+		const started = Date.now()
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, PATIENT)
+		setTimeout(() => goOffline(self, DEST), 20)
+
+		// a command error, so Companion shows the action failing with this message
+		await expect(route).rejects.toBeInstanceOf(DanteCommandError)
+		await expect(route).rejects.toThrow(/^Amp \(10\.0\.0\.5\) went offline before it confirmed the change$/)
+		expect(Date.now() - started).toBeLessThan(PATIENT.confirm.timeoutMs / 4)
+	})
+
+	it('fails a command still waiting on its answer at once, and stops resending it', async () => {
+		const { self, send } = instance()
+
+		const started = Date.now()
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, PATIENT)
+		setTimeout(() => goOffline(self, DEST), 20)
+
+		await expect(route).rejects.toThrow('went offline')
+		expect(Date.now() - started).toBeLessThan(PATIENT.ack.attemptTimeoutMs / 2)
+		expect(subscribes(send)).toHaveLength(1)
+	})
+
+	it('leaves waits on other devices alone', async () => {
+		const { self } = instance((command) => (isSubscribe(command) ? {} : undefined))
+
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, PATIENT)
+		// the source goes, then the destination reports the route it was asked for
+		setTimeout(() => goOffline(self, SOURCE), 10)
+		setTimeout(() => {
+			subscribe(self, 'Mic 1', 0x0001)()
+			notifyRxStateChanged(self, DEST, { mediaType: 'audio', channels: [1] })
+		}, 30)
+
+		// a source that is not on the network is a pre-patch, confirmed by the subscription alone
+		await expect(route).resolves.toBeUndefined()
+	})
+
+	it('does not take a device for one whose address it starts with', async () => {
+		const { self } = instance()
+		const command = makeCommand(self, DANTE_CONST.COMMANDS.subscription, Buffer.from('0401', 'hex'))
+		const ack = awaitCommandAck(self, ip('10.0.0.50'), command, { attemptTimeoutMs: 30, attempts: 1 })
+
+		goOffline(self, DEST)
+		await expect(ack).resolves.toEqual({ kind: 'unanswered' })
+	})
+
+	it('stops a clear of every channel there, rather than trying the rest', async () => {
+		const isRemove = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscriptionRemove
+		// four batches of sixteen routed channels, each accepted and never shown cleared
+		const { self, send } = instance((command) => (isRemove(command) ? {} : undefined))
+		const routed = (number: number) => ({
+			number: ch(number),
+			name: `In ${number}`,
+			sourceDevice: 'Stage Box',
+			sourceChannel: 'Mic 1',
+			subscriptionStatus: 0x0009,
+		})
+		self.devicesData[DEST].audioRx = {
+			count: 64,
+			...Object.fromEntries(Array.from({ length: 64 }, (_, index) => [index + 1, routed(index + 1)])),
+		}
+
+		const started = Date.now()
+		const clear = clearAllAudioCrosspoints(self, 'Amp', PATIENT)
+		setTimeout(() => goOffline(self, DEST), 20)
+
+		// one message for the device, not one for every batch left
+		await expect(clear).rejects.toThrow(
+			new DanteCommandError('Amp (10.0.0.5) went offline before it confirmed the change'),
+		)
+		expect(Date.now() - started).toBeLessThan(PATIENT.confirm.timeoutMs / 4)
 		await later(50)
 		expect(send.mock.calls.filter((call) => isRemove(call[0] as Buffer))).toHaveLength(1)
 	})

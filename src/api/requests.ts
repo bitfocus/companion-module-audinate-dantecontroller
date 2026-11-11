@@ -22,6 +22,18 @@ export class DanteCommandError extends Error {
 }
 
 /**
+ * A command that could not be confirmed because its device left the network while it was waited
+ * on. Told apart from other failures because nothing more can be done on that device: a clear of
+ * every channel stops here rather than trying the rest.
+ */
+export class DanteDeviceOfflineError extends DanteCommandError {
+	constructor(message: string) {
+		super(message)
+		this.name = 'DanteDeviceOfflineError'
+	}
+}
+
+/**
  * Result codes a device puts in bytes 8-9 of its reply, where a request carries `0x0000`. Only these
  * two mean the command was accepted - see `isAccepted`. The rest are rejections; the ones listed
  * are the ones seen in the field and documented by the netaudio project.
@@ -67,7 +79,8 @@ function pendingFor(self: DanteInstance): Map<string, PendingCommand> {
 /** A command's transaction number, which the device echoes in bytes 4-5 of its reply. */
 export const transactionId = (packet: Buffer): number => packet.readUInt16BE(4)
 
-const pendingKey = (ip: DeviceIp, packet: Buffer) => `${ip}#${transactionId(packet)}`
+const pendingKeyPrefix = (ip: DeviceIp) => `${ip}#`
+const pendingKey = (ip: DeviceIp, packet: Buffer) => `${pendingKeyPrefix(ip)}${transactionId(packet)}`
 
 /**
  * Hands a reply to the command waiting for it, if any. Called for every packet on the ARC socket,
@@ -112,6 +125,22 @@ export function cancelPendingCommands(self: DanteInstance): void {
 	for (const waiter of [...(rxWaiters.get(self) ?? [])]) waiter.cancel(closed())
 }
 
+/**
+ * Fails everything still waiting on one device, for when it has left the network. Without this a
+ * wait ran out its timeouts against a device that was gone - about 6 s per batch for each batch a
+ * clear of every channel had left. `label` names the device, as messages do.
+ */
+export function cancelDeviceCommands(self: DanteInstance, ip: DeviceIp, label: string): void {
+	const offline = () => new DanteDeviceOfflineError(`${label} went offline before it confirmed the change`)
+
+	for (const [key, waiting] of [...(pendingByInstance.get(self)?.entries() ?? [])]) {
+		if (key.startsWith(pendingKeyPrefix(ip))) waiting.reject(offline())
+	}
+	for (const waiter of [...(rxWaiters.get(self) ?? [])]) {
+		if (waiter.ip === ip) waiter.cancel(offline())
+	}
+}
+
 export interface AckOptions {
 	/** How long to wait for each attempt's reply. */
 	attemptTimeoutMs?: number
@@ -125,8 +154,9 @@ const DEFAULT_ACK_OPTIONS: Required<AckOptions> = { attemptTimeoutMs: 1000, atte
 /**
  * Waits for a device's answer to a command that has just been sent with `sendCommand`, resending
  * it while there is none. Resolves with how the device answered; rejects only when there is no
- * socket left to resend on, the connection closes, or `signal` aborts - with `signal.reason`, so a
- * caller can tell an abandoned wait from a failed command.
+ * socket left to resend on, the connection closes, the device goes offline
+ * ({@link DanteDeviceOfflineError}), or `signal` aborts - with `signal.reason`, so a caller can tell
+ * an abandoned wait from a failed command.
  *
  * Must be called in the same tick as the first send, so a reply cannot arrive before it is waited
  * for.
@@ -200,6 +230,8 @@ export interface RxReport {
 }
 
 interface RxWaiter {
+	/** The device whose channel is waited on. */
+	ip: DeviceIp
 	onReport: (ip: DeviceIp, report: RxReport | undefined) => void
 	cancel: (error: Error) => void
 }
@@ -306,8 +338,9 @@ const reportCovers = (report: RxReport | undefined, wait: RxWait) =>
 
 /**
  * Waits until `matches` holds for a receive channel, asking the device for its state meanwhile.
- * Resolves true when it holds, false on timeout; rejects if the connection closes first, or with
- * `signal.reason` if `signal` aborts, which also takes the wait out of its device's poll.
+ * Resolves true when it holds, false on timeout; rejects if the connection closes or the device goes
+ * offline first ({@link DanteDeviceOfflineError}), or with `signal.reason` if `signal` aborts. Each
+ * of those also takes the wait out of its device's poll.
  *
  * This is what makes a crosspoint command's success real: a device can accept a command and still
  * not apply it, and the acknowledgement alone cannot tell. Devices also announce routing changes
@@ -343,6 +376,7 @@ export async function awaitRxState(
 			reject(signal?.reason as Error)
 		}
 		const waiter: RxWaiter = {
+			ip: wait.ip,
 			onReport: (ip, report) => {
 				if (ip !== wait.ip) return
 				if (reportCovers(report, wait)) reported = true

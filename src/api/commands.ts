@@ -24,6 +24,7 @@ import {
 	awaitCommandAck,
 	awaitRxState,
 	DanteCommandError,
+	DanteDeviceOfflineError,
 	type AckOptions,
 	type CommandAck,
 	type ConfirmOptions,
@@ -229,7 +230,8 @@ const MAX_UNSUBSCRIBE_PER_COMMAND = 16
  * count as a u16 here is what makes the bytes line up; widening it would shift the whole payload.
  *
  * Confirmed as {@link confirmCrosspoint} confirms one channel, a packet at a time, so one packet's
- * channels are read back with one query. Every packet is tried, and any failures reported at the end.
+ * channels are read back with one query. Every packet is tried, and any failures reported at the end,
+ * unless the device goes offline part way: then it stops, as the rest cannot be cleared either.
  */
 export async function clearAllAudioCrosspoints(
 	self: DanteInstance,
@@ -290,7 +292,9 @@ async function clearAudioBatch(
 
 /**
  * Runs `step` for every item, whatever became of the ones before it, then reports all that failed.
- * Anything other than a {@link DanteCommandError} - an aborted action's reason, say - stops it there.
+ * It stops early on the device going offline ({@link DanteDeviceOfflineError}), since nothing more
+ * can be done on it, and on anything other than a {@link DanteCommandError} - an aborted action's
+ * reason, say - which it rethrows.
  */
 async function forEachThenReport<Item>(items: readonly Item[], step: (item: Item) => Promise<void>): Promise<void> {
 	const failures: string[] = []
@@ -300,6 +304,7 @@ async function forEachThenReport<Item>(items: readonly Item[], step: (item: Item
 		} catch (error) {
 			if (!(error instanceof DanteCommandError)) throw error
 			failures.push(error.message)
+			if (error instanceof DanteDeviceOfflineError) break
 		}
 	}
 	if (failures.length > 0) throw new DanteCommandError(failures.join('; '))
@@ -314,7 +319,8 @@ async function forEachThenReport<Item>(items: readonly Item[], step: (item: Item
  * channels, so the simplicity of reusing the already-verified single-entry path outweighs adding
  * and testing an unneeded batched one.
  *
- * Every channel is tried, and any failures reported at the end.
+ * Every channel is tried, and any failures reported at the end, unless the device goes offline part
+ * way - see {@link clearAllAudioCrosspoints}.
  */
 export async function clearAllVideoCrosspoints(
 	self: DanteInstance,

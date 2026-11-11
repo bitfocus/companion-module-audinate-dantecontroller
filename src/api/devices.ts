@@ -24,7 +24,7 @@ import type {
 import { isSubscriptionConnected } from './protocol-rules.js'
 import type { DanteDeviceVariables } from '../types.js'
 import { refreshDeviceChoices } from './choices.js'
-import { DanteCommandError } from './requests.js'
+import { cancelDeviceCommands, DanteCommandError } from './requests.js'
 import {
 	brandedEntries,
 	brandedKeys,
@@ -504,6 +504,9 @@ export function destroyDevice(self: DanteInstance, deviceIp: DeviceIp): void {
 	//delete timeout
 	clearTimeout(self.devicesData[deviceIp]?.timeoutArray?.[0])
 	channelSettleDeadlines.get(self)?.delete(deviceIp)
+
+	// a crosspoint waiting on the device can only time out now, so it fails here instead
+	cancelDeviceCommands(self, deviceIp, deviceLabel(self, deviceIp))
 
 	// delete object from devicesData
 	delete self.devicesData[deviceIp]
