@@ -266,9 +266,10 @@ async function clearAudioBatch(
 		...channels.map((channel) => intToBuffer(channel, 4)),
 	])
 	const command = makeCommand(self, DANTE_CONST.COMMANDS.subscriptionRemove, commandArguments)
+	options.signal?.throwIfAborted()
 	if (!sendCommand(self, command, ipaddress)) throw new DanteCommandError(`Could not send to ${destination}`)
 
-	const ack = await awaitCommandAck(self, ipaddress, command, options.ack)
+	const ack = await awaitCommandAck(self, ipaddress, command, options.ack, options.signal)
 	if (ack.kind === 'rejected') {
 		throw new DanteCommandError(
 			`${destination} rejected clearing audio channels ${channels[0]}-${channels.at(-1)} ${resultLabel(ack.code)}`,
@@ -281,13 +282,16 @@ async function clearAudioBatch(
 				self,
 				{ ip: ipaddress, destination, mediaType: 'audio', channel, command, expected: undefined },
 				ack,
-				options.confirm,
+				options,
 			),
 		),
 	)
 }
 
-/** Runs `step` for every item, whatever became of the ones before it, then reports all that failed. */
+/**
+ * Runs `step` for every item, whatever became of the ones before it, then reports all that failed.
+ * Anything other than a {@link DanteCommandError} - an aborted action's reason, say - stops it there.
+ */
 async function forEachThenReport<Item>(items: readonly Item[], step: (item: Item) => Promise<void>): Promise<void> {
 	const failures: string[] = []
 	for (const item of items) {
@@ -479,6 +483,12 @@ export function crosspointApplied(self: DanteInstance, sent: SentCrosspoint): bo
 export interface ConfirmCrosspointOptions {
 	ack?: AckOptions
 	confirm?: ConfirmOptions
+	/**
+	 * The action's `context.signal`. When it aborts, the waits stop resending and polling and reject
+	 * with its reason, and a clear-all stops at the batch or channel it is on. A command the device
+	 * already has is not undone: this only stops the module waiting on work nobody wants any more.
+	 */
+	signal?: AbortSignal
 }
 
 /**
@@ -498,14 +508,14 @@ export async function confirmCrosspoint(
 	sent: SentCrosspoint,
 	options: ConfirmCrosspointOptions = {},
 ): Promise<void> {
-	const ack = await awaitCommandAck(self, sent.ip, sent.command, options.ack)
+	const ack = await awaitCommandAck(self, sent.ip, sent.command, options.ack, options.signal)
 	if (ack.kind === 'rejected') {
 		throw new DanteCommandError(
 			`${sent.destination} rejected the change to ${sent.mediaType} channel ${sent.channel} ` + resultLabel(ack.code),
 		)
 	}
 
-	await confirmChannelState(self, sent, ack, options.confirm)
+	await confirmChannelState(self, sent, ack, options)
 }
 
 /** A device's result code, as messages show it. */
@@ -524,7 +534,7 @@ async function confirmChannelState(
 	self: DanteInstance,
 	sent: SentCrosspoint,
 	ack: Exclude<CommandAck, { kind: 'rejected' }>,
-	options: ConfirmOptions | undefined,
+	options: ConfirmCrosspointOptions,
 ): Promise<void> {
 	const what = `${sent.mediaType} channel ${sent.channel} on ${sent.destination}`
 	const applied = await awaitRxState(
@@ -536,7 +546,8 @@ async function confirmChannelState(
 			matches: (reported) => (reported || ack.kind === 'accepted') && crosspointApplied(self, sent),
 			query: channelStateQuery(self, sent),
 		},
-		options,
+		options.confirm,
+		options.signal,
 	)
 	const wanted = sent.expected ? `${sent.expected.channelName}@${sent.expected.deviceName}` : 'no source'
 	if (applied) {
@@ -566,7 +577,7 @@ async function confirmAudioConnected(
 	self: DanteInstance,
 	sent: SentCrosspoint,
 	wanted: string,
-	options: ConfirmOptions | undefined,
+	options: ConfirmCrosspointOptions,
 ): Promise<void> {
 	if (sent.mediaType !== 'audio' || !sent.expected) return
 	if (findDeviceIpByName(self, sent.expected.deviceName) === undefined) return
@@ -585,7 +596,8 @@ async function confirmAudioConnected(
 			matches: (reported) => isConnected() || (reported && isSubscriptionRefused(statusNow())),
 			query: channelStateQuery(self, sent),
 		},
-		options,
+		options.confirm,
+		options.signal,
 	)
 	if (isConnected()) return
 
@@ -605,6 +617,7 @@ export async function makeAudioCrosspointConfirmed(
 	destinationChannel: string | number,
 	options?: ConfirmCrosspointOptions,
 ): Promise<void> {
+	options?.signal?.throwIfAborted()
 	const sent = makeAudioCrosspoint(self, destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
 	await confirmCrosspoint(self, sent, options)
 }
@@ -616,6 +629,7 @@ export async function clearAudioCrosspointConfirmed(
 	destinationChannel: string | number,
 	options?: ConfirmCrosspointOptions,
 ): Promise<void> {
+	options?.signal?.throwIfAborted()
 	await confirmCrosspoint(self, clearAudioCrosspoint(self, destinationDevice, destinationChannel), options)
 }
 
@@ -766,6 +780,7 @@ export async function makeVideoCrosspointConfirmed(
 	destinationChannel: string | number,
 	options?: ConfirmCrosspointOptions,
 ): Promise<void> {
+	options?.signal?.throwIfAborted()
 	const sent = makeVideoCrosspoint(self, destinationDevice, sourceChannelName, sourceDeviceName, destinationChannel)
 	await confirmCrosspoint(self, sent, options)
 }
@@ -777,6 +792,7 @@ export async function clearVideoCrosspointConfirmed(
 	destinationChannel: string | number,
 	options?: ConfirmCrosspointOptions,
 ): Promise<void> {
+	options?.signal?.throwIfAborted()
 	await confirmCrosspoint(self, clearVideoCrosspoint(self, destinationDevice, destinationChannel), options)
 }
 

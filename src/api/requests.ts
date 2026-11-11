@@ -125,7 +125,8 @@ const DEFAULT_ACK_OPTIONS: Required<AckOptions> = { attemptTimeoutMs: 1000, atte
 /**
  * Waits for a device's answer to a command that has just been sent with `sendCommand`, resending
  * it while there is none. Resolves with how the device answered; rejects only when there is no
- * socket left to resend on, or the connection closes.
+ * socket left to resend on, the connection closes, or `signal` aborts - with `signal.reason`, so a
+ * caller can tell an abandoned wait from a failed command.
  *
  * Must be called in the same tick as the first send, so a reply cannot arrive before it is waited
  * for.
@@ -135,6 +136,7 @@ export async function awaitCommandAck(
 	ip: DeviceIp,
 	command: Buffer,
 	options: AckOptions = {},
+	signal?: AbortSignal,
 ): Promise<CommandAck> {
 	const { attemptTimeoutMs, attempts } = { ...DEFAULT_ACK_OPTIONS, ...options }
 	const pending = pendingFor(self)
@@ -142,22 +144,33 @@ export async function awaitCommandAck(
 	let sendError: Error | undefined
 
 	for (let attempt = 1; attempt <= attempts; attempt++) {
+		signal?.throwIfAborted()
 		if (attempt > 1 && !sendCommand(self, command, ip)) {
 			throw new DanteCommandError(`Could not resend the command to ${ip}`)
 		}
 
 		const reply = await new Promise<Buffer | undefined>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			const stop = () => {
+				clearTimeout(timer)
+				signal?.removeEventListener('abort', onAbort)
 				if (pending.get(key) === waiting) pending.delete(key)
+			}
+			const onAbort = () => {
+				stop()
+				// the reason as given, as `throwIfAborted` throws it
+				reject(signal?.reason as Error)
+			}
+			const timer = setTimeout(() => {
+				stop()
 				resolve(undefined)
 			}, attemptTimeoutMs)
 			const waiting: PendingCommand = {
 				resolve: (packet) => {
-					clearTimeout(timer)
+					stop()
 					resolve(packet)
 				},
 				reject: (error) => {
-					clearTimeout(timer)
+					stop()
 					reject(error)
 				},
 				sendFailed: (error) => {
@@ -165,6 +178,7 @@ export async function awaitCommandAck(
 				},
 			}
 			pending.set(key, waiting)
+			signal?.addEventListener('abort', onAbort, { once: true })
 		})
 
 		if (reply) {
@@ -292,13 +306,20 @@ const reportCovers = (report: RxReport | undefined, wait: RxWait) =>
 
 /**
  * Waits until `matches` holds for a receive channel, asking the device for its state meanwhile.
- * Resolves true when it holds, false on timeout; rejects if the connection closes first.
+ * Resolves true when it holds, false on timeout; rejects if the connection closes first, or with
+ * `signal.reason` if `signal` aborts, which also takes the wait out of its device's poll.
  *
  * This is what makes a crosspoint command's success real: a device can accept a command and still
  * not apply it, and the acknowledgement alone cannot tell. Devices also announce routing changes
  * on their own, so the state usually arrives without the re-query.
  */
-export async function awaitRxState(self: DanteInstance, wait: RxWait, options: ConfirmOptions = {}): Promise<boolean> {
+export async function awaitRxState(
+	self: DanteInstance,
+	wait: RxWait,
+	options: ConfirmOptions = {},
+	signal?: AbortSignal,
+): Promise<boolean> {
+	signal?.throwIfAborted()
 	if (wait.matches(false)) return true
 
 	const { timeoutMs, requeryMs } = { ...DEFAULT_CONFIRM_OPTIONS, ...options }
@@ -315,6 +336,11 @@ export async function awaitRxState(self: DanteInstance, wait: RxWait, options: C
 			clearTimeout(deadline)
 			leavePoll()
 			registered.delete(waiter)
+			signal?.removeEventListener('abort', onAbort)
+		}
+		const onAbort = () => {
+			stop()
+			reject(signal?.reason as Error)
 		}
 		const waiter: RxWaiter = {
 			onReport: (ip, report) => {
@@ -335,5 +361,6 @@ export async function awaitRxState(self: DanteInstance, wait: RxWait, options: C
 		}, timeoutMs)
 		registered.add(waiter)
 		const leavePoll = joinRxPoll(self, wait.ip, wait.query, requeryMs)
+		signal?.addEventListener('abort', onAbort, { once: true })
 	})
 }

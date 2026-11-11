@@ -102,9 +102,14 @@ function feedbackDefinition(self: DanteInstance, feedbackId: string) {
 	return (self.setFeedbackDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][feedbackId]
 }
 
+/** An action's definition, its callback run as Companion runs it: with a context holding an abort signal. */
 function actionDefinition(self: DanteInstance, actionId: string) {
 	UpdateActions(self)
-	return (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][actionId]
+	const definition = (self.setActionDefinitions as ReturnType<typeof vi.fn>).mock.calls[0][0][actionId]
+	return {
+		...definition,
+		callback: async (action: unknown, signal = new AbortController().signal) => definition.callback(action, { signal }),
+	}
 }
 
 /**
@@ -335,6 +340,29 @@ describe('Crosspoint - Make/Clear actions, video', () => {
 		)
 		expect(sentBuffer.readUInt16BE(6)).toBe(DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_CROSSPOINT_CONTROL)
 		expect(refreshes(sendFn)).toEqual([DANTE_CONST.COMMANDS.MESSAGE_TYPE_AV_RX_CHANNEL_QUERY])
+	})
+
+	it("hands the action's abort signal to the crosspoint", async () => {
+		const self = instance()
+		const sendFn = answering(self)
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(
+			actionDefinition(self, 'makeCrosspointDropDown').callback(
+				{
+					options: {
+						channelType: 'video',
+						destinationDevice: A_NAME,
+						[`destinationChannelVideo_${A_NAME}`]: 2,
+						sourceDevice: B_NAME,
+						[`sourceChannelVideo_${B_NAME}`]: 1,
+					},
+				},
+				controller.signal,
+			),
+		).rejects.toThrow('aborted')
+		expect(writes(sendFn)).toHaveLength(0)
 	})
 
 	it('makeCrosspointDropDown sends a plain audio command for options keyed by device name', async () => {

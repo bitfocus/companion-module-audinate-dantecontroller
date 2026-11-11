@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
 	awaitCommandAck,
 	cancelPendingCommands,
+	clearAllAudioCrosspoints,
 	DANTE_CONST,
 	handleCommandReply,
 	makeAudioCrosspointConfirmed,
@@ -417,6 +418,101 @@ describe('a salvo of routes to one receiver', () => {
 		await new Promise((resolve) => setTimeout(resolve, FAST.confirm.requeryMs * 3))
 
 		expect(rxQueries(send)).toHaveLength(queries)
+	})
+})
+
+describe('an aborted action', () => {
+	/** Waits long enough that only the abort can have ended them early. */
+	const PATIENT = { ack: { attemptTimeoutMs: 1000, attempts: 3 }, confirm: { timeoutMs: 2000, requeryMs: 10 } }
+	const later = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+	const rxQueries = (send: ReturnType<typeof vi.fn>) =>
+		send.mock.calls.map((call) => call[0] as Buffer).filter((command) => isRxQuery(command))
+
+	it('stops resending a command nobody wants any more, with the reason it was aborted', async () => {
+		const { self, send } = instance()
+		const controller = new AbortController()
+		const reason = new Error('Actions aborted')
+
+		const started = Date.now()
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, {
+			...PATIENT,
+			signal: controller.signal,
+		})
+		setTimeout(() => controller.abort(reason), 20)
+
+		await expect(route).rejects.toBe(reason)
+		expect(Date.now() - started).toBeLessThan(PATIENT.ack.attemptTimeoutMs / 2)
+		await later(50)
+		expect(subscribes(send)).toHaveLength(1)
+	})
+
+	it('takes a reply that comes after the abort for nobody', async () => {
+		const { self } = instance()
+		const controller = new AbortController()
+		const command = makeCommand(self, DANTE_CONST.COMMANDS.subscription, Buffer.from('0401', 'hex'))
+		sendCommand(self, command, DEST)
+		const ack = awaitCommandAck(self, DEST, command, PATIENT.ack, controller.signal)
+
+		controller.abort()
+		await expect(ack).rejects.toThrow('aborted')
+		expect(handleCommandReply(self, ackFor(command), { address: DEST })).toBe(false)
+	})
+
+	it('stops polling the channel once the action is aborted', async () => {
+		// accepted, and never shown, so the wait would poll for the whole timeout
+		const { self, send } = instance((command) => (isSubscribe(command) ? {} : undefined))
+		const controller = new AbortController()
+
+		const started = Date.now()
+		const route = makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, {
+			...PATIENT,
+			signal: controller.signal,
+		})
+		setTimeout(() => controller.abort(), 30)
+
+		await expect(route).rejects.toThrow('aborted')
+		expect(Date.now() - started).toBeLessThan(PATIENT.confirm.timeoutMs / 4)
+		const queries = rxQueries(send).length
+		await later(PATIENT.confirm.requeryMs * 5)
+		expect(rxQueries(send)).toHaveLength(queries)
+	})
+
+	it('sends nothing for an action aborted before it ran', async () => {
+		const { self, send } = instance()
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(
+			makeAudioCrosspointConfirmed(self, 'Amp', 'Mic 1', 'Stage Box', 1, { ...PATIENT, signal: controller.signal }),
+		).rejects.toThrow('aborted')
+		expect(send).not.toHaveBeenCalled()
+	})
+
+	it('stops a clear of every channel at the batch it is on', async () => {
+		const isRemove = (command: Buffer) => command.readUInt16BE(6) === DANTE_CONST.COMMANDS.subscriptionRemove
+		// four batches of sixteen routed channels, each batch accepted and never shown cleared
+		const { self, send } = instance((command) => (isRemove(command) ? {} : undefined))
+		const routed = (number: number) => ({
+			number: ch(number),
+			name: `In ${number}`,
+			sourceDevice: 'Stage Box',
+			sourceChannel: 'Mic 1',
+			subscriptionStatus: 0x0009,
+		})
+		self.devicesData[DEST].audioRx = {
+			count: 64,
+			...Object.fromEntries(Array.from({ length: 64 }, (_, index) => [index + 1, routed(index + 1)])),
+		}
+		const controller = new AbortController()
+		const reason = new Error('Actions aborted')
+
+		const clear = clearAllAudioCrosspoints(self, 'Amp', { ...PATIENT, signal: controller.signal })
+		setTimeout(() => controller.abort(reason), 20)
+
+		// the reason itself, not a report of four failed batches
+		await expect(clear).rejects.toBe(reason)
+		await later(50)
+		expect(send.mock.calls.filter((call) => isRemove(call[0] as Buffer))).toHaveLength(1)
 	})
 })
 

@@ -254,8 +254,9 @@ export function UpdateActions(self: DanteInstance): void {
 
 				return { sourceChannelName: source.channelName, sourceDeviceName: source.deviceName }
 			},
-			callback: async (action) => {
+			callback: async (action, context) => {
 				const opt = action.options
+				const confirm = { signal: context.signal }
 				if (opt.channelType === 'video') {
 					await makeVideoCrosspointConfirmed(
 						self,
@@ -263,6 +264,7 @@ export function UpdateActions(self: DanteInstance): void {
 						opt.sourceChannelName,
 						opt.sourceDeviceName,
 						opt.destinationChannelNumber,
+						confirm,
 					)
 					return
 				}
@@ -272,6 +274,7 @@ export function UpdateActions(self: DanteInstance): void {
 					opt.sourceChannelName,
 					opt.sourceDeviceName,
 					opt.destinationChannelNumber,
+					confirm,
 				)
 			},
 		},
@@ -363,9 +366,10 @@ export function UpdateActions(self: DanteInstance): void {
 				}
 				return learnt
 			},
-			callback: async (action) => {
+			callback: async (action, context) => {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
+				const confirm = { signal: context.signal }
 				const sourcePrefix = channelOptionPrefix('sourceChannel', opt.channelType)
 				const destinationPrefix = channelOptionPrefix('destinationChannel', opt.channelType)
 
@@ -399,8 +403,8 @@ export function UpdateActions(self: DanteInstance): void {
 
 				// No source means no route: clear the destination rather than subscribing it to nothing.
 				if (!sourceChannelNumber) {
-					if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
-					else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+					if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel, confirm)
+					else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel, confirm)
 					return
 				}
 
@@ -427,7 +431,7 @@ export function UpdateActions(self: DanteInstance): void {
 				}
 
 				const makeCrosspoint = isVideo ? makeVideoCrosspointConfirmed : makeAudioCrosspointConfirmed
-				await makeCrosspoint(self, opt.destinationDevice, sourceChannelName, sourceName, destinationChannel)
+				await makeCrosspoint(self, opt.destinationDevice, sourceChannelName, sourceName, destinationChannel, confirm)
 			},
 		},
 
@@ -461,19 +465,25 @@ export function UpdateActions(self: DanteInstance): void {
 					isVisibleExpression: `!$(options:clearAll)`,
 				},
 			],
-			callback: async (action) => {
+			callback: async (action, context) => {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
+				const confirm = { signal: context.signal }
 				if (opt.clearAll) {
-					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress)
-					else await clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDeviceAdddress, confirm)
+					else await clearAllAudioCrosspoints(self, opt.destinationDeviceAdddress, confirm)
 					return
 				}
 				if (isVideo) {
-					await clearVideoCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+					await clearVideoCrosspointConfirmed(
+						self,
+						opt.destinationDeviceAdddress,
+						opt.destinationChannelNumber,
+						confirm,
+					)
 					return
 				}
-				await clearAudioCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber)
+				await clearAudioCrosspointConfirmed(self, opt.destinationDeviceAdddress, opt.destinationChannelNumber, confirm)
 			},
 		},
 
@@ -521,12 +531,13 @@ export function UpdateActions(self: DanteInstance): void {
 				// that type still has nothing to clear.
 				...perDeviceMissingChannelWarnings(self, 'destinationDevice', 'rx'),
 			],
-			callback: async (action) => {
+			callback: async (action, context) => {
 				const opt = action.options
 				const isVideo = opt.channelType === 'video'
+				const confirm = { signal: context.signal }
 				if (opt.clearAll) {
-					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDevice)
-					else await clearAllAudioCrosspoints(self, opt.destinationDevice)
+					if (isVideo) await clearAllVideoCrosspoints(self, opt.destinationDevice, confirm)
+					else await clearAllAudioCrosspoints(self, opt.destinationDevice, confirm)
 					return
 				}
 
@@ -544,8 +555,8 @@ export function UpdateActions(self: DanteInstance): void {
 					)
 				}
 
-				if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
-				else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel)
+				if (isVideo) await clearVideoCrosspointConfirmed(self, opt.destinationDevice, destinationChannel, confirm)
+				else await clearAudioCrosspointConfirmed(self, opt.destinationDevice, destinationChannel, confirm)
 			},
 		},
 
