@@ -47,15 +47,13 @@ The crosspoint actions finish only once the device has taken the change: it ackn
 the receive channel reports the new subscription, and, for an audio source that is on the network,
 the subscription connects. Otherwise the action fails with the reason - the device is offline or
 locked, it rejected the command (with its result code), or it reports a subscription status such as
-_unsupported_ for a self-route a device does not allow. A device that goes offline while the action
-waits on it fails the action at once. A route to a device that is not on the network succeeds once
-the receiver reports it, as Dante pre-patching does: it connects when the device appears.
+_unsupported_ for a self-route a device does not allow. A route to a device that is not on the network
+succeeds once the receiver reports it, as Dante pre-patching does: it connects when the device appears.
 
 _Crosspoint - Clear_'s "clear every channel" option follows the Channel Type as well: it clears every
 channel of the selected type, not both. Use two actions to clear audio and video together. It finishes
 the same way, once the device shows every channel cleared, and fails if the device is locked or has no
-known channels of that type. A channel that fails does not stop the rest from being cleared, but a
-device that goes offline part way does: the action fails at once instead of trying the rest.
+known channels of that type. A channel that fails does not stop the rest from being cleared.
 
 - Crosspoint - Clear
 - Crosspoint - Clear (custom)
