@@ -393,13 +393,15 @@ const AV_CHANNEL_RECORD = {
 	 *
 	 * Lags reality: a source powered off *after* resolving keeps this at 1 for a while, whereas
 	 * subscribing to the same device while it is off reports 0 at once. So it means "resolved as far
-	 * as this device currently knows", not a live reachability check - which is why it is not what
-	 * the crosspoint feedback gates on.
+	 * as this device currently knows", not a live reachability check. It is still what makes a
+	 * video subscription connected (`isVideoSubscriptionConnected`): like audio's status, that says
+	 * the route is in place, not that its source is sending.
 	 */
 	SUBSCRIPTION_RESOLVED: 54,
 	/**
-	 * 1 when media is actually flowing to this channel, 0 otherwise - the video analogue of audio's
-	 * subscription status, and the field that answers "is this crosspoint connected".
+	 * 1 when media is actually flowing to this channel, 0 otherwise. Dante Controller calls only
+	 * this state connected, but it depends on the source sending, so the module's connected test
+	 * does not gate on it - see `isVideoSubscriptionConnected`.
 	 *
 	 * Established live across five states on an encoder/decoder pair: unrouted, subscribed to a name
 	 * that does not exist, subscribed to a real device that is powered off, resolved with the source

@@ -285,7 +285,7 @@ function addRoutingValues(
 		variableValues[`${id}_rx_video_${channel}_label`] = channelDisplayLabel(record?.name, channel)
 		variableValues[`${id}_rx_video_${channel}_source`] = subscriptionValue(source)
 		variableValues[`${id}_rx_video_${channel}_status`] = source
-			? videoSubscriptionStatusLabel(record?.subscriptionResolved, record?.subscriptionActive)
+			? videoSubscriptionStatusLabel(record)
 			: SUBSCRIPTION_STATE_NOT_SUBSCRIBED
 	}
 	for (const channel of channelNumbers(device.videoTx?.count)) {

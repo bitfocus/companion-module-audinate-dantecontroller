@@ -138,41 +138,67 @@ export function isSubscriptionConnected(status: number | undefined): boolean {
 }
 
 /**
+ * Values of a video rx record's `subscriptionResolved` byte that mean the receiver has located the
+ * source it is subscribed to. Only 0 and 1 have been observed; a set, like the audio codes above, so
+ * another is a line here rather than a rewrite.
+ */
+export const VIDEO_SUBSCRIPTION_RESOLVED: readonly number[] = [1]
+
+/**
  * Values of a video rx record's `subscriptionActive` byte that mean media is reaching the channel.
- *
- * Only 0 and 1 have ever been observed, so this could be a boolean test - it is a set to match the
- * audio rule above, because audio turned out to have four distinct connected codes and there is no
- * reason to assume video will not grow more. Adding one is then a line here rather than a rewrite.
+ * Only 0 and 1 have been observed, and a set for the same reason as {@link VIDEO_SUBSCRIPTION_RESOLVED}.
  */
 export const VIDEO_SUBSCRIPTION_ACTIVE: readonly number[] = [1]
+
+/** The two flags a video rx record carries in place of audio's status code. */
+interface VideoSubscriptionFlags {
+	subscriptionResolved?: number
+	subscriptionActive?: number
+}
 
 /**
  * True if a video rx channel's `subscriptionActive` byte says media is actually flowing.
  *
- * This is the video counterpart of {@link isSubscriptionConnected}, and the distinction it draws is
- * the one Dante Controller draws: a subscription whose source is present but sending nothing reads
- * "Subscription is not active" there, and false here. A destination reporting a source is therefore
- * not on its own evidence of a working crosspoint.
+ * Dante Controller shows a subscription whose source is present but sending nothing as "Subscription
+ * is not active", and this reads false for it. That is a property of the source rather than of the
+ * route, so it is not what makes a video subscription connected - see
+ * {@link isVideoSubscriptionConnected}.
  */
 export function isVideoSubscriptionActive(active: number | undefined): boolean {
 	return active !== undefined && VIDEO_SUBSCRIPTION_ACTIVE.includes(active)
 }
 
 /**
- * A video subscription's state as the `_rx_video_<n>_status` variable holds it, the counterpart of
- * {@link subscriptionStateValue}.
+ * True if a video rx channel's subscription is connected: the receiver has located its source.
  *
- * Video rx records carry two flags rather than a status code, so this names the combinations:
- * `connected` when media is flowing; otherwise `unresolved` while the source has not been located,
- * and `not active` once it has (Dante Controller's "Subscription is not active"). `resolved` lags a
- * source going away, so an absent source can read `not active` for a while before `unresolved` -
- * the `active` test, which is the one that matters, does not lag. `unknown status` when the
- * device has not reported the flags at all.
+ * The video counterpart of {@link isSubscriptionConnected}, and like it independent of signal. A
+ * crosspoint reads the way a baseband router reports one, in place whether or not its input carries
+ * anything, so a Dante AV transmitter that loses its input stays connected. Media flowing counts as
+ * well, since it can only come from a located source.
+ *
+ * `subscriptionResolved` lags a source going away: one powered off after resolving reads connected
+ * until the receiver notices it has gone, and the receiver's reply meanwhile is byte-identical to
+ * an idle source's.
  */
-export function videoSubscriptionStatusLabel(resolved: number | undefined, active: number | undefined): string {
-	if (active === undefined) return 'unknown status'
-	if (isVideoSubscriptionActive(active)) return SUBSCRIPTION_STATE_CONNECTED
-	return resolved === 0 ? 'unresolved' : 'not active'
+export function isVideoSubscriptionConnected(channel: VideoSubscriptionFlags | undefined): boolean {
+	const resolved = channel?.subscriptionResolved
+	return (
+		(resolved !== undefined && VIDEO_SUBSCRIPTION_RESOLVED.includes(resolved)) ||
+		isVideoSubscriptionActive(channel?.subscriptionActive)
+	)
+}
+
+/**
+ * A video subscription's state as the `_rx_video_<n>_status` variable holds it, the counterpart of
+ * {@link subscriptionStateValue}: `connected` when {@link isVideoSubscriptionConnected}, otherwise
+ * `unresolved`, the source not (or no longer) located. `unknown status` when the device has not
+ * reported the flags at all.
+ */
+export function videoSubscriptionStatusLabel(channel: VideoSubscriptionFlags | undefined): string {
+	if (channel?.subscriptionResolved === undefined && channel?.subscriptionActive === undefined) {
+		return 'unknown status'
+	}
+	return isVideoSubscriptionConnected(channel) ? SUBSCRIPTION_STATE_CONNECTED : 'unresolved'
 }
 
 /**

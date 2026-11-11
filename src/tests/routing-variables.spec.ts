@@ -424,7 +424,7 @@ describe('subscription health variables', () => {
 		expect(definitionCalls(self)).toHaveLength(1)
 	})
 
-	it('reports a video subscription by its active flag', () => {
+	it('reports a video subscription by whether its source is located, not by signal', () => {
 		const self = keyed()
 		UpdateVariableDefinitions(self)
 		CheckVariables(self)
@@ -432,12 +432,13 @@ describe('subscription health variables', () => {
 			[`${amp}_rx_video_1_status`]: 'connected',
 		})
 
-		// resolved, but the source sending nothing: Dante Controller's "Subscription is not active"
+		// located, but the source sending nothing (Dante Controller's "Subscription is not active"):
+		// still connected, as audio is when its transmitter loses its input, so nothing is sent
+		const sent = valueCalls(self).length
 		self.devicesData[AMP].videoRx![1].subscriptionActive = 0
 		CheckVariables(self, AMP, 'rx_video')
-		expect(valueCalls(self).at(-1)?.[0]).toEqual({
-			[`${amp}_rx_video_1_status`]: 'not active',
-		})
+		expect(valueCalls(self)).toHaveLength(sent)
+		expect(published(self)).toMatchObject({ [`${amp}_rx_video_1_status`]: 'connected' })
 
 		self.devicesData[AMP].videoRx![1].subscriptionResolved = 0
 		CheckVariables(self, AMP, 'rx_video')

@@ -23,7 +23,7 @@ import {
 	getAudioRxChannelSource,
 	getVideoRxChannelSource,
 	isSubscriptionConnected,
-	isVideoSubscriptionActive,
+	isVideoSubscriptionConnected,
 	DEVICE_PROPERTIES,
 	DEVICE_PROPERTY_LABELS,
 	deviceProperty,
@@ -314,12 +314,12 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				// source to be reporting. What is *not* substituted is the route itself: an unrouted
 				// destination reports no source and matches nothing.
 				//
-				// The destination's own account of whether media is flowing, which is the same distinction
-				// Dante Controller draws: a subscription whose source is present but sending nothing
-				// reads "Subscription is not active" there. Naming a source is not on its own evidence
-				// of a working crosspoint - this module used to treat it as such and reported connected
-				// for a route carrying nothing.
-				if (!isVideoSubscriptionActive(destinationChannel?.subscriptionActive)) return false
+				// The destination's own account of whether it has located the source, the test audio's
+				// subscription status makes. Like that one it does not depend on signal: the crosspoint
+				// reads as a baseband router reports one, connected whether or not its input carries
+				// anything, so a transmitter that loses its input stays connected. Naming a source is
+				// still not enough on its own - a subscription to a device that is not there names it too.
+				if (!isVideoSubscriptionConnected(destinationChannel)) return false
 
 				return sourceMatches(
 					destinationChannel,
@@ -570,11 +570,9 @@ export function UpdateFeedbacks(self: DanteInstance): void {
 				const sourceChannelNumber =
 					sourceChannel?.number ?? rememberedTxChannelNumber(self, source.deviceName, 'video', source.channelName)
 				return {
-					// the destination's own flag rather than a hardcoded true - a subscription that names a
-					// source but carries nothing is reported as the subscription it is, not as connected
-					connected: isVideoSubscriptionActive(
-						deviceByIdentifier(self, opt.device)?.videoRx?.[channelNumber]?.subscriptionActive,
-					),
+					// the destination's own word rather than a hardcoded true, by the same test as audio: the
+					// source has been located, whether or not it is sending anything
+					connected: isVideoSubscriptionConnected(deviceByIdentifier(self, opt.device)?.videoRx?.[channelNumber]),
 					device: { name: source.deviceName, ip: resolveDeviceIp(self, source.deviceName) ?? '' },
 					channel: { name: source.channelName, number: sourceChannelNumber ?? 0 },
 				}

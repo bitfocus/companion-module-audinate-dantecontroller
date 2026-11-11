@@ -57,7 +57,10 @@ export interface VideoRxChannel extends VideoTxChannel {
 	 * rather than as a boolean, so an unrecognised code is preserved for whoever looks next.
 	 */
 	subscriptionResolved?: number
-	/** 1 when media is flowing - see `isVideoSubscriptionActive`, and the offsets in `protocol.ts`. */
+	/**
+	 * 1 when media is flowing - see `isVideoSubscriptionActive`, and the offsets in `protocol.ts`. Not
+	 * what makes the subscription connected, which is `isVideoSubscriptionConnected`.
+	 */
 	subscriptionActive?: number
 }
 

@@ -130,8 +130,9 @@ Per device, with the same `<device>` prefix:
   subscription, even one it then refuses or cannot resolve - this says whether it is actually
   working, as Dante Controller's error marker does. Audio shows the status by name, such as
   `unresolved` (source not on the network, as with pre-patching) or `unsupported` (a refused
-  self-route), or the code itself (`0x0042`) for one with no name. Video shows `not active` (source
-  found but sending nothing) or `unresolved`. Compare with `connected` to test for a working route,
+  self-route), or the code itself (`0x0042`) for one with no name. Video shows `unresolved`. Neither
+  depends on signal: a transmitter that loses its input stays `connected`, as a crosspoint on a
+  baseband router does. Compare with `connected` to test for a working route,
   for example `$(dante:Amp_rx_1_status) == 'connected'`. It updates whenever the device reports a
   change, not only after an action
 - Transmit channel name (`_tx_<n>_name`, `_tx_video_<n>_name`) - the name subscriptions use

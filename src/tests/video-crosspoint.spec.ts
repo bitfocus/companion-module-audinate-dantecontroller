@@ -32,9 +32,9 @@ function devicesData(): DevicesData {
 			audioTx: { count: 1, 1: { number: ch(1), name: 'Audio Out 1' } },
 			videoRx: {
 				count: 3,
-				// subscriptionActive 1 = media actually flowing, which is what "connected" means for
-				// video - a channel naming a source but carrying nothing reads "Subscription is not
-				// active" in Dante Controller, and false here. Channel 3 below is exactly that case.
+				// subscriptionResolved 1 = the source located, which is what "connected" means for
+				// video, as for audio, whatever the source is sending. Channel 3 below is located but
+				// carrying nothing, which Dante Controller shows as "Subscription is not active".
 				1: {
 					number: ch(1),
 					name: 'Video In 1',
@@ -159,6 +159,20 @@ describe('Channel Subscription feedback, video', () => {
 			device: { name: 'DeviceB', ip: SOURCE },
 			channel: { name: 'Cam 1', number: ch(1) },
 		})
+	})
+
+	it('reports a located source sending nothing as connected, as a baseband router would', () => {
+		expect(read(instance(), 3)).toEqual({
+			connected: true,
+			device: { name: 'DeviceB', ip: SOURCE },
+			channel: { name: 'Cam 1', number: ch(1) },
+		})
+	})
+
+	it('reports a source the destination has not located as not connected', () => {
+		const self = instance()
+		Object.assign(self.devicesData[DEST].videoRx![1], { subscriptionResolved: 0, subscriptionActive: 0 })
+		expect(read(self, 1)).toMatchObject({ connected: false, device: { name: 'DeviceB' } })
 	})
 
 	it('returns the empty shape for an unrouted video channel', () => {
