@@ -222,7 +222,7 @@ export interface RxQuery {
 
 interface RxPoll {
 	queries: Map<string, RxQuery & { waits: number }>
-	timer: ReturnType<typeof setInterval>
+	timer: NodeJS.Timeout
 }
 
 const rxPolls = new WeakMap<DanteInstance, Map<DeviceIp, RxPoll>>()
