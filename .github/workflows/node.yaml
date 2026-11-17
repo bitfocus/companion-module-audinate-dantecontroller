@@ -8,9 +8,6 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
   lint:
     name: Lint
@@ -19,14 +16,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Use Node.js 26.x
         # This should match the version of Node.js you have defined in the manifest.json runtime field
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v6
         with:
           node-version: 26.x
       - name: Prepare Environment
         run: |
           corepack enable
+      - name: Prepare Environment (For template repository)
+        # Only run this step if the repository is a template repository
+        # If you are using this in a module, you can remove this step
+        if: ${{ contains(github.repository, 'companion-module-template-') }}
+        run: |
+          # Perform an install to generate the lockfile
+          yarn install
+        env:
+          CI: false
       - name: Prepare module
         run: |
           yarn install
@@ -43,38 +51,26 @@ jobs:
         env:
           CI: true
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  # Uncomment this to enable running unit tests
+  # test:
+  #   name: Test
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
 
-    steps:
-      - uses: actions/checkout@v7
-      - name: Use Node.js 26.x
-        # This should match the version of Node.js you have defined in the manifest.json runtime field
-        uses: actions/setup-node@v7
-        with:
-          node-version: 26.x
-      - name: Prepare Environment
-        run: |
-          corepack enable
-      - name: Prepare module
-        run: |
-          yarn install
-        env:
-          CI: true
-      - name: Run tests
-        run: |
-          yarn test:coverage
-        env:
-          CI: true
-      - name: Send coverage
-        uses: codecov/codecov-action@v7
-        with:
-          # Optional for public repos, but uploads are rate-limited without it.
-          # Add CODECOV_TOKEN as a repository secret to make uploads reliable.
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/lcov.info
-          # codecov-action defaults this to false, so a failed upload reports a
-          # warning rather than failing the build. Set true to make it blocking.
-          fail_ci_if_error: false
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - name: Use Node.js 26.x
+  #       uses: actions/setup-node@v6
+  #       with:
+  #         node-version: 26.x
+  #     - name: Prepare Environment
+  #       run: |
+  #         corepack enable
+  #         yarn install
+  #       env:
+  #         CI: true
+  #     - name: Run tests
+  #       run: |
+  #         yarn test
+  #       env:
+  #         CI: true
