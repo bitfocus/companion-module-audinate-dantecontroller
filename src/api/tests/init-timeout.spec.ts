@@ -43,7 +43,7 @@ function instance(interval: number, timeoutInterval: number): DanteInstance {
 	// object, which is also what the class does, just without the field-initialiser sugar.
 	const self: Record<string, unknown> = {
 		// 'Automatic' - no card to resolve, so nothing here depends on the host's interfaces
-		config: { mac: '', interval, timeoutInterval, variables: true, verbose: false },
+		config: { mac: '', interval, timeoutInterval, createVariables: ['device'], verbose: false },
 		devicesData: {},
 		activeConnections: {},
 		log: vi.fn(),

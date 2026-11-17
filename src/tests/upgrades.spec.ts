@@ -23,7 +23,8 @@ const VARIABLES_OPTION_SCRIPT_INDEX = 4
 const INTERVAL_MINIMUMS_SCRIPT_INDEX = 5
 const REFRESH_DEVICE_SCRIPT_INDEX = 6
 const CHANNEL_TYPE_SCRIPT_INDEX = 7
-const EXPECTED_SCRIPT_COUNT = 8
+const CREATE_VARIABLES_SCRIPT_INDEX = 8
+const EXPECTED_SCRIPT_COUNT = 9
 
 const addClearAllOption = UpgradeScripts[CLEAR_ALL_SCRIPT_INDEX]
 const renameIpToMac = UpgradeScripts[CONFIG_RENAME_SCRIPT_INDEX]
@@ -31,6 +32,7 @@ const defaultVariablesOption = UpgradeScripts[VARIABLES_OPTION_SCRIPT_INDEX]
 const applyIntervalMinimums = UpgradeScripts[INTERVAL_MINIMUMS_SCRIPT_INDEX]
 const addRefreshDeviceOption = UpgradeScripts[REFRESH_DEVICE_SCRIPT_INDEX]
 const addChannelTypeOption = UpgradeScripts[CHANNEL_TYPE_SCRIPT_INDEX]
+const combineVariableOptions = UpgradeScripts[CREATE_VARIABLES_SCRIPT_INDEX]
 
 function action(actionId: string, options: Record<string, unknown> = {}): CompanionMigrationAction {
 	return {
@@ -307,6 +309,68 @@ describe('create-variables option default', () => {
 
 	it('does not touch actions or feedbacks', () => {
 		const result = runConfig({ mac: '' })
+		expect(result.updatedActions).toEqual([])
+		expect(result.updatedFeedbacks).toEqual([])
+	})
+})
+
+describe('create-variables multi-select', () => {
+	function runConfig(config: Record<string, unknown> | null) {
+		return combineVariableOptions(
+			{} as CompanionUpgradeContext<ModuleConfig>,
+			{
+				config,
+				secrets: null,
+				actions: [],
+				feedbacks: [],
+			} as unknown as CompanionStaticUpgradeProps<ModuleConfig, undefined>,
+		)
+	}
+
+	it.each([
+		[{ variables: true, routingVariables: true }, ['device', 'routing']],
+		[{ variables: true, routingVariables: false }, ['device']],
+		[{ variables: false, routingVariables: true }, ['routing']],
+		[{ variables: false, routingVariables: false }, []],
+		// routing variables are newer than the checkbox for the others, and unset counted as off
+		[{ variables: true }, ['device']],
+		[{ variables: false }, []],
+	])('carries the checkboxes %o over as %o', (checkboxes, createVariables) => {
+		expect(runConfig({ mac: '', ...checkboxes })?.updatedConfig).toEqual({ mac: '', createVariables })
+	})
+
+	it('reads a missing Create Module Variables as on, as the script that added it did', () => {
+		expect(runConfig({ mac: '' })?.updatedConfig).toEqual({ mac: '', createVariables: ['device'] })
+	})
+
+	it('carries the other settings through untouched', () => {
+		const result = runConfig({
+			mac: 'aa|1.2.3.4',
+			interval: 250,
+			timeoutInterval: 9000,
+			variables: true,
+			verbose: true,
+		})
+		expect(result.updatedConfig).toEqual({
+			mac: 'aa|1.2.3.4',
+			interval: 250,
+			timeoutInterval: 9000,
+			verbose: true,
+			createVariables: ['device'],
+		})
+	})
+
+	it('leaves a connection that already has the multi-select alone', () => {
+		expect(runConfig({ createVariables: [] })?.updatedConfig).toBeNull()
+		expect(runConfig({ createVariables: ['routing'], variables: true })?.updatedConfig).toBeNull()
+	})
+
+	it('handles a connection with no config at all', () => {
+		expect(runConfig(null)?.updatedConfig).toBeNull()
+	})
+
+	it('does not touch actions or feedbacks', () => {
+		const result = runConfig({ variables: true })
 		expect(result.updatedActions).toEqual([])
 		expect(result.updatedFeedbacks).toEqual([])
 	})

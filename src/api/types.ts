@@ -2,6 +2,7 @@
  * Shared shapes for the Dante protocol and the device registry.
  */
 import type dgram from 'node:dgram'
+import type { ChannelNumber, DeviceIp, DeviceName } from './ids.js'
 
 export type ServiceName = 'ARC' | 'SETTINGS' | 'CMC' | 'HEARTBEAT'
 
@@ -14,16 +15,17 @@ export type ConnectionName = ServiceName | 'MDNS'
 export type DanteSockets = Partial<Record<ServiceName, dgram.Socket>>
 
 export interface AudioTxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 	friendlyName?: string
 	sampleRate?: number
 }
 
 export interface AudioRxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 	sourceChannel?: string
+	/** As the device reports it: the name it subscribed with, or `.` for itself. */
 	sourceDevice?: string
 	channelStatus?: number
 	subscriptionStatus?: number
@@ -42,7 +44,7 @@ export type AudioRxChannels = Record<number, AudioRxChannel> & { count?: number 
  * legacy protocol's channel queries do.
  */
 export interface VideoTxChannel {
-	number: number
+	number: ChannelNumber
 	name?: string
 }
 
@@ -55,7 +57,10 @@ export interface VideoRxChannel extends VideoTxChannel {
 	 * rather than as a boolean, so an unrecognised code is preserved for whoever looks next.
 	 */
 	subscriptionResolved?: number
-	/** 1 when media is flowing - see `isVideoSubscriptionActive`, and the offsets in `protocol.ts`. */
+	/**
+	 * 1 when media is flowing - see `isVideoSubscriptionActive`, and the offsets in `protocol.ts`. Not
+	 * what makes the subscription connected, which is `isVideoSubscriptionConnected`.
+	 */
 	subscriptionActive?: number
 }
 
@@ -104,7 +109,7 @@ export interface MdnsResponsePacket {
 }
 
 export interface DeviceData {
-	name?: string
+	name?: DeviceName
 	/** True when the device is locked and will refuse configuration changes. */
 	locked?: boolean
 	/**
@@ -114,6 +119,12 @@ export interface DeviceData {
 	interfaceMac?: string
 	ports?: Partial<Record<ServiceName, number>>
 	audioTx?: AudioTxChannels
+	/**
+	 * How many pages of the last tx friendly-names query are unanswered. A device answers even when it
+	 * has no friendly names, so a page still pending at the next sweep was dropped. A count, because a
+	 * reply with no names in it cannot say which page it answers.
+	 */
+	txFriendlyNamePagesPending?: number
 	audioRx?: AudioRxChannels
 	videoTx?: VideoTxChannels
 	videoRx?: VideoRxChannels
@@ -150,12 +161,13 @@ export interface DeviceData {
 	timeoutArray?: [NodeJS.Timeout]
 }
 
-export type DevicesData = Record<string, DeviceData>
+/** Device records by the address they were discovered at. */
+export type DevicesData = Record<DeviceIp, DeviceData>
 
 /** What an rx channel is currently subscribed to, as the device reports it. */
 export interface AudioRxChannelSource {
 	/** Name of the transmitting device, with the '.' self-route shorthand already resolved. */
-	deviceName: string
+	deviceName: DeviceName
 	/** Name of the transmitting channel. */
 	channelName: string
 	/**
@@ -176,6 +188,6 @@ export interface AudioRxChannelSource {
  * are simply absent when there is no live source, so presence of this value already means connected.
  */
 export interface VideoRxChannelSource {
-	deviceName: string
+	deviceName: DeviceName
 	channelName: string
 }

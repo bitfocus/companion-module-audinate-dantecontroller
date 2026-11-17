@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseAvReply, isVideoSubscriptionActive, type DevicesData } from '../index.js'
+import {
+	parseAvReply,
+	isVideoSubscriptionActive,
+	isVideoSubscriptionConnected,
+	videoSubscriptionStatusLabel,
+	type DevicesData,
+} from '../index.js'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * The video subscription flags, against real captures.
@@ -10,9 +17,10 @@ import type DanteInstance from '../../main.js'
  * were byte-identical, so every difference between these is signal.
  *
  * Two single-byte flags sit at record offsets +54 and +55: whether the named source has been
- * *resolved*, and whether media is actually *flowing*. Only the second answers "is this crosspoint
- * connected" - a subscription whose source is present but sending nothing reads "Subscription is
- * not active" in Dante Controller, and the module reported it as connected until these were found.
+ * *resolved*, and whether media is actually *flowing*. The first is what makes the crosspoint
+ * connected, as for audio: the route is in place whether or not its source is sending, as a
+ * baseband router reports it. The second is what Dante Controller shows as "Subscription is not
+ * active" for a source that is present but sending nothing.
  *
  * A capture of the source being powered off is deliberately absent: it is byte-identical to the
  * idle one, so the decoder does not distinguish an idle source from an absent one and neither can
@@ -58,7 +66,7 @@ const ACTIVE_HEX =
 	'00850000000001010104161c00030000000400010000000000060000000000e8010400000000000100fe000100000000011400000000' +
 	'0606000000c000d7000a0101'
 
-const DEVICE_IP = '169.254.2.58'
+const DEVICE_IP = ip('169.254.2.58')
 
 function instance(): DanteInstance {
 	return {
@@ -68,7 +76,7 @@ function instance(): DanteInstance {
 		txChannelsChoices: {},
 		videoRxChannelsChoices: {},
 		videoTxChannelsChoices: {},
-		config: { variables: true, interval: 1000, timeoutInterval: 3000, verbose: false },
+		config: { createVariables: ['device'], interval: 1000, timeoutInterval: 3000, verbose: false },
 		debug: false,
 		timeout: 3000,
 		counter: Buffer.alloc(2),
@@ -134,7 +142,21 @@ describe('video subscription flags, from real captures', () => {
 		expect(idle?.name).toBe(active?.name)
 	})
 
-	it('treats only the flowing state as connected', () => {
+	it('treats a located source as connected, whether or not media is flowing', () => {
+		expect(isVideoSubscriptionConnected(videoChannel(UNROUTED_HEX))).toBe(false)
+		expect(isVideoSubscriptionConnected(videoChannel(NEVER_RESOLVED_HEX))).toBe(false)
+		expect(isVideoSubscriptionConnected(videoChannel(RESOLVED_IDLE_HEX))).toBe(true)
+		expect(isVideoSubscriptionConnected(videoChannel(ACTIVE_HEX))).toBe(true)
+	})
+
+	it('names the state the status variable shows', () => {
+		expect(videoSubscriptionStatusLabel(videoChannel(NEVER_RESOLVED_HEX))).toBe('unresolved')
+		expect(videoSubscriptionStatusLabel(videoChannel(RESOLVED_IDLE_HEX))).toBe('connected')
+		expect(videoSubscriptionStatusLabel(videoChannel(ACTIVE_HEX))).toBe('connected')
+		expect(videoSubscriptionStatusLabel(undefined)).toBe('unknown status')
+	})
+
+	it('reads only the flowing state as active', () => {
 		expect(isVideoSubscriptionActive(videoChannel(UNROUTED_HEX)?.subscriptionActive)).toBe(false)
 		expect(isVideoSubscriptionActive(videoChannel(NEVER_RESOLVED_HEX)?.subscriptionActive)).toBe(false)
 		expect(isVideoSubscriptionActive(videoChannel(RESOLVED_IDLE_HEX)?.subscriptionActive)).toBe(false)

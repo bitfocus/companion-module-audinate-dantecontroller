@@ -66,7 +66,7 @@ function instance(channel: Channel, { sourceOnline, audio = false }: { sourceOnl
 		txChannelsChoices: { [S]: [{ id: 1, label: CH }] },
 		videoRxChannelsChoices: { [D]: [{ id: 1, label: 'Rear' }] },
 		videoTxChannelsChoices: { [S]: [{ id: 1, label: CH }] },
-		config: { variables: true },
+		config: { createVariables: ['device'] },
 		setFeedbackDefinitions: (d: typeof definitions) => (definitions = d),
 		setActionDefinitions: vi.fn(),
 		log: vi.fn(),
@@ -94,7 +94,7 @@ function crosspointConnected(channel: Channel, opts: { sourceOnline: boolean; au
 	) as boolean
 }
 
-/** A route that is both named by the destination and actually carrying media. */
+/** A route named by the destination, its source located and carrying media. */
 const routed: Channel = {
 	number: 1,
 	name: 'Rear',
@@ -122,12 +122,20 @@ describe('Crosspoint - Connected with the source device offline', () => {
 		expect(crosspointConnected(elsewhere, { sourceOnline: false })).toBe(false)
 	})
 
-	it('is false for video when the destination says the subscription is not active', () => {
-		// the source device being offline is not what decides this - the destination reporting that
-		// nothing is flowing is. Dante Controller calls this state "Subscription is not active".
+	it('is true for video when the source is located but sending nothing', () => {
+		// as a baseband router reports a crosspoint: the route is in place whatever its input carries,
+		// so a transmitter that loses its input stays connected, as audio does. Dante Controller calls
+		// this state "Subscription is not active".
 		const idle = { ...routed, subscriptionActive: 0 }
-		expect(crosspointConnected(idle, { sourceOnline: false })).toBe(false)
-		expect(crosspointConnected(idle, { sourceOnline: true })).toBe(false)
+		expect(crosspointConnected(idle, { sourceOnline: false })).toBe(true)
+		expect(crosspointConnected(idle, { sourceOnline: true })).toBe(true)
+	})
+
+	it('is false for video when the destination has not located the source', () => {
+		// the source device being offline is not what decides this - the destination saying so is
+		const unresolved = { ...routed, subscriptionResolved: 0, subscriptionActive: 0 }
+		expect(crosspointConnected(unresolved, { sourceOnline: false })).toBe(false)
+		expect(crosspointConnected(unresolved, { sourceOnline: true })).toBe(false)
 	})
 
 	it('is false when the destination names a different source channel', () => {

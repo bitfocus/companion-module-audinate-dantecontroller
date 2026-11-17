@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { retryMissingVideoDirectories, type DevicesData } from '../index.js'
 import type DanteInstance from '../../main.js'
+import { ip } from '../../tests/ids.js'
 
 /**
  * Re-asking for a video directory that never arrived.
@@ -13,7 +14,7 @@ import type DanteInstance from '../../main.js'
  * is re-read only on a rename, which may never happen.
  */
 
-const IP = '172.16.3.141'
+const IP = ip('172.16.3.141')
 
 function instance(device: Record<string, unknown>): { self: DanteInstance; sent: Buffer[] } {
 	const sent: Buffer[] = []
